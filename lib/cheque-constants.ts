@@ -1,0 +1,2 @@
+export const CHEQUE_TYPES = ["ACCOUNT_PAYEE", "BEARER", "CROSS", "OPEN", "POST_DATED"] as const;
+export const CHEQUE_STATUSES = ["RECEIVED", "ISSUED", "IN_HAND", "DEPOSITED", "CLEARED", "RETURNED", "CANCELLED", "VOID"] as const;

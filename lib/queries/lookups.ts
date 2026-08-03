@@ -1,0 +1,317 @@
+import "server-only";
+import { and, eq, inArray, isNotNull, sql, type Column, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import {
+  bankAccounts,
+  brands,
+  cashAccounts,
+  categories,
+  chequeRegister,
+  companies,
+  contacts,
+  documentTypes,
+  expenseCategories,
+  expenses,
+  items,
+  locations,
+  roles,
+  units,
+} from "@/lib/db/schema";
+import { getSession } from "@/lib/auth/session";
+import { PermissionError } from "@/lib/auth/permissions";
+import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { cached, invalidate, MINUTE } from "@/lib/cache";
+import { bankAccountLabel } from "@/lib/account-label";
+
+// Dropdown option lists. Nearly forty near-identical copies of these were spread
+// across lib/actions/* — nine separate functions selected the full companies
+// table alone — and they picked up two problems along the way.
+//
+// First, they lived in "use server" modules, which publishes every export as an
+// HTTP endpoint. About thirty shipped with no auth check whatsoever, so an
+// unauthenticated POST could dump the contact list, the cheque register, or the
+// bank accounts. Everything here requires a live session.
+//
+// The gate is authentication, deliberately not a module permission: a Salesman
+// holds sales.create but not companies.view, products.view, or units.view, and
+// still has to fill in the new-sale form. Authorization for what a user *does*
+// with this data already sits on the action that does it (createSale requires
+// sales.create); re-gating the option lists would only break the form.
+//
+// Second, none of it was cached. These are reference tables — companies, units,
+// currencies — that change a few times a year, and every render paid a ~170ms
+// round trip for each. They now sit behind lib/cache.ts, with the auth check
+// kept strictly outside the cached scope: the *data* is global, the permission
+// to see it is not, so caching the query must never cache the check.
+//
+// Every write to one of these tables calls the matching invalidate below, so
+// creating a brand and immediately opening a product form shows the new brand.
+
+const TTL = 5 * MINUTE;
+
+// Key names match the table they read, so invalidation reads as itself. Grouped
+// here rather than inlined as strings so a typo is a type error, not a cache
+// entry that never clears.
+export const CACHE = {
+  companies: "companies",
+  categories: "categories",
+  brands: "brands",
+  locations: "locations",
+  units: "units",
+  documentTypes: "document_types",
+  expenseCategories: "expense_categories",
+  roles: "roles",
+  items: "items",
+  contacts: "contacts",
+  bankAccounts: "bank_accounts",
+  cashAccounts: "cash_accounts",
+  cheques: "cheques",
+} as const;
+
+export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][]) {
+  invalidate(...keys);
+}
+
+async function requireAuth() {
+  const session = await getSession();
+  if (!session) throw new PermissionError("Not authenticated");
+  return session;
+}
+
+// The set of companies currently in view, as a stable cache-key fragment. A
+// Royal-Hardware view and an M52 view must not share a cache entry, so the
+// scope is baked into every scoped lookup's key. invalidateLookups still clears
+// them all — invalidate() drops a key and every "<key>:…" variant.
+async function scopeSuffix(): Promise<string> {
+  const ids = await getScopeCompanyIds();
+  return ids.length ? [...ids].sort().join(",") : "none";
+}
+
+// Unscoped lookup — for reference data with no company at all (units, roles).
+// One shared entry for everyone.
+function lookup<T>(key: string, load: () => Promise<T>): () => Promise<T> {
+  return async () => {
+    await requireAuth();
+    return cached(key, TTL, load);
+  };
+}
+
+// Scoped lookup — the query is filtered to the companies in view plus global
+// rows, and cached per scope. `column` is the table's company_id; the load
+// receives the ready-made scope condition to drop into its `.where()`.
+function scopedLookup<T>(key: string, column: Column, load: (scope: SQL | undefined) => Promise<T>): () => Promise<T> {
+  return async () => {
+    await requireAuth();
+    const [suffix, where] = await Promise.all([scopeSuffix(), companyInScope(column)]);
+    return cached(`${key}:${suffix}`, TTL, () => load(where));
+  };
+}
+
+// Companies the user can assign to — the accessible set, not the current view
+// scope. You can file a record under any company you have access to regardless
+// of which one you're looking at, so this ignores the Topbar selection.
+export const getCompanies = async () => {
+  const session = await requireAuth();
+  const ids = session.companyIds;
+  return cached(`${CACHE.companies}:${ids.length ? [...ids].sort().join(",") : "none"}`, TTL, () =>
+    ids.length ? db.select().from(companies).where(inArray(companies.id, ids)) : Promise.resolve([]),
+  );
+};
+
+// Global reference data — brands, categories, currencies, locations, units,
+// taxes, roles have no company_id, so they're the same for everyone and share
+// one cache entry regardless of the Topbar scope.
+export const getCategories = lookup(CACHE.categories, () => db.select().from(categories));
+export const getBrands = lookup(CACHE.brands, () => db.select().from(brands));
+export const getLocations = lookup(CACHE.locations, () => db.select().from(locations));
+export const getUnits = lookup(CACHE.units, () => db.select().from(units));
+export const getRoles = lookup(CACHE.roles, () => db.select().from(roles));
+
+// Still company-scoped: document types and expense categories belong to a company.
+export const getDocumentTypes = scopedLookup(CACHE.documentTypes, documentTypes.companyId, (w) => db.select().from(documentTypes).where(w));
+export const getExpenseCategories = scopedLookup(CACHE.expenseCategories, expenseCategories.companyId, (w) =>
+  db.select().from(expenseCategories).where(w),
+);
+
+// `rate` is the item's most recent purchase price, read from the rate_list view
+// (purchase_rate_1) — the sale grid shows it as the reference price next to the
+// price actually charged. The view isn't modeled in schema.ts, so it's a raw
+// query merged in JS rather than a correlated subquery per item (rate_list
+// already runs a LATERAL per item; nesting it per row would rescan it n times).
+export const getItemOptions = scopedLookup(CACHE.items, items.companyId, async (w) => {
+  const [rows, rates, salesRates] = await Promise.all([
+    db.select({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId }).from(items).where(w),
+    db.execute<{ id: string; purchase_rate_1: string | null }>(sql`SELECT id, purchase_rate_1 FROM rate_list`),
+    // The selling price the products page shows — the price it last went out at.
+    // Not in rate_list (that view is purchase-only), so it's its own pass: one
+    // row per item, the newest sales line first.
+    db.execute<{ item_id: string; unit_price: string }>(sql`
+      SELECT DISTINCT ON (dl.item_id) dl.item_id, dl.unit_price
+      FROM document_lines dl
+      JOIN documents d ON d.id = dl.document_id
+      JOIN document_types dt ON dt.id = d.document_type_id
+      WHERE dt.code = 'SALES_INVOICE' AND dl.item_id IS NOT NULL
+      ORDER BY dl.item_id, d.document_date DESC, dl.line_no DESC`),
+  ]);
+  const rateById = new Map(rates.map((r) => [r.id, r.purchase_rate_1]));
+  const saleRateById = new Map(salesRates.map((r) => [r.item_id, r.unit_price]));
+  return rows.map((r) => ({ ...r, rate: rateById.get(r.id) ?? null, salesRate: saleRateById.get(r.id) ?? null }));
+});
+
+export const getContactOptions = scopedLookup(`${CACHE.contacts}:options`, contacts.companyId, (w) =>
+  db.select({ id: contacts.id, displayName: contacts.displayName, companyId: contacts.companyId }).from(contacts).where(w),
+);
+
+// Contacts are unified — customer and supplier pickers both list every contact
+// in scope.
+export const getCustomers = scopedLookup(`${CACHE.contacts}:customers`, contacts.companyId, (w) =>
+  db.select().from(contacts).where(w),
+);
+
+export const getSuppliers = scopedLookup(`${CACHE.contacts}:suppliers`, contacts.companyId, (w) =>
+  db.select().from(contacts).where(w),
+);
+
+export const getBankAccountOptions = scopedLookup(CACHE.bankAccounts, bankAccounts.companyId, async (w) => {
+  const rows = await db
+    .select({
+      id: bankAccounts.id,
+      companyId: bankAccounts.companyId,
+      bankName: bankAccounts.bankName,
+      branchName: bankAccounts.branchName,
+      accountTitle: bankAccounts.accountTitle,
+    })
+    .from(bankAccounts)
+    .where(and(eq(bankAccounts.isActive, true), w));
+  // Bank, branch and account title together (lib/account-label.ts). Bank and
+  // branch alone can't tell two accounts at the same branch apart, which is
+  // exactly the case a shop with a current and a savings account is in.
+  //
+  // companyId rides along for the pickers that narrow to one company — null is
+  // global, visible to every company (lib/contact-scope.ts).
+  return rows.map((r) => ({ id: r.id, companyId: r.companyId, name: bankAccountLabel(r) }));
+});
+
+// companyId comes along so a form can narrow the list to the company being
+// filed under — a sale must not settle into another company's drawer.
+export const getCashAccountOptions = scopedLookup(CACHE.cashAccounts, cashAccounts.companyId, (w) =>
+  db
+    .select({ id: cashAccounts.id, name: cashAccounts.name, companyId: cashAccounts.companyId, isDefault: cashAccounts.isDefault })
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.isActive, true), w)),
+);
+
+// A cheque is available if it isn't already settling a document (payments,
+// stock purchases — linked via cheque_register.document_id) or an expense
+// (linked via expenses.cheque_id, since expenses aren't part of the
+// documents universal model) — except whichever one is currently being
+// edited, so it doesn't disappear from its own dropdown.
+//
+// The two queries don't depend on which document is being edited — only the
+// filtering below does — so one cache entry serves every caller and the
+// "except the one I'm editing" case costs nothing extra.
+const chequeSource = (scope: SQL | undefined) =>
+  Promise.all([
+    db
+      .select({
+        id: chequeRegister.id,
+        chequeNumber: chequeRegister.chequeNumber,
+        amount: chequeRegister.amount,
+        documentId: chequeRegister.documentId,
+      })
+      .from(chequeRegister)
+      .where(scope),
+    db.select({ id: expenses.id, chequeId: expenses.chequeId }).from(expenses).where(isNotNull(expenses.chequeId)),
+  ]);
+
+export async function getAvailableCheques(documentId?: string, expenseId?: string) {
+  await requireAuth();
+  const [suffix, where] = await Promise.all([scopeSuffix(), companyInScope(chequeRegister.companyId)]);
+  const [allCheques, linkedExpenses] = await cached(`${CACHE.cheques}:${suffix}`, TTL, () => chequeSource(where));
+
+  const usedByExpense = new Set(linkedExpenses.filter((e) => e.id !== expenseId).map((e) => e.chequeId));
+
+  return allCheques
+    .filter((c) => !(c.documentId && c.documentId !== documentId) && !usedByExpense.has(c.id))
+    .map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` }));
+}
+
+const labelled = {
+  contact: (c: { id: string; displayName: string; companyId: string | null }) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" }),
+  // Name only — the SKU used to be appended here, which put it in front of the
+  // customer on every sale line and, worse, made the label the string the server
+  // resolved items by. Nothing picks an item by SKU on a sale.
+  item: (i: { id: string; name: string; sku: string; companyId: string; rate: string | null; salesRate: string | null }) => ({
+    id: i.id,
+    name: i.name,
+    companyId: i.companyId,
+    rate: i.rate,
+    salesRate: i.salesRate,
+  }),
+  unit: (u: { id: string; name: string; symbol: string | null }) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name }),
+};
+
+// The new-sale and edit-sale routes need an identical eleven option lists, and
+// each was re-deriving the same display labels inline. One shape, one place, so
+// the two can't drift.
+export async function getSaleFormOptions(documentId?: string) {
+  const [companyOptions, customers, itemRows, locationOptions, unitRows, categoryOptions, brandOptions, bankAccountOptions, cashAccountOptions, chequeOptions] =
+    await Promise.all([
+      getCompanies(),
+      getCustomers(),
+      getItemOptions(),
+      getLocations(),
+      getUnits(),
+      getCategories(),
+      getBrands(),
+      getBankAccountOptions(),
+      getCashAccountOptions(),
+      getAvailableCheques(documentId),
+    ]);
+
+  return {
+    companyOptions,
+    customerOptions: customers.map(labelled.contact),
+    itemOptions: itemRows.map(labelled.item),
+    locationOptions,
+    unitOptions: unitRows.map(labelled.unit),
+    categoryOptions,
+    brandOptions,
+    bankAccountOptions,
+    cashAccountOptions,
+    chequeOptions,
+  };
+}
+
+// Same idea for stock purchases: suppliers rather than customers, plus the
+// document-type list that only the purchase form needs.
+export async function getPurchaseFormOptions(documentId?: string) {
+  const [companyOptions, suppliers, itemRows, documentTypeOptions, locationOptions, unitRows, categoryOptions, brandOptions, bankAccountOptions, cashAccountOptions, chequeOptions] =
+    await Promise.all([
+      getCompanies(),
+      getSuppliers(),
+      getItemOptions(),
+      getDocumentTypes(),
+      getLocations(),
+      getUnits(),
+      getCategories(),
+      getBrands(),
+      getBankAccountOptions(),
+      getCashAccountOptions(),
+      getAvailableCheques(documentId),
+    ]);
+
+  return {
+    companyOptions,
+    supplierOptions: suppliers.map(labelled.contact),
+    itemOptions: itemRows.map(labelled.item),
+    documentTypeOptions,
+    locationOptions,
+    unitOptions: unitRows.map(labelled.unit),
+    categoryOptions,
+    brandOptions,
+    bankAccountOptions,
+    cashAccountOptions,
+    chequeOptions,
+  };
+}

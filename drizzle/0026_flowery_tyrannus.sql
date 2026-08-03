@@ -1,0 +1,1 @@
+CREATE INDEX "idx_documents_type" ON "documents" USING btree ("document_type_id");

@@ -1,0 +1,1 @@
+ALTER TABLE "items" ADD COLUMN "alias" varchar(255);

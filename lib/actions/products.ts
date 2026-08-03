@@ -1,0 +1,944 @@
+"use server";
+
+import { and, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { db } from "@/lib/db";
+import {
+  brands,
+  categories,
+  companies,
+  documentLines,
+  inventoryTransactions,
+  itemImages,
+  items,
+  locations,
+  unitConversions,
+  units,
+} from "@/lib/db/schema";
+import { getSession } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/permissions";
+import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { CACHE, getBrands, getCategories, getCompanies, getLocations, getSuppliers, getUnits, invalidateLookups } from "@/lib/queries/lookups";
+import { csvBool, csvErrorText } from "@/lib/csv";
+import { SKU_SCOPE, formatSku, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
+import { ensureDocumentType } from "@/lib/actions/document-numbering";
+import { createStockPurchase } from "@/lib/actions/purchases";
+import { createStockAdjustment } from "@/lib/actions/stock-adjustments";
+import { resolveBrandId, resolveCategoryId, resolveUnitId } from "@/lib/actions/resolve-refs";
+import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-constants";
+import { locationIdOrNull } from "@/lib/location-constants";
+import { purchaseRowError, recordsQty, writesDocument } from "@/lib/product-edit-rules";
+import { queryProductRates, type ProductRateRow } from "@/lib/queries/products";
+import { guard, describeDbError, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
+import { recordAudit } from "@/lib/actions/audit";
+
+export type { ProductRateRow } from "@/lib/queries/products";
+
+// Auth, then delegate. The SQL lives in lib/queries/products.ts so a check can
+// import and run the real query — this file is "use server", and nothing in it
+// is reachable from a test.
+export async function listProductsWithRates(): Promise<ProductRateRow[]> {
+  const session = await getSession();
+  requirePermission(session, "products", "view");
+  return queryProductRates(await getScopeCompanyIds());
+}
+
+// The SKU the batch dialog shows as each row's placeholder before you save. A
+// peek, not a reservation — opening the dialog and closing it must not burn a
+// number, and two people opening it at once should both see RH-00042. The
+// numbers that actually stick are allocated per row on save, which is why the
+// dialog renders these as placeholders rather than filling them in.
+export async function peekNextSku() {
+  const session = await getSession();
+  requirePermission(session, "products", "create");
+  return formatSku(await peekSequenceValue(SKU_SCOPE));
+}
+
+export interface ProductBatchRow {
+  name: string;
+  sku: string;
+  companyId: string;
+  categoryId: string | null;
+  brandId: string | null;
+  // A name typed into the category/brand cell that matched nothing: the record
+  // is created from it on save, the same rule the edit grid and the sale and
+  // purchase line grids follow. Ignored when the matching id is set.
+  categoryName?: string | null;
+  brandName?: string | null;
+  urduName: string | null;
+  taxable: boolean;
+  isActive: boolean;
+}
+
+// Returns what it created so a quick-add from a sale or purchase line can drop
+// the new product straight into the line the user was editing.
+export async function createProductsBatch(
+  rows: ProductBatchRow[],
+): Promise<CreateResult<{ id: string; name: string; sku: string; companyId: string }>> {
+  return guard(
+    "Couldn't save the products.",
+    async () => {
+      const session = await getSession();
+      requirePermission(session, "products", "create");
+
+      // SKU is no longer required to submit a row — a blank one gets the next RH-
+      // number, so a batch can be pasted in with just names.
+      const valid = rows.filter((r) => r.name.trim() && r.companyId);
+      if (valid.length === 0) return { error: "Add at least one product with a name and company." };
+
+      const created = await db.transaction(async (tx) => {
+        // Distinct typed names resolved once each, not once per row: a price
+        // list with four hundred rows under one brand used to do four hundred
+        // lookups for that brand, each its own round trip inside the
+        // transaction. That is what made a long CSV import crawl.
+        const categoryIds = new Map<string, string | null>();
+        const brandIds = new Map<string, string | null>();
+
+        const withSkus = [];
+        for (const r of valid) {
+          // A typed-but-unmatched category or brand becomes the record, inside
+          // the same transaction as the product — a failed batch leaves no
+          // orphan category behind.
+          const { categoryName, brandName, ...fields } = r;
+          const categoryKey = r.categoryId ?? `name:${(categoryName ?? "").trim()}`;
+          const brandKey = r.brandId ?? `name:${(brandName ?? "").trim()}`;
+          if (!categoryIds.has(categoryKey)) categoryIds.set(categoryKey, await resolveCategoryId(tx, r.categoryId, categoryName ?? ""));
+          if (!brandIds.has(brandKey)) brandIds.set(brandKey, await resolveBrandId(tx, r.brandId, brandName ?? ""));
+
+          withSkus.push({
+            ...fields,
+            categoryId: categoryIds.get(categoryKey)!,
+            brandId: brandIds.get(brandKey)!,
+            sku: r.sku.trim() || formatSku(await nextSequenceValue(SKU_SCOPE, tx)),
+          });
+        }
+        return tx.insert(items).values(withSkus).returning({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId });
+      });
+
+      invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands);
+      revalidatePath("/inventory/products");
+      await recordAudit({
+        action: "create",
+        entity: "product",
+        summary: created.map((c) => c.name).slice(0, 5).join(", ") + (created.length > 5 ? ` +${created.length - 5} more` : ""),
+        companyId: valid[0]?.companyId,
+      });
+      return { created };
+    },
+    { [DUPLICATE]: "Can't create — one or more SKUs are already in use." },
+  );
+}
+// --- Edit products in bulk -------------------------------------------------
+
+// One selected product, as the edit grid shows it. Category and brand carry the
+// current name alongside the id because the grid's typeahead needs something to
+// display, and a name typed over it is what creates a new one.
+export interface ProductEditRow {
+  id: string;
+  companyId: string;
+  company: string;
+  sku: string;
+  name: string;
+  urduName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  brandId: string | null;
+  brandName: string | null;
+  taxable: boolean;
+  isActive: boolean;
+  // Everything the last purchase of this item already answered, so the edit grid
+  // opens with those cells filled in rather than blank: who it came from, the
+  // unit it was bought in, and what it cost. Editing them writes to the same
+  // places these were read from — there is no second copy of a supplier.
+  // All null for an item that has never been purchased.
+  lastSupplierId: string | null;
+  lastUnitId: string | null;
+  // ISO date of that last purchase, so the dialog opens on it rather than today.
+  lastPurchaseDate: string | null;
+  purchaseRate: string | null;
+  // Not editable anywhere — it's whatever the item last sold for, which is set
+  // by raising a sale, not by this dialog.
+  salesRate: string | null;
+  // One entry per location + unit the item has ever moved in — the same grain a
+  // stock adjustment works at, so "set stock to N" has something exact to
+  // subtract from. locationId/unitId are null for movements booked without one.
+  stock: { locationId: string | null; location: string; unitId: string | null; unit: string; onHand: number }[];
+}
+
+export interface ProductEditData {
+  rows: ProductEditRow[];
+  // Contacts are company-scoped, so the grid filters these by each row's own
+  // company; units and locations are global.
+  supplierOptions: { id: string; name: string; companyId: string | null }[];
+  unitOptions: { id: string; name: string }[];
+  locationOptions: { id: string; name: string }[];
+}
+
+// Loaded when the Edit button is pressed rather than shipped with every list
+// row: the derived half (suppliers, stock) is three joins per item, and only the
+// handful that were ticked are ever opened.
+export async function getProductsForEdit(itemIds: string[]): Promise<ProductEditData> {
+  const session = await getSession();
+  requirePermission(session, "products", "view");
+
+  const empty: ProductEditData = { rows: [], supplierOptions: [], unitOptions: [], locationOptions: [] };
+  if (itemIds.length === 0) return empty;
+
+  const rows = await db
+    .select({
+      id: items.id,
+      companyId: items.companyId,
+      company: companies.name,
+      sku: items.sku,
+      name: items.name,
+      urduName: items.urduName,
+      categoryId: items.categoryId,
+      categoryName: categories.name,
+      brandId: items.brandId,
+      brandName: brands.name,
+      taxable: items.taxable,
+      isActive: items.isActive,
+    })
+    .from(items)
+    .innerJoin(companies, eq(companies.id, items.companyId))
+    .leftJoin(categories, eq(categories.id, items.categoryId))
+    .leftJoin(brands, eq(brands.id, items.brandId))
+    .where(and(inArray(items.id, itemIds), await companyInScope(items.companyId)))
+    .orderBy(items.name);
+  if (rows.length === 0) return empty;
+
+  const ids = rows.map((r) => r.id);
+
+  // Same derivation as the stock list (lib/actions/stock.ts) — SUM(movement *
+  // base_quantity) — grouped by location and unit rather than rolled up, because
+  // that's the grain an adjustment is written at.
+  const stockRows = await db
+    .select({
+      itemId: documentLines.itemId,
+      locationId: documentLines.locationId,
+      location: sql<string>`coalesce(${locations.name}, 'Unassigned')`,
+      unitId: documentLines.unitId,
+      unit: sql<string>`coalesce(${units.symbol}, ${units.name}, '—')`,
+      onHand: sql<string>`sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity})`,
+    })
+    .from(inventoryTransactions)
+    .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
+    .leftJoin(units, eq(units.id, documentLines.unitId))
+    .leftJoin(locations, eq(locations.id, documentLines.locationId))
+    .where(inArray(documentLines.itemId, ids))
+    .groupBy(documentLines.itemId, documentLines.locationId, locations.name, documentLines.unitId, units.symbol, units.name);
+
+  // The rate columns, for exactly the items being edited. Same derivation the
+  // products list uses (lib/actions/products.ts listProductsWithRates): the last
+  // three purchase prices from the rate_list view, falling back to the cost
+  // typed on a sale line for an item never actually purchased, plus the price it
+  // last sold at. The id list binds one parameter per id — a raw `= ANY(array)`
+  // mis-binds under drizzle's execute().
+  const idList = sql.join(
+    ids.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  const rateRows = await db.execute<{
+    id: string;
+    purchase_rate_1: string | null;
+    sales_rate: string | null;
+  }>(sql`
+    SELECT rl.id,
+           coalesce(rl.purchase_rate_1, c.unit_cost) AS purchase_rate_1,
+           s.unit_price AS sales_rate
+    FROM rate_list rl
+    LEFT JOIN LATERAL (
+      SELECT dl.unit_price
+      FROM document_lines dl
+      JOIN documents d ON d.id = dl.document_id
+      JOIN document_types dt ON dt.id = d.document_type_id
+      WHERE dl.item_id = rl.id AND dt.code = 'SALES_INVOICE'
+      ORDER BY d.document_date DESC, dl.line_no DESC
+      LIMIT 1
+    ) s ON true
+    LEFT JOIN LATERAL (
+      SELECT dl.unit_cost
+      FROM document_lines dl
+      JOIN documents d ON d.id = dl.document_id
+      JOIN document_types dt ON dt.id = d.document_type_id
+      WHERE dl.item_id = rl.id AND dt.code = 'SALES_INVOICE' AND dl.unit_cost IS NOT NULL
+      ORDER BY d.document_date DESC, dl.line_no DESC
+      LIMIT 1
+    ) c ON true
+    WHERE rl.id IN (${idList})`);
+  const ratesById = new Map(rateRows.map((r) => [r.id, r]));
+
+  // Who it was last bought from and in what unit. DISTINCT ON keeps the first
+  // row per item under the ORDER BY, which is the newest line — the same "last
+  // purchase wins" rule the rate columns follow. Stock receipts count alongside
+  // purchase invoices: both are this item arriving.
+  const lastPurchaseRows = await db.execute<{
+    item_id: string;
+    contact_id: string | null;
+    unit_id: string | null;
+    document_date: string | null;
+  }>(sql`
+    SELECT DISTINCT ON (dl.item_id) dl.item_id, d.contact_id, dl.unit_id, d.document_date
+    FROM document_lines dl
+    JOIN documents d ON d.id = dl.document_id
+    JOIN document_types dt ON dt.id = d.document_type_id
+    WHERE dl.item_id IN (${idList})
+      AND dt.code IN ('PURCHASE_INVOICE', 'STOCK_OPENING')
+    ORDER BY dl.item_id, d.document_date DESC, dl.line_no DESC`);
+  const lastPurchaseById = new Map(lastPurchaseRows.map((r) => [r.item_id, r]));
+
+  const [supplierOpts, unitOpts, locationOpts] = await Promise.all([getSuppliers(), getUnits(), getLocations()]);
+
+  return {
+    rows: rows.map((r) => ({
+      ...r,
+      taxable: r.taxable ?? false,
+      isActive: r.isActive ?? true,
+      lastSupplierId: lastPurchaseById.get(r.id)?.contact_id ?? null,
+      lastUnitId: lastPurchaseById.get(r.id)?.unit_id ?? null,
+      // A `date` column comes back as YYYY-MM-DD, which is what the form wants.
+      lastPurchaseDate: lastPurchaseById.get(r.id)?.document_date ?? null,
+      purchaseRate: ratesById.get(r.id)?.purchase_rate_1 ?? null,
+      salesRate: ratesById.get(r.id)?.sales_rate ?? null,
+      stock: stockRows.filter((s) => s.itemId === r.id).map((s) => ({ ...s, onHand: Number(s.onHand) })).filter((s) => s.onHand !== 0),
+    })),
+    supplierOptions: supplierOpts.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId })),
+    unitOptions: unitOpts.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name })),
+    locationOptions: locationOpts.map((l) => ({ id: l.id, name: l.name })),
+  };
+}
+
+// What one row of the edit grid submits. Every reference is an id-or-name pair:
+// the id when an existing record was picked from the typeahead, otherwise the
+// typed name for the resolvers to find or create.
+export interface ProductEditInput {
+  // Blank on a row added in the dialog — that row creates a product instead of
+  // updating one, so a batch can fix five items and add two in the same pass.
+  id: string;
+  // Only read when `id` is blank; an existing product's company is never moved.
+  companyId: string;
+  name: string;
+  sku: string;
+  urduName: string;
+  categoryId: string;
+  categoryName: string;
+  brandId: string;
+  brandName: string;
+  taxable: boolean;
+  isActive: boolean;
+  unitId: string;
+  unitName: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseQty: string;
+  purchaseRate: string;
+  targetQty: string;
+}
+
+// Settings the whole batch shares. Location, date and reason are the same for
+// every row in practice — a stock count is one count, a delivery is one
+// delivery — so they sit above the grid instead of repeating per row.
+export interface ProductBatchEditShared {
+  // "none" edits the catalogue details only and writes no document.
+  mode: "none" | "purchase" | "adjust";
+  locationId: string;
+  documentDate: string;
+  reason: string;
+}
+
+// company_id is deliberately not editable: catalogs are per company and stock
+// hangs off the row, so moving a product between them would move stock between
+// two sets of books with no document saying so — the same reason mergeProducts
+// refuses a cross-company merge.
+//
+// Supplier, quantity and purchase rate are not columns on items and never will
+// be — they're properties of a purchase, and the tables that hold them are
+// documents / document_lines / inventory_transactions. Filling them in here
+// therefore books a document, exactly as the Stock Purchase and Stock
+// Adjustment screens do, rather than stamping a number onto the product that
+// the next invoice would immediately contradict. That's what makes the rate
+// show up in rate_list, the supplier in the item's supplier list, and the
+// quantity in on-hand stock.
+//
+// Two ways to write stock, because they answer different questions:
+//   purchase — "we bought 40 more of these, from them, at this price". Adds to
+//              stock, sets the rate, records the supplier, books the payable.
+//   adjust   — "there are 12 on the shelf, whatever the system thinks". No
+//              supplier and no price; the difference against what's currently
+//              recorded is posted as a stock adjustment with a reason.
+//
+// Rows are grouped into documents rather than each getting its own: an invoice
+// has one supplier, so items bought from the same one on the same day are lines
+// on a single invoice — which is what the delivery note looked like.
+export async function updateProductsBatch(
+  shared: ProductBatchEditShared,
+  rows: ProductEditInput[],
+): Promise<ActionResult> {
+  return guard("Couldn't save the products.", async () => {
+    const session = await getSession();
+    requirePermission(session, "products", "edit");
+    // Rows added in the dialog create products, which is a different permission
+    // from editing the ones already there.
+    if (rows.some((r) => !r.id)) requirePermission(session, "products", "create");
+
+    if (rows.length === 0) return { error: "Nothing selected to edit." };
+
+    // Every row is checked before any row is written. A batch that fails on row
+    // seven having already saved rows one to six is the worst outcome here — the
+    // user can't tell what landed without re-reading the list.
+    for (const [i, row] of rows.entries()) {
+      const where = `Row ${i + 1} (${row.name.trim() || "unnamed"})`;
+      if (!row.name.trim()) return { error: `${where}: name is required.` };
+      // A new row may leave the SKU blank and take the next RH- number, the same
+      // as the add dialog. An existing product can't have its SKU emptied.
+      if (row.id && !row.sku.trim()) return { error: `${where}: SKU is required.` };
+      if (!row.id && !row.companyId) return { error: `${where}: pick a company for the new product.` };
+
+      if (shared.mode === "purchase") {
+        const rowError = purchaseRowError(row, where);
+        if (rowError) return { error: rowError };
+      }
+
+      if (shared.mode === "adjust" && row.targetQty.trim() !== "") {
+        const target = Number(row.targetQty);
+        if (!Number.isFinite(target) || target < 0) return { error: `${where}: stock level must be zero or more.` };
+      }
+    }
+
+    // A row writes a document if it records a rate, a quantity, or both.
+    const writesDocuments =
+      (shared.mode === "purchase" && rows.some(writesDocument)) ||
+      (shared.mode === "adjust" && rows.some((r) => r.targetQty.trim() !== ""));
+    if (writesDocuments && !shared.documentDate) return { error: "Enter the date for the documents this will create." };
+    // Both documents put stock somewhere and neither guesses: an adjustment has no
+    // "current" to measure a target against without a location, and goods that
+    // arrive nowhere can only ever be shown as Unassigned. A rate on its own moves
+    // no stock, so it needs no location.
+    const movesStock =
+      (shared.mode === "purchase" && rows.some(recordsQty)) || (shared.mode === "adjust" && rows.some((r) => r.targetQty.trim() !== ""));
+    if (movesStock && !shared.locationId) {
+      return { error: shared.mode === "adjust" ? "Pick the location whose stock levels you're setting." : "Pick the location the goods arrived at." };
+    }
+    if (shared.mode === "adjust" && writesDocuments) {
+      if (!ADJUSTMENT_REASONS.includes(shared.reason as AdjustmentReason)) return { error: "Pick a reason for the stock adjustments." };
+    }
+
+    // The catalogue half, all rows in one transaction. Each row used to save in
+    // two transactions of its own, which broke the promise made four paragraphs
+    // up: a batch that failed on row seven had already committed rows one to six,
+    // and the user had no way to tell which. One transaction means the grid either
+    // lands whole or not at all, and the twenty rows cost one commit instead of
+    // forty.
+    const scope = await companyInScope(items.companyId);
+    const saved: SavedProductRow[] = [];
+    const rowFailure = await db
+      .transaction(async (tx) => {
+        for (const [i, row] of rows.entries()) {
+          const result = await saveProductRow(tx, row, scope);
+          // Thrown, not returned: throwing is what rolls the transaction back, so
+          // the rows before this one don't commit either.
+          if ("error" in result) throw new RowError(`Row ${i + 1} (${row.name.trim()}): ${result.error}`);
+          saved.push({ ...result, row, index: i });
+        }
+        return null;
+      })
+      .catch((e) => {
+        if (e instanceof RowError) return e.message;
+        throw e;
+      });
+    if (rowFailure) return { error: rowFailure };
+
+    // Documents are written after the catalogue commits, not inside it: they go
+    // through createStockPurchase / createStockAdjustment, which open transactions
+    // of their own. That seam is why the messages below say "saved, but…" — the
+    // products are already stored at that point, and saying so is the difference
+    // between "try the stock part again" and "type it all in again".
+    const documentError =
+      shared.mode === "purchase" ? await recordPurchases(shared, saved) : shared.mode === "adjust" ? await recordAdjustments(shared, saved) : null;
+    if (documentError) return { error: documentError };
+
+    invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands, CACHE.units);
+    revalidatePath("/inventory/products");
+    revalidatePath("/inventory/stock");
+    await recordAudit({
+      action: "update",
+      entity: "product",
+      summary: `${rows.length} product(s) edited`,
+      companyId: saved[0]?.companyId,
+      detail: shared.mode === "none" ? null : `mode: ${shared.mode}`,
+    });
+    return { success: true };
+  });
+}
+
+// Carries a row-specific message out of the batch transaction. Throwing is what
+// makes the rollback happen; the message is what the user reads.
+class RowError extends Error {}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+interface SavedProductRow {
+  row: ProductEditInput;
+  // Position in the submitted batch, kept so an error can name the row the user
+  // is looking at rather than the position within some group.
+  index: number;
+  itemId: string;
+  companyId: string;
+  unitId: string | null;
+}
+
+// One row's catalogue record: the references it names, then the product itself.
+// Split out so updateProductsBatch reads as "check everything, save everything,
+// then file the paperwork" rather than one function doing all three.
+async function saveProductRow(
+  tx: Tx,
+  row: ProductEditInput,
+  scope: SQL | undefined,
+): Promise<{ error: string } | Omit<SavedProductRow, "row" | "index">> {
+  // A name that didn't match anything in the dropdown becomes the record — the
+  // same rule the sale and purchase grids follow, which is how half-filled items
+  // get created in the first place.
+  const refs = {
+    categoryId: await resolveCategoryId(tx, row.categoryId || null, row.categoryName),
+    brandId: await resolveBrandId(tx, row.brandId || null, row.brandName),
+    // Resolved here rather than left to the document actions because the
+    // "set stock level" delta has to measure against this exact unit.
+    unitId: await resolveUnitId(tx, row.unitId || null, row.unitName || null),
+  };
+
+  const fields = {
+    name: row.name.trim(),
+    urduName: row.urduName.trim() || null,
+    categoryId: refs.categoryId,
+    brandId: refs.brandId,
+    taxable: row.taxable,
+    isActive: row.isActive,
+  };
+
+  const result = row.id
+    ? await tx
+        .update(items)
+        .set({ ...fields, sku: row.sku.trim() })
+        .where(and(eq(items.id, row.id), scope))
+        .returning({ id: items.id, companyId: items.companyId })
+    : // A blank SKU takes the next RH- number, allocated inside the transaction
+      // so a failed insert gives it back — same rule as createProductsBatch.
+      await (async () => {
+        const sku = row.sku.trim() || formatSku(await nextSequenceValue(SKU_SCOPE, tx));
+        return tx
+          .insert(items)
+          .values({ ...fields, sku, companyId: row.companyId })
+          .returning({ id: items.id, companyId: items.companyId });
+      })();
+
+  if (result.length === 0) return { error: "this product no longer exists, or isn't in your company scope." };
+
+  return { itemId: result[0].id, companyId: result[0].companyId, unitId: refs.unitId };
+}
+
+// A purchase invoice has one supplier and belongs to one company, so that pair is
+// what decides how many invoices a batch produces: five items bought from one
+// supplier are one invoice with five lines, which is what the delivery note
+// actually looked like. Two suppliers in the grid means two invoices.
+//
+// A typed supplier name groups on the exact trimmed text rather than a
+// case-folded one, because that is the comparison resolveContactId makes — two
+// spellings resolve to two contacts, so they have to produce two invoices or one
+// of them would be filed against the wrong one.
+function invoiceKey(saved: SavedProductRow) {
+  const supplier = saved.row.supplierId || `name:${saved.row.supplierName.trim()}`;
+  return `${saved.companyId}::${supplier}`;
+}
+
+async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProductRow[]): Promise<string | null> {
+  const groups = new Map<string, SavedProductRow[]>();
+  for (const s of saved) {
+    // A rate with no quantity still books a line — that's what puts the price in
+    // rate_list. It just carries quantity 0, so nothing lands in stock.
+    const qty = Number(s.row.purchaseQty.trim() || "0");
+    if (!(qty > 0) && !(Number(s.row.purchaseRate) > 0)) continue;
+    const key = invoiceKey(s);
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+
+  for (const group of groups.values()) {
+    const { companyId, row: first } = group[0];
+    // Delegated to createStockPurchase rather than reimplemented: it is what
+    // allocates the document number, writes the lines and posts the +1 inventory
+    // movements. Whether any of it reaches the ledger is decided by the document
+    // type's own affects* flags, which is why the type below is the whole of the
+    // difference between this and a real purchase.
+    //
+    // ponytail: one round trip per document, in sequence. Fine for a grid
+    // someone filled in by hand; revisit if a batch ever runs to hundreds of
+    // suppliers.
+    //
+    // A stock receipt, not a purchase invoice. Editing a product is catalogue
+    // work: it records what arrived and what it cost, so the quantity lands in
+    // stock and the rate lands in rate_list — but it books nothing to the
+    // ledger, owes nobody, and is neither paid nor unpaid. A real delivery with
+    // an invoice behind it is entered on the Stock Purchase screen, which is
+    // still the only thing that creates a payable.
+    const documentType = await ensureDocumentType({
+      companyId,
+      code: "STOCK_OPENING",
+      name: "Stock Receipt",
+      series: "OS",
+      affectsInventory: true,
+      affectsAccounting: false,
+      affectsPayable: false,
+      active: true,
+    });
+
+    const purchaseForm = new FormData();
+    purchaseForm.set("companyId", companyId);
+    purchaseForm.set("documentDate", shared.documentDate);
+    purchaseForm.set("documentTypeMode", "existing");
+    purchaseForm.set("documentTypeId", String(documentType.id));
+    // Every row in the group named the same supplier — that's what grouped them —
+    // so the first row's answer speaks for all of them. A typed name is created by
+    // createStockPurchase's own resolveContactId, under this company.
+    purchaseForm.set("contactId", first.supplierId);
+    purchaseForm.set("contactName", first.supplierId ? "" : first.supplierName.trim());
+    // Ignored for this type — a receipt is neither paid nor unpaid — but sent so
+    // the form shape is the one createStockPurchase expects.
+    purchaseForm.set("isPaid", "no");
+    // Location is a header field — one delivery, one place — which is also how
+    // the batch grid asks for it.
+    purchaseForm.set("locationId", locationIdOrNull(shared.locationId) ?? "");
+    purchaseForm.set(
+      "linesJson",
+      JSON.stringify(
+        group.map((s) => ({
+          itemId: s.itemId,
+          itemName: "",
+          unitId: s.unitId ?? "",
+          unitName: "",
+          quantity: String(Number(s.row.purchaseQty)),
+          // unit_price is the purchase rate — rate_list reads it, which is how
+          // the rate columns on the products list get their values.
+          unitPrice: s.row.purchaseRate,
+          unitCost: "",
+        })),
+      ),
+    );
+
+    const result = await createStockPurchase(undefined, purchaseForm);
+    if (result.error) return `${rowLabel(group)} saved, but the stock wasn't recorded: ${result.error}`;
+  }
+
+  return null;
+}
+
+// The mirror of the above: location, date and reason are shared by the whole
+// batch, so a stock count over eight products is one adjustment document with
+// eight lines. Only the company splits them, since a document belongs to one.
+async function recordAdjustments(shared: ProductBatchEditShared, saved: SavedProductRow[]): Promise<string | null> {
+  // Unassigned is a place stock can sit, so it has to match NULL rather than
+  // fall through to "every location".
+  const locationId = locationIdOrNull(shared.locationId);
+
+  const groups = new Map<string, { rows: SavedProductRow[]; lines: unknown[] }>();
+  for (const s of saved) {
+    if (s.row.targetQty.trim() === "") continue;
+
+    // The delta is measured here, not in the browser: the grid's "current" was
+    // read when it opened, and a sale posted in between would make a client-side
+    // subtraction adjust to the wrong number. Same grain as the adjustment line —
+    // this one location, this one unit.
+    const [current] = await db
+      .select({ onHand: sql<string>`coalesce(sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity}), 0)` })
+      .from(inventoryTransactions)
+      .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
+      .where(
+        and(
+          eq(documentLines.itemId, s.itemId),
+          locationId ? eq(documentLines.locationId, locationId) : isNull(documentLines.locationId),
+          s.unitId ? eq(documentLines.unitId, s.unitId) : isNull(documentLines.unitId),
+        ),
+      );
+
+    const delta = Number(s.row.targetQty) - Number(current?.onHand ?? 0);
+    // Already at the target — a line of zero would be a paper trail recording
+    // that nothing happened.
+    if (delta === 0) continue;
+
+    const group = groups.get(s.companyId) ?? { rows: [], lines: [] };
+    group.rows.push(s);
+    // Signed: createStockAdjustment reads the sign as the movement direction and
+    // stores the quantity absolute.
+    group.lines.push({ itemId: s.itemId, itemName: "", unitId: s.unitId ?? "", unitName: "", quantity: String(delta) });
+    groups.set(s.companyId, group);
+  }
+
+  for (const [companyId, group] of groups) {
+    const adjustForm = new FormData();
+    adjustForm.set("companyId", companyId);
+    adjustForm.set("documentDate", shared.documentDate);
+    adjustForm.set("locationId", shared.locationId);
+    adjustForm.set("reason", shared.reason);
+    adjustForm.set("linesJson", JSON.stringify(group.lines));
+
+    const result = await createStockAdjustment(undefined, adjustForm);
+    if (result.error) return `${rowLabel(group.rows)} saved, but the stock level wasn't set: ${result.error}`;
+  }
+
+  return null;
+}
+
+// Names the grid rows a failed document came from, so "row 2 and row 5" points at
+// what the user is looking at rather than at a position inside some group.
+function rowLabel(group: SavedProductRow[]) {
+  const numbers = group.map((s) => s.index + 1);
+  return numbers.length === 1 ? `Row ${numbers[0]} details` : `Rows ${numbers.join(", ")} details`;
+}
+
+// --- Merge ---------------------------------------------------------------
+
+// The same physical product ends up in the catalog twice easily: typed into a
+// sale line under a slightly different name, created on the fly by a purchase,
+// or (until migration 0042) minted by an inter-company sale. Merging folds the
+// duplicates into one row and moves their history with them, so stock and rates
+// stop being split across two half-used entries.
+
+export interface MergeCandidate {
+  id: string;
+  name: string;
+  sku: string;
+  companyId: string;
+  company: string;
+  // What a merge would carry across — shown so the size of the change is visible
+  // before it happens.
+  lines: number;
+  movements: number;
+}
+
+export async function listMergeCandidates(): Promise<MergeCandidate[]> {
+  const session = await getSession();
+  requirePermission(session, "products", "view");
+
+  const rows = await db
+    .select({
+      id: items.id,
+      name: items.name,
+      sku: items.sku,
+      companyId: items.companyId,
+      company: companies.name,
+      lines: sql<number>`(select count(*) from ${documentLines} dl where dl.item_id = ${items.id})`,
+      movements: sql<number>`(
+        select count(*) from inventory_transactions it
+        join ${documentLines} dl on dl.id = it.document_line_id
+        where dl.item_id = ${items.id}
+      )`,
+    })
+    .from(items)
+    .innerJoin(companies, eq(companies.id, items.companyId))
+    .where(await companyInScope(items.companyId))
+    .orderBy(items.name);
+
+  return rows.map((r) => ({ ...r, lines: Number(r.lines), movements: Number(r.movements) }));
+}
+
+export async function mergeProducts(
+  _prevState: ActionResult | undefined,
+  formData: FormData,
+): Promise<{ error?: string; success?: boolean }> {
+  const session = await getSession();
+  // Rewrites one product and destroys the others, so it needs both.
+  requirePermission(session, "products", "edit");
+  requirePermission(session, "products", "delete");
+
+  const survivorId = String(formData.get("survivorId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const sku = String(formData.get("sku") ?? "").trim();
+  let itemIds: string[];
+  try {
+    itemIds = JSON.parse(String(formData.get("itemIds") ?? "[]"));
+  } catch (e) {
+    return { error: describeDbError(e, "Nothing to merge.") };
+  }
+
+  if (itemIds.length < 2) return { error: "Pick at least two products to merge." };
+  if (!survivorId || !itemIds.includes(survivorId)) return { error: "Pick which product survives the merge." };
+  if (!name || !sku) return { error: "The surviving product needs a name and a SKU." };
+
+  const rows = await db.select({ id: items.id, companyId: items.companyId }).from(items).where(inArray(items.id, itemIds));
+  if (rows.length !== itemIds.length) return { error: "One of these products no longer exists." };
+  // Catalogs are per company and so is stock. Folding an M52 row into a Royal
+  // one would move stock between two sets of books without a document saying so.
+  if (new Set(rows.map((r) => r.companyId)).size > 1) return { error: "These products belong to different companies — merge within one company." };
+
+  const loserIds = itemIds.filter((id) => id !== survivorId);
+
+  try {
+    await db.transaction(async (tx) => {
+      // inventory_transactions hangs off document_lines, not items, so moving the
+      // lines moves the stock movements with them — on-hand and valuation come
+      // out the same, just under one product.
+      await tx.update(documentLines).set({ itemId: survivorId }).where(inArray(documentLines.itemId, loserIds));
+
+      // unit_conversions is UNIQUE(item, from, to): a duplicate that carries the
+      // same conversion as the survivor can't be repointed onto it, and doesn't
+      // need to be — it says the same thing.
+      const survivorPairs = await tx
+        .select({ fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId })
+        .from(unitConversions)
+        .where(eq(unitConversions.itemId, survivorId));
+      const held = new Set(survivorPairs.map((p) => `${p.fromUnitId}:${p.toUnitId}`));
+
+      const loserConversions = await tx
+        .select({ id: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId })
+        .from(unitConversions)
+        .where(inArray(unitConversions.itemId, loserIds));
+      const duplicated = loserConversions.filter((c) => held.has(`${c.fromUnitId}:${c.toUnitId}`)).map((c) => c.id);
+      if (duplicated.length > 0) await tx.delete(unitConversions).where(inArray(unitConversions.id, duplicated));
+      // Whatever is left is a conversion the survivor doesn't have yet.
+      await tx.update(unitConversions).set({ itemId: survivorId }).where(inArray(unitConversions.itemId, loserIds));
+
+      // item_images.item_id is ON DELETE CASCADE, so these would be thrown away
+      // with the row rather than kept. isPrimary is cleared on the way over — the
+      // survivor's own primary image stays the primary one.
+      await tx.update(itemImages).set({ itemId: survivorId, isPrimary: false }).where(inArray(itemImages.itemId, loserIds));
+
+      // Losers go first, then the survivor is renamed. The other order fails when
+      // the SKU being kept is one of theirs — items is UNIQUE(company_id, sku),
+      // and the row still holding it would not have been deleted yet.
+      await tx.delete(items).where(and(inArray(items.id, loserIds), ne(items.id, survivorId)));
+      await tx.update(items).set({ name, sku }).where(eq(items.id, survivorId));
+    });
+  } catch (e) {
+    return { error: describeDbError(e, "Can't merge — that SKU is already used by another product in this company, or one of these rows is still referenced elsewhere.") };
+  }
+
+  invalidateLookups(CACHE.items);
+  revalidatePath("/inventory/products");
+  revalidatePath("/inventory/stock");
+  revalidatePath("/dashboard");
+  await recordAudit({
+    action: "merge",
+    entity: "product",
+    entityId: survivorId,
+    summary: `${name} (${sku})`,
+    companyId: rows[0]?.companyId,
+    detail: `${loserIds.length} duplicate(s) folded in`,
+  });
+  return { success: true };
+}
+
+// --- CSV import / export ---------------------------------------------------
+
+// The columns and their headings live in lib/csv-columns.ts (PRODUCT_CSV_COLUMNS)
+// — the template download, the export and this import all read that one list, so
+// a file saved from the template imports without editing.
+//
+// Everything here is a name, not an id: the same names the pickers show. An
+// unmatched category or brand is created on save, the same as typing one into
+// the batch dialog. A company is not — you can only file under a company you
+// already have access to, and inventing one from a typo is not a thing an
+// import should do.
+
+export async function exportProductsCsv(): Promise<Record<string, string>[]> {
+  const session = await getSession();
+  requirePermission(session, "products", "view");
+
+  const [rows, rates] = await Promise.all([
+    db
+      .select({
+        id: items.id,
+        company: companies.name,
+        name: items.name,
+        sku: items.sku,
+        urduName: items.urduName,
+        category: categories.name,
+        brand: brands.name,
+        taxable: items.taxable,
+        isActive: items.isActive,
+      })
+      .from(items)
+      .innerJoin(companies, eq(companies.id, items.companyId))
+      .leftJoin(categories, eq(categories.id, items.categoryId))
+      .leftJoin(brands, eq(brands.id, items.brandId))
+      .where(await companyInScope(items.companyId))
+      .orderBy(items.name),
+    // The four rate columns are derived, so they come from the same place the
+    // products list reads them from rather than being recomputed here.
+    listProductsWithRates(),
+  ]);
+
+  const rateById = new Map(rates.map((r) => [r.id, r]));
+  return rows.map((r) => {
+    const rate = rateById.get(r.id);
+    return {
+      company: r.company,
+      name: r.name,
+      sku: r.sku,
+      urduName: r.urduName ?? "",
+      category: r.category ?? "",
+      brand: r.brand ?? "",
+      taxable: r.taxable ? "yes" : "no",
+      isActive: r.isActive ? "yes" : "no",
+      purchaseRate1: rate?.purchaseRate1 ?? "",
+      purchaseRate2: rate?.purchaseRate2 ?? "",
+      purchaseRate3: rate?.purchaseRate3 ?? "",
+      salesRate: rate?.salesRate ?? "",
+    };
+  });
+}
+
+// Rows come from the browser already parsed (lib/csv.ts runs on both sides), so
+// this takes objects rather than a file. Nothing is written until every row
+// passes: half an imported price list is worse than none, because you can't tell
+// by looking which half landed.
+export async function importProductsCsv(
+  rows: Record<string, string>[],
+): Promise<{ error?: string; created?: number }> {
+  const session = await getSession();
+  requirePermission(session, "products", "create");
+  if (rows.length === 0) return { error: "That file has no rows." };
+
+  // Fetched once for the whole file. A category or brand that matches one of
+  // these arrives as an id, so createProductsBatch's transaction does no lookup
+  // for it — the same two lookups per row are what made a long file crawl
+  // against a database ~170ms away. A name that matches nothing still goes down
+  // as text and is created inside that transaction, as before.
+  const [companyRows, categoryRows, brandRows] = await Promise.all([getCompanies(), getCategories(), getBrands()]);
+  const key = (s: string) => s.trim().toLowerCase();
+  const companyByName = new Map(companyRows.map((c) => [key(c.name), c.id]));
+  const categoryByName = new Map(categoryRows.map((c) => [key(c.name), c.id]));
+  const brandByName = new Map(brandRows.map((b) => [key(b.name), b.id]));
+
+  const errors: string[] = [];
+  const batch: ProductBatchRow[] = [];
+
+  rows.forEach((r, i) => {
+    // +2, not +1: row 1 of the file is the heading.
+    const label = `Row ${i + 2}`;
+    const name = (r.name ?? "").trim();
+    const company = (r.company ?? "").trim();
+    const companyId = companyByName.get(key(company));
+
+    if (!name) errors.push(`${label}: Item Name is required.`);
+    if (!company) errors.push(`${label}: Company is required.`);
+    else if (!companyId) errors.push(`${label}: no company named "${company}" — check the spelling.`);
+    if (!name || !companyId) return;
+
+    batch.push({
+      name,
+      sku: (r.sku ?? "").trim(),
+      companyId,
+      categoryId: categoryByName.get(key(r.category ?? "")) ?? null,
+      brandId: brandByName.get(key(r.brand ?? "")) ?? null,
+      categoryName: (r.category ?? "").trim(),
+      brandName: (r.brand ?? "").trim(),
+      urduName: (r.urduName ?? "").trim() || null,
+      taxable: csvBool(r.taxable ?? "", false),
+      isActive: csvBool(r.isActive ?? "", true),
+    });
+  });
+
+  if (errors.length > 0) return { error: csvErrorText(errors) };
+
+  const result = await createProductsBatch(batch);
+  if (result.error) return { error: result.error };
+  return { created: result.created?.length ?? 0 };
+}

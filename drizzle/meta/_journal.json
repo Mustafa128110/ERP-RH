@@ -1,0 +1,342 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783856261455,
+      "tag": "0000_magical_captain_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783857719789,
+      "tag": "0001_sad_dust",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783859023402,
+      "tag": "0002_parallel_firestar",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783868777140,
+      "tag": "0003_disable_rls_on_unscoped_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783887781735,
+      "tag": "0004_users_backfilled_not_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783887841161,
+      "tag": "0005_strange_ultimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783893177231,
+      "tag": "0006_jittery_kabuki",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783925918865,
+      "tag": "0007_create_rate_list_view",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784017883257,
+      "tag": "0008_organic_phil_sheldon",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784034125059,
+      "tag": "0009_magenta_professor_monster",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784034575625,
+      "tag": "0010_volatile_norman_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784100668596,
+      "tag": "0011_real_vengeance",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784100743628,
+      "tag": "0012_parallel_blur",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784126743896,
+      "tag": "0013_tearful_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784199676269,
+      "tag": "0014_young_mephistopheles",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1784210393575,
+      "tag": "0015_kind_siren",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1784532009682,
+      "tag": "0016_swift_alex_wilder",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784539321278,
+      "tag": "0017_blushing_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784540612393,
+      "tag": "0018_backfill_document_number_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784541713616,
+      "tag": "0019_backfill_inventory_transactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784619120278,
+      "tag": "0020_flippant_kree",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784619836306,
+      "tag": "0021_many_omega_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784628530519,
+      "tag": "0022_closed_dragon_lord",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784701559878,
+      "tag": "0023_jazzy_lizard",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784703415269,
+      "tag": "0024_remarkable_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784703462927,
+      "tag": "0025_high_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784787491340,
+      "tag": "0026_flowery_tyrannus",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784787989314,
+      "tag": "0027_optimize_rate_list_view",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1784812332763,
+      "tag": "0028_lame_shinobi_shaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784812976760,
+      "tag": "0029_dizzy_sage",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784855629815,
+      "tag": "0030_bizarre_silk_fever",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784876722160,
+      "tag": "0031_common_lila_cheney",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784922133189,
+      "tag": "0032_drop_unused_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784925632716,
+      "tag": "0033_drop_more_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1784927482167,
+      "tag": "0034_drop_currency_and_contact_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1784928270771,
+      "tag": "0035_unit_symbol_nullable_category_sort",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0036_shared_document_series",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785000100000,
+      "tag": "0037_documents_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1785000200000,
+      "tag": "0038_documents_paid_amount",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785000300000,
+      "tag": "0039_backfill_sales_receivables",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1785000400000,
+      "tag": "0040_backfill_movement_costs",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1785139163067,
+      "tag": "0041_expenses_drop_location",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1785146841194,
+      "tag": "0042_items_sku_per_company",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1785236969455,
+      "tag": "0043_documents_sale_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1785323369455,
+      "tag": "0044_rate_list_stock_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1785443020416,
+      "tag": "0045_audit_whatsapp_quotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1785492880425,
+      "tag": "0046_users_whatsapp_number",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785493853432,
+      "tag": "0047_whatsapp_handoff_status",
+      "breakpoints": true
+    }
+  ]
+}

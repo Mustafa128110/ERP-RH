@@ -1,0 +1,468 @@
+"use client";
+
+import { useActionState, useEffect, useMemo, useState } from "react";
+import {
+
+  updatePayment,
+  deletePayment,
+  createPaymentsBatch,
+  type PaymentDirection,
+  type PaymentType,
+  type PaymentBatchRow,
+} from "@/lib/actions/payments";
+import type { SettlementType } from "@/lib/actions/settlement";
+import { ComboBox } from "@/components/ui/ComboBox";
+import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import {
+  inputClass,
+  labelClass,
+  labelTextClass,
+  submitClass,
+  deleteButtonClass,
+  errorTextClass,
+  successTextClass,
+} from "@/components/ui/form-styles";
+import { DateField } from "@/components/ui/DateField";
+import { todayISO } from "@/lib/format";
+import { inCompany } from "@/lib/contact-scope";
+import { ChequeQuickAddButton } from "@/components/modules/AccountForms";
+
+type Option = { id: string; name: string };
+type ScopedOption = Option & { companyId: string };
+// Cash accounts carry their default flag so a new row can preselect the drawer.
+export type CashOption = Option & { isDefault: boolean };
+// Bank accounts carry their company (null = global) — the cheque quick-add needs
+// it to narrow its own bank picker.
+export type BankOption = Option & { companyId: string | null };
+
+// The cheque dialog names contacts and bank accounts its own way; this is the
+// one place that translation lives.
+const forChequeDialog = (contactOptions: ScopedOption[], bankAccountOptions: BankOption[]) => ({
+  contactOptions: contactOptions.map((c) => ({ id: c.id, displayName: c.name, companyId: c.companyId || null })),
+  bankAccountOptions: bankAccountOptions.map((b) => ({ id: b.id, label: b.name, companyId: b.companyId })),
+});
+
+interface PaymentValues {
+  companyId: string;
+  contactId: string | null;
+  amount: string;
+  paymentDate: string;
+  paymentType: PaymentType | null;
+  bankAccountId: string | null;
+  cashAccountId: string | null;
+  chequeId: string | null;
+}
+
+const PAYMENT_TYPES: { value: PaymentType; label: string }[] = [
+  { value: "account", label: "Account" },
+  { value: "cash", label: "Cash" },
+  { value: "cheque", label: "Cheque" },
+];
+
+// --- Batch add ------------------------------------------------------------
+
+// Contact is typed, not picked from a fixed list — an unrecognised name becomes a
+// new contact for that company on save (resolve-refs.ts), so there's no separate
+// "add contact" step.
+type PaymentBatchRowLocal = {
+  direction: PaymentDirection;
+  companyId: string;
+  contactId: string;
+  contactText: string;
+  settlementType: SettlementType;
+  settlementId: string;
+  amount: string;
+  paymentDate: string;
+};
+
+export function PaymentBatchAddDialog({
+  companyOptions,
+  contactOptions,
+  bankAccountOptions,
+  cashAccountOptions,
+  chequeOptions,
+  onClose,
+  onDone,
+}: {
+  companyOptions: Option[];
+  contactOptions: ScopedOption[];
+  bankAccountOptions: BankOption[];
+  cashAccountOptions: CashOption[];
+  chequeOptions: Option[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const defaultCompanyId = companyOptions[0]?.id ?? "";
+
+  // Cheques created from a row's "+" join the shared list, so they're pickable
+  // from every row — and the row that opened the dialog gets the first one
+  // selected, which is what it was opened for.
+  const [chequeOpts, setChequeOpts] = useState(chequeOptions);
+  const settlementList = (t: SettlementType) => (t === "account" ? bankAccountOptions : t === "cash" ? cashAccountOptions : chequeOpts);
+
+  // Payments are nearly always made out of the drawer, on the day they happen, so
+  // that's where a fresh row starts. Which cash account is "the drawer" comes from
+  // cash_accounts.is_default, not a name match. en-CA is the YYYY-MM-DD the date
+  // input wants, in local time — toISOString() would hand back yesterday for
+  // anything entered before 05:00 here.
+  const today = new Date().toLocaleDateString("en-CA");
+  const defaultCashId = cashAccountOptions.find((a) => a.isDefault)?.id ?? cashAccountOptions[0]?.id ?? "";
+
+  const emptyRow = (): PaymentBatchRowLocal => ({
+    direction: "made",
+    companyId: defaultCompanyId,
+    contactId: "",
+    contactText: "",
+    settlementType: "cash",
+    settlementId: defaultCashId,
+    amount: "",
+    paymentDate: today,
+  });
+
+  return (
+    <BatchAddDialog<PaymentBatchRowLocal>
+      title="Add Payments"
+      onClose={onClose}
+      onDone={onDone}
+      emptyRow={emptyRow}
+      headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount", "Date"]}
+      onSubmit={async (rows) => {
+        const values: PaymentBatchRow[] = rows.map((r) => ({
+          direction: r.direction,
+          companyId: r.companyId,
+          contactId: r.contactId || null,
+          contactName: r.contactText.trim() || null,
+          settlementType: r.settlementType,
+          bankAccountId: r.settlementType === "account" ? r.settlementId || null : null,
+          cashAccountId: r.settlementType === "cash" ? r.settlementId || null : null,
+          chequeId: r.settlementType === "cheque" ? r.settlementId || null : null,
+          // Left blank rather than defaulted to "0" — that's how the server tells
+          // an untouched spare row from one someone actually typed a number into.
+          amount: r.amount.trim(),
+          paymentDate: r.paymentDate,
+        }));
+        return createPaymentsBatch(values);
+      }}
+      renderRow={(row, i, update) => (
+        <>
+          <td className={batchCellClass}>
+            <select value={row.direction} onChange={(e) => update({ direction: e.target.value as PaymentDirection })} className={batchInputClass}>
+              <option value="received">Received</option>
+              <option value="made">Made</option>
+            </select>
+          </td>
+          <td className={batchCellClass}>
+            <select
+              value={row.companyId}
+              onChange={(e) => {
+                // A contact belongs to one company, so switching companies drops
+                // the picked id — the text stays and re-resolves against the new
+                // company's list on save.
+                const stillValid = contactOptions.some((c) => c.id === row.contactId && inCompany(e.target.value)(c));
+                update({ companyId: e.target.value, ...(stillValid ? {} : { contactId: "" }) });
+              }}
+              className={batchInputClass}
+            >
+              <option value="" disabled>
+                Select
+              </option>
+              {companyOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </td>
+          <td className={batchCellClass}>
+            <ComboBox
+              value={row.contactText}
+              options={contactOptions.filter(inCompany(row.companyId))}
+              placeholder="Pick or type a new one"
+              className={batchInputClass}
+              onChange={(name) =>
+                update({
+                  contactText: name,
+                  contactId: contactOptions.find((c) => inCompany(row.companyId)(c) && c.name === name)?.id ?? "",
+                })
+              }
+            />
+          </td>
+          <td className={batchCellClass}>
+            <select
+              value={row.settlementType}
+              onChange={(e) => update({ settlementType: e.target.value as SettlementType, settlementId: "" })}
+              className={batchInputClass}
+            >
+              <option value="account">Account</option>
+              <option value="cash">Cash</option>
+              <option value="cheque">Cheque</option>
+            </select>
+          </td>
+          <td className={batchCellClass}>
+            {/* Settling by cheque needs the cheque to exist in the register, so
+                a cheque row gets a "+" that puts one there without leaving the
+                batch half-entered. */}
+            <div className="flex gap-1.5">
+              <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
+                <option value="">—</option>
+                {settlementList(row.settlementType).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              {row.settlementType === "cheque" && (
+                <ChequeQuickAddButton
+                  companyOptions={companyOptions}
+                  {...forChequeDialog(contactOptions, bankAccountOptions)}
+                  onCreated={(created) => {
+                    setChequeOpts((prev) => [...created, ...prev]);
+                    update({ settlementId: created[0].id });
+                  }}
+                />
+              )}
+            </div>
+          </td>
+          <td className={batchCellClass}>
+            {/* A cheque settles for its own registered amount, so the field is
+                disabled for cheque rows — the server reads the amount off the
+                cheque. */}
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={row.settlementType === "cheque" ? "" : row.amount}
+              disabled={row.settlementType === "cheque"}
+              placeholder={row.settlementType === "cheque" ? "from cheque" : ""}
+              onChange={(e) => update({ amount: e.target.value })}
+              className={`${batchInputClass} disabled:bg-ivory disabled:text-steel`}
+            />
+          </td>
+          <td className={batchCellClass}>
+            <DateField value={row.paymentDate} onChange={(paymentDate) => update({ paymentDate })} className={batchInputClass} />
+          </td>
+        </>
+      )}
+    />
+  );
+}
+
+function Fields({
+  defaults,
+  companyOptions,
+  contactOptions,
+  contactId,
+  contactText,
+  onContactChange,
+  bankAccountOptions,
+  cashAccountOptions,
+  chequeOptions,
+}: {
+  defaults?: PaymentValues;
+  companyOptions: Option[];
+  contactOptions: ScopedOption[];
+  contactId: string;
+  contactText: string;
+  onContactChange: (id: string, text: string) => void;
+  bankAccountOptions: BankOption[];
+  cashAccountOptions: CashOption[];
+  chequeOptions: Option[];
+}) {
+  const [paymentType, setPaymentType] = useState<PaymentType>(defaults?.paymentType ?? "cash");
+  const [companyId, setCompanyId] = useState(defaults?.companyId ?? "");
+  // The chosen company's contacts, plus the global ones — a contact with no
+  // company is visible to every company.
+  const visibleContacts = useMemo(() => contactOptions.filter(inCompany(companyId)), [contactOptions, companyId]);
+  // Cheques created from the "+" beside the picker, newest first.
+  const [chequeOpts, setChequeOpts] = useState(chequeOptions);
+  const settlementOptions = paymentType === "account" ? bankAccountOptions : paymentType === "cash" ? cashAccountOptions : chequeOpts;
+  const settlementFieldName = paymentType === "account" ? "bankAccountId" : paymentType === "cash" ? "cashAccountId" : "chequeId";
+  const settlementDefault =
+    paymentType === "account" ? defaults?.bankAccountId : paymentType === "cash" ? defaults?.cashAccountId : defaults?.chequeId;
+  // The select is uncontrolled (it remounts on `key` when the settlement type
+  // changes, taking a fresh default with it), so a cheque created on the spot is
+  // selected by overriding that default rather than by holding a value.
+  const [createdChequeId, setCreatedChequeId] = useState("");
+
+  return (
+    <>
+      <label className={labelClass}>
+        <span className={labelTextClass}>Company</span>
+        <select
+          name="companyId"
+          required
+          value={companyId}
+          onChange={(e) => {
+            setCompanyId(e.target.value);
+            // Drop a contact that doesn't belong to the newly chosen company —
+            // the typed text stays and re-resolves against the new company.
+            if (contactId && !contactOptions.some((c) => c.id === contactId && c.companyId === e.target.value)) onContactChange("", contactText);
+          }}
+          className={inputClass}
+        >
+          <option value="" disabled>
+            {companyOptions.length === 0 ? "No companies yet — create one first" : "Select a company"}
+          </option>
+          {companyOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {/* Typed, not picked: an unrecognised name becomes a new contact for this
+          company on save, the same way a sale creates a customer. */}
+      <div className={labelClass}>
+        <span className={labelTextClass}>Contact</span>
+        <ComboBox
+          value={contactText}
+          options={visibleContacts}
+          placeholder="Pick a contact or type a new one"
+          className={inputClass}
+          onChange={(name) => onContactChange(visibleContacts.find((c) => c.name === name)?.id ?? "", name)}
+        />
+        <input type="hidden" name="contactId" value={contactId} />
+        <input type="hidden" name="contactName" value={contactText} />
+      </div>
+      <label className={labelClass}>
+        <span className={labelTextClass}>Date</span>
+        <DateField name="paymentDate" required defaultValue={defaults?.paymentDate ?? todayISO()} className={inputClass} />
+      </label>
+      <div className={labelClass}>
+        <span className={labelTextClass}>Settle via</span>
+        <div className="flex gap-2">
+          {PAYMENT_TYPES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setPaymentType(t.value)}
+              className={`h-11 flex-1 rounded border text-sm font-semibold ${
+                paymentType === t.value ? "border-navy-800 bg-navy-800 text-white" : "border-sand text-steel hover:bg-ivory"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <input type="hidden" name="paymentType" value={paymentType} />
+      <div className={labelClass}>
+        <span className={labelTextClass}>{paymentType === "account" ? "Account" : paymentType === "cash" ? "Cash Account" : "Cheque"}</span>
+        <div className="flex gap-1.5">
+          <select
+            key={`${paymentType}:${createdChequeId}`}
+            name={settlementFieldName}
+            required
+            defaultValue={createdChequeId || settlementDefault || ""}
+            className={inputClass}
+          >
+            <option value="" disabled>
+              {settlementOptions.length === 0 ? "None available — create one first" : "Select"}
+            </option>
+            {settlementOptions.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          {/* Settling by cheque needs the cheque to exist in the register — this
+              puts one there without abandoning the payment being filled in. */}
+          {paymentType === "cheque" && (
+            <ChequeQuickAddButton
+              companyOptions={companyOptions}
+              {...forChequeDialog(contactOptions, bankAccountOptions)}
+              onCreated={(created) => {
+                setChequeOpts((prev) => [...created, ...prev]);
+                setCreatedChequeId(created[0].id);
+              }}
+            />
+          )}
+        </div>
+      </div>
+      {paymentType !== "cheque" && (
+        <label className={labelClass}>
+          <span className={labelTextClass}>Amount</span>
+          <input name="amount" type="number" step="0.01" min="0.01" required defaultValue={defaults?.amount} className={inputClass} />
+        </label>
+      )}
+    </>
+  );
+}
+
+export function PaymentEditForm({
+  paymentId,
+  direction,
+  defaults,
+  companyOptions,
+  contactOptions,
+  bankAccountOptions,
+  cashAccountOptions,
+  chequeOptions,
+  onDone,
+}: {
+  paymentId: string;
+  direction: PaymentDirection;
+  defaults: PaymentValues;
+  companyOptions: Option[];
+  contactOptions: ScopedOption[];
+  bankAccountOptions: BankOption[];
+  cashAccountOptions: CashOption[];
+  chequeOptions: Option[];
+  onDone?: () => void;
+}) {
+  const [state, action, pending] = useActionState(updatePayment.bind(null, paymentId), undefined);
+  const [contactId, setContactId] = useState(defaults.contactId ?? "");
+  const [contactText, setContactText] = useState(() => contactOptions.find((c) => c.id === defaults.contactId)?.name ?? "");
+
+  useEffect(() => {
+    if (state?.success) onDone?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.success]);
+
+  return (
+    <form action={action} className="flex flex-col gap-4">
+      <div className={labelClass}>
+        <span className={labelTextClass}>Direction</span>
+        <p className="text-sm text-ink">{direction === "made" ? "Payment Made" : "Payment Received"} (fixed after creation)</p>
+      </div>
+      <Fields
+        defaults={defaults}
+        companyOptions={companyOptions}
+        contactOptions={contactOptions}
+        contactId={contactId}
+        contactText={contactText}
+        onContactChange={(id, text) => {
+          setContactId(id);
+          setContactText(text);
+        }}
+        bankAccountOptions={bankAccountOptions}
+        cashAccountOptions={cashAccountOptions}
+        chequeOptions={chequeOptions}
+      />
+      {state?.error && <p className={errorTextClass}>{state.error}</p>}
+      {state?.success && <p className={successTextClass}>Saved.</p>}
+      <button type="submit" disabled={pending} className={submitClass}>
+        {pending ? "Saving…" : "Save"}
+      </button>
+    </form>
+  );
+}
+
+export function DeletePaymentButton({ paymentId, onDone }: { paymentId: string; onDone?: () => void }) {
+  const [state, action, pending] = useActionState(deletePayment, undefined);
+
+  useEffect(() => {
+    if (state?.success) onDone?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.success]);
+
+  return (
+    <form action={action} onSubmit={(e) => { if (!confirm("Delete this payment?")) e.preventDefault(); }}>
+      <input type="hidden" name="paymentId" value={paymentId} />
+      <button type="submit" disabled={pending} className={deleteButtonClass}>
+        {pending ? "Deleting…" : "Delete this payment"}
+      </button>
+      {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
+    </form>
+  );
+}

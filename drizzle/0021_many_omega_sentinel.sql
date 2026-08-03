@@ -1,0 +1,2 @@
+ALTER TABLE "bank_accounts" ALTER COLUMN "company_id" DROP NOT NULL;--> statement-breakpoint
+ALTER POLICY "company_scope" ON "bank_accounts" TO app_user USING ("bank_accounts"."company_id" IS NULL OR company_id IN (SELECT company_id FROM user_company_access WHERE user_id = current_setting('app.user_id', true)::uuid)) WITH CHECK ("bank_accounts"."company_id" IS NULL OR company_id IN (SELECT company_id FROM user_company_access WHERE user_id = current_setting('app.user_id', true)::uuid));

@@ -1,0 +1,4 @@
+ALTER TABLE "contacts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "contacts" ADD COLUMN "company_id" uuid;--> statement-breakpoint
+ALTER TABLE "contacts" ADD CONSTRAINT "contacts_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE POLICY "company_or_global_scope" ON "contacts" AS PERMISSIVE FOR ALL TO "app_user" USING ("contacts"."company_id" IS NULL OR company_id IN (SELECT company_id FROM user_company_access WHERE user_id = current_setting('app.user_id', true)::uuid)) WITH CHECK ("contacts"."company_id" IS NULL OR company_id IN (SELECT company_id FROM user_company_access WHERE user_id = current_setting('app.user_id', true)::uuid));

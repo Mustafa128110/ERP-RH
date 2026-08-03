@@ -1,0 +1,49 @@
+{
+  "meta": {
+    "system": "Royal Hardware color system v2",
+    "principle": "Navy = authority. Brass = the seal (max 10%). White = the stage. Ratio 70/20/10.",
+    "note": "Contrast ratios approximate — verify with a checker at build time."
+  },
+  "navy": {
+    "900": { "value": "#0A1A2C", "use": "pressed states, deepest bands" },
+    "800": { "value": "#10263F", "use": "PRIMARY — logo, buttons, headers, footer" },
+    "700": { "value": "#1E3A5C", "use": "secondary panels, hover on 800" },
+    "500": { "value": "#3D5A7E", "use": "charts, subdued graphics" },
+    "200": { "value": "#C9D4E2", "use": "tints, table stripes" },
+    "100": { "value": "#E8EDF4", "use": "info backgrounds, hero tint blocks" }
+  },
+  "brass": {
+    "700": { "value": "#8F6E2C", "use": "brass text on ivory (large only), pressed accent" },
+    "600": { "value": "#B08A3C", "use": "PRIMARY ACCENT — seals, badges, rules, add-to-cart" },
+    "400": { "value": "#C9A85C", "use": "brass on navy, hover on 600" },
+    "100": { "value": "#F5EEDD", "use": "genuine-badge backgrounds, highlight tints" }
+  },
+  "neutral": {
+    "white": { "value": "#FFFFFF", "use": "page + product background" },
+    "ivory": { "value": "#F7F5F0", "use": "alternate sections, cards" },
+    "sand":  { "value": "#E2DFD8", "use": "hairlines, dividers, borders" },
+    "steel": { "value": "#5B6470", "use": "secondary text, icons" },
+    "ink":   { "value": "#1C1E21", "use": "body text" }
+  },
+  "semantic": {
+    "success": { "value": "#1E7A4D", "tint": "#E6F2EC", "use": "in stock, confirmed" },
+    "warning": { "value": "#B4690E", "tint": "#FBF1E3", "use": "low stock, delays" },
+    "error":   { "value": "#B3261E", "tint": "#FAEAE9", "use": "out of stock, failures" },
+    "info":    { "value": "#1E4E79", "tint": "#E8EDF4", "use": "notices" }
+  },
+  "contrast_rules_approx": {
+    "navy-800 on white": "~13:1 — passes AA/AAA all text",
+    "ink on white": "~15:1 — body text standard",
+    "steel on white": "~5.9:1 — passes AA body; do not lighten further",
+    "brass-600 on white": "~3.5:1 — LARGE text & UI elements only; NEVER body",
+    "white on navy-800": "~13:1 — passes",
+    "brass-400 on navy-800": "~5:1 — headings/accents on navy, not long text",
+    "semantic text": "always the 'value' on white/tint, never on navy"
+  },
+  "hard_rules": {
+    "brass_share": "≤10% of any view; one brass moment per view",
+    "gradients": "never",
+    "text_on_brass_600": "white or navy-800 only",
+    "backgrounds": "white default · ivory alternating · navy bands for hero/footer only · never full navy pages"
+  }
+}
