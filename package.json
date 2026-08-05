@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run check:offline",
-    "check:offline": "tsx lib/format.check.ts && tsx lib/csv.check.ts && tsx lib/product-edit-rules.check.ts && tsx lib/contact-scope.check.ts && tsx lib/day-groups.check.ts && tsx lib/invoice-pdf.check.ts && tsx lib/whatsapp-templates.check.ts && tsx lib/whatsapp-agent/commands.check.ts && tsx lib/whatsapp-agent/match.check.ts && tsx lib/whatsapp-agent/pending.check.ts && tsx --conditions=react-server lib/actions/guard.check.ts && tsx --conditions=react-server lib/actions/resolve-refs.check.ts",
+    "check:offline": "tsx lib/format.check.ts && tsx lib/csv.check.ts && tsx lib/product-edit-rules.check.ts && tsx lib/contact-scope.check.ts && tsx lib/day-groups.check.ts && tsx lib/payment-constants.check.ts && tsx lib/invoice-pdf.check.ts && tsx lib/whatsapp-templates.check.ts && tsx lib/whatsapp-agent/commands.check.ts && tsx lib/whatsapp-agent/match.check.ts && tsx lib/whatsapp-agent/pending.check.ts && tsx --conditions=react-server lib/actions/guard.check.ts && tsx --conditions=react-server lib/actions/resolve-refs.check.ts",
     "check:db": "tsx --conditions=react-server --env-file=.env lib/cache.check.ts && tsx --conditions=react-server --env-file=.env lib/db/sequences.check.ts && tsx --conditions=react-server --env-file=.env lib/auth/session.check.ts && tsx --conditions=react-server --env-file=.env lib/queries/reports.check.ts && tsx --conditions=react-server --env-file=.env lib/queries/products.check.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

@@ -23,6 +23,7 @@ import { resolveContactId } from "@/lib/actions/resolve-refs";
 import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
+import { paymentLedgerSide } from "@/lib/payment-constants";
 import { recordAudit } from "@/lib/actions/audit";
 
 export type PaymentDirection = "made" | "received";
@@ -218,12 +219,13 @@ export async function createPayment(
       }
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
 
-      // A payment made against a contact settles part of what we owe them —
-      // mirror stock purchases' credit with the opposite entry (debit).
-      // Payment received has no receivable ledger to offset yet (sales/AR
-      // isn't wired up), so it's recorded as a document only, no ledger row.
-      if (direction === "made" && contactId) {
-        await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, debit: values.amount });
+      // A payment settles part of a balance, so it books the opposite side of
+      // whatever raised it: made offsets a purchase's credit with a debit,
+      // received offsets a sale's debit (`sales.ts`, the "Owes Us" column) with
+      // a credit. Without the credit side, taking money off a customer left
+      // what they owed us exactly where it was.
+      if (contactId) {
+        await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, ...paymentLedgerSide(direction, values.amount) });
       }
     });
   } catch (e) {
@@ -232,6 +234,7 @@ export async function createPayment(
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
   revalidatePath("/payments");
+  revalidatePath("/ledger");
   await recordAudit({
     action: "create",
     entity: `payment ${direction}`,
@@ -367,8 +370,8 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[]): Promise<Acti
         }
         await adjustSettlementBalance(tx, SETTLE_DIRECTION[r.direction], amount, r.bankAccountId, r.cashAccountId, r.chequeId, 1);
 
-        if (r.direction === "made" && contactId) {
-          await tx.insert(ledgerEntries).values({ companyId: r.companyId, documentId: doc.id, debit: amount });
+        if (contactId) {
+          await tx.insert(ledgerEntries).values({ companyId: r.companyId, documentId: doc.id, ...paymentLedgerSide(r.direction, amount) });
         }
       }
     });
@@ -379,6 +382,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[]): Promise<Acti
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
   revalidatePath("/payments");
+  revalidatePath("/ledger");
   await recordAudit({
     action: "create",
     entity: "payment",
@@ -447,16 +451,17 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
       }
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
 
-      // Re-sync the debit exactly like create — drop and re-add so editing the
+      // Re-sync the entry exactly like create — drop and re-add so editing the
       // amount/contact never leaves a stale ledger row behind.
       await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
-      if (existing.code === "PAYMENT_MADE" && contactId) {
-        await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, debit: values.amount });
+      if (contactId) {
+        await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
       }
     });
 
     invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
     revalidatePath("/payments");
+    revalidatePath("/ledger");
     await recordAudit({
       action: "update",
       entity: `payment ${direction}`,
@@ -508,6 +513,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques);
   revalidatePath("/payments");
+  revalidatePath("/ledger");
   await recordAudit({
     action: "delete",
     entity: `payment ${direction}`,

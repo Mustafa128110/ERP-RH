@@ -54,16 +54,28 @@ export async function listSuppliers() {
       .from(contacts)
       .leftJoin(companies, eq(contacts.companyId, companies.id))
       .where(await companyInScope(contacts.companyId)),
+    // The two balances come off ledger_entries, the same rows the Ledger screen
+    // reads, so a contact's figure here and there is one number arrived at once.
+    // Summing (grand_total - paid_amount) over the invoices instead — which is
+    // what this did — misses every payment taken on the Payments screen, because
+    // a standalone payment is its own document and never writes back to the
+    // invoice's paid_amount. A customer who had settled in full still showed the
+    // whole original balance under "Owes Us".
+    //
+    // A contact has one running account, so the net is split by sign rather than
+    // by document type: they owe us, or we owe them, never both at once.
+    // last_document and the count still speak for the invoices only — that's the
+    // trading history, and a payment is not a document anyone means by it.
     db.execute<{ contact_id: string; owes_us: string; we_owe: string; last_document: string | null; documents: number }>(sql`
       SELECT d.contact_id,
-             sum(CASE WHEN dt.code = 'SALES_INVOICE' THEN d.grand_total - d.paid_amount ELSE 0 END) AS owes_us,
-             sum(CASE WHEN dt.code = 'PURCHASE_INVOICE' THEN d.grand_total - d.paid_amount ELSE 0 END) AS we_owe,
-             max(d.document_date)::text AS last_document,
-             count(*)::int AS documents
+             greatest(coalesce(sum(l.debit - l.credit), 0), 0) AS owes_us,
+             greatest(coalesce(sum(l.credit - l.debit), 0), 0) AS we_owe,
+             (max(d.document_date) FILTER (WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')))::text AS last_document,
+             count(DISTINCT d.id) FILTER (WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE'))::int AS documents
         FROM documents d
         JOIN document_types dt ON dt.id = d.document_type_id
+        LEFT JOIN ledger_entries l ON l.document_id = d.id
        WHERE d.contact_id IS NOT NULL
-         AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')
        GROUP BY d.contact_id`),
   ]);
 

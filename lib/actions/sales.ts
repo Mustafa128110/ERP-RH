@@ -137,10 +137,24 @@ export async function listChequesForSales(currentDocumentId?: string) {
 // line the sale form shows under the grand total, so the total handed over at
 // the counter is the whole of what's due, not just today's basket.
 //
-// Measured off the invoices themselves (grand total minus what's been paid)
-// rather than off ledger_entries: the ledger only carries a row while something
-// is outstanding, and this has to agree with the Balance column on the invoice
-// list, which is computed the same way.
+// Read off ledger_entries, which is the whole of what has moved on this
+// contact's books: the sale's debit, a payment received's credit, and any
+// journal entry posted from the Ledger screen. It used to sum
+// (grand_total - paid_amount) over the invoices instead, and that number only
+// moves when someone edits the invoice — a payment taken on the Payments screen
+// never writes back to `documents.paid_amount`, so a customer who had settled up
+// still arrived at the counter carrying their old balance while the Ledger
+// showed them at nil.
+//
+// The per-invoice Balance column on the invoice list stays as it was, and
+// should: an unallocated payment doesn't belong to any one invoice. This is the
+// contact's running total, the same figure the Ledger's "Owes Us" column shows,
+// so the two screens now agree by construction rather than by coincidence.
+//
+// Sign follows the ledger convention (credit - debit, positive = we owe them),
+// inverted here because this asks the receivable question. A contact who is also
+// a supplier nets across both — one running account, which is what the Ledger
+// already reports for them — and a net payable clamps to zero, showing no line.
 export async function getCustomerOutstanding(contactId: string, excludeSaleId?: string): Promise<number> {
   if (!contactId) return 0;
   const session = await getSession();
@@ -148,18 +162,17 @@ export async function getCustomerOutstanding(contactId: string, excludeSaleId?: 
 
   const [row] = await db
     .select({
-      owed: sql<string>`coalesce(sum(${documents.grandTotal} - ${documents.paidAmount}), 0)`,
+      owed: sql<string>`coalesce(sum(${ledgerEntries.debit} - ${ledgerEntries.credit}), 0)`,
     })
-    .from(documents)
-    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .from(ledgerEntries)
+    .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
     .where(
       and(
-        eq(documentTypes.code, "SALES_INVOICE"),
         eq(documents.contactId, contactId),
         // Editing an invoice must not count that invoice as part of what was
         // owed beforehand.
         excludeSaleId ? ne(documents.id, excludeSaleId) : undefined,
-        await companyInScope(documents.companyId),
+        await companyInScope(ledgerEntries.companyId),
       ),
     );
 

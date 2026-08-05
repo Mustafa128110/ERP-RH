@@ -337,6 +337,13 @@
       "when": 1785493853432,
       "tag": "0047_whatsapp_handoff_status",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785888000000,
+      "tag": "0048_backfill_payments_received",
+      "breakpoints": true
     }
   ]
 }
