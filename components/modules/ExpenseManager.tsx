@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -164,6 +165,8 @@ export function ExpenseManager({
     setModal({ kind: "edit", expense });
     setEditChequeOptions(await listChequesForExpenses(expense.id));
   }
+
+  useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-4">

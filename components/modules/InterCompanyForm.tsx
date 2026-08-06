@@ -265,7 +265,7 @@ export function InterCompanyFormPage({
                       data-cell={`${r}-2`}
                       type="number"
                       min="0"
-                      step="0.001"
+                      step="0.01"
                       placeholder="Qty"
                       value={line.quantity}
                       onChange={(e) => updateLine(r, { quantity: e.target.value })}
@@ -277,7 +277,7 @@ export function InterCompanyFormPage({
                       data-cell={`${r}-3`}
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="0.1"
                       placeholder="Rate"
                       value={line.rate}
                       onChange={(e) => updateLine(r, { rate: e.target.value })}

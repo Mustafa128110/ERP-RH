@@ -3,7 +3,8 @@
 import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { bankAccounts, cashAccounts, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
+import { bankAccounts, cashAccounts, chequeRegister, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
+import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
@@ -32,11 +33,16 @@ const inReason = (key: string) => `${TRANSFER_REASON} in ${key}`;
 
 // The form posts an account as "cash:<id>" or "bank:<id>" — one dropdown listing
 // both kinds beats two dropdowns and a radio for picking one account.
-function parseAccount(value: string): { bankAccountId: string | null; cashAccountId: string | null } | null {
+// "cheque:<id>" is a third kind, and only ever on the side the money leaves:
+// handing over a cheque is how the money goes, and the cheque is spent doing it.
+// It carries no account of its own — where the money actually comes from is the
+// account the cheque is drawn on, which settlement.ts resolves.
+function parseAccount(value: string): { bankAccountId: string | null; cashAccountId: string | null; chequeId: string | null } | null {
   const [kind, id] = value.split(":");
   if (!id) return null;
-  if (kind === "cash") return { bankAccountId: null, cashAccountId: id };
-  if (kind === "bank") return { bankAccountId: id, cashAccountId: null };
+  if (kind === "cash") return { bankAccountId: null, cashAccountId: id, chequeId: null };
+  if (kind === "bank") return { bankAccountId: id, cashAccountId: null, chequeId: null };
+  if (kind === "cheque") return { bankAccountId: null, cashAccountId: null, chequeId: id };
   return null;
 }
 
@@ -126,6 +132,8 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       const from = parseAccount(fromValue);
       const to = parseAccount(toValue);
       if (!from || !to) return { error: "Account not recognised." };
+      // A cheque is a way of paying out, not a place money lands in.
+      if (to.chequeId) return { error: "Money can't be transferred into a cheque — pick the account it lands in." };
 
       const documentType = await ensureDocumentType({
         companyId,
@@ -163,7 +171,17 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
             .returning({ id: documents.id });
 
           await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
-          await adjustSettlementBalance(tx, side.direction, total, side.account.bankAccountId, side.account.cashAccountId, null, 1);
+          await adjustSettlementBalance(tx, side.direction, total, side.account.bankAccountId, side.account.cashAccountId, side.account.chequeId, 1);
+
+          // The cheque went out with the money: tied to the document it settled
+          // and marked spent, so it leaves the register's working list and
+          // can't be picked again for something else.
+          if (side.account.chequeId) {
+            await tx
+              .update(chequeRegister)
+              .set({ documentId: doc.id, status: chequeStatusAfterSettling(side.direction) })
+              .where(eq(chequeRegister.id, side.account.chequeId));
+          }
         }
       });
 

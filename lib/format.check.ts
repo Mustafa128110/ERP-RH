@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatDate, money, qty, resolveAdjustment, round1, toISODate } from "./format";
+import { formatDate, landedUnitCost, money, perUnitShare, qty, resolveAdjustment, round1, toISODate } from "./format";
 
 // The formatting rules the whole app now reads money, quantities and dates
 // through. No database needed:
@@ -41,6 +41,42 @@ assert.equal(qty("0.125"), "0.13");
 assert.equal(round1(10.04), 10);
 assert.equal(round1(10.05), 10.1);
 assert.equal(round1(10.449), 10.4);
+
+// --- Landed cost: the delivery's adjustments spread over the whole load -------
+assert.equal(perUnitShare(500, 40), 12.5);
+assert.equal(perUnitShare(500, 0), 0, "no units means no share, not Infinity");
+assert.equal(perUnitShare(0, 40), 0);
+assert.equal(perUnitShare(-200, 40), -5, "a discount-heavy load lowers the cost");
+// Whole rupees, always upward — 700.4 costs 701, never 700.
+assert.equal(landedUnitCost(700, 0.4), 701);
+assert.equal(landedUnitCost(700, 0.6), 701);
+assert.equal(landedUnitCost(700, 0), 700, "an exact figure is left alone");
+assert.equal(landedUnitCost(0, 35), 35);
+
+// Priced out line by line the landed costs cover the invoice, and — because
+// each one rounds up — cover it with a little to spare, never less.
+// 3 x 100 + 7 x 250 = 2050 of goods, +500 shipping, -300 discount, +150 tax.
+{
+  const lines = [
+    { quantity: 3, unitPrice: 100 },
+    { quantity: 7, unitPrice: 250 },
+  ];
+  const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+  const grandTotal = subtotal + 500 - 300 + 150;
+  const perUnit = perUnitShare(500 - 300 + 150, 10);
+  const landed = lines.reduce((sum, l) => sum + landedUnitCost(l.unitPrice, perUnit) * l.quantity, 0);
+  // 35 a unit exactly here, so this one lands on the total rather than over it.
+  assert.equal(round1(landed), grandTotal);
+
+  // A share that doesn't divide evenly is the case worth pinning: 5 units and
+  // 12 rupees of freight is 2.4 each, charged as 3.
+  const odd = [{ quantity: 5, unitPrice: 100 }];
+  const oddPerUnit = perUnitShare(12, 5);
+  const oddLanded = odd.reduce((sum, l) => sum + landedUnitCost(l.unitPrice, oddPerUnit) * l.quantity, 0);
+  assert.equal(oddLanded, 515);
+  assert.ok(oddLanded >= 100 * 5 + 12, "never under what the purchase cost");
+  assert.ok(oddLanded - (100 * 5 + 12) < odd[0].quantity, "and over it by less than a rupee a unit");
+}
 
 // --- Discount / tax: one box, "%" is what makes it a percentage --------------
 assert.equal(resolveAdjustment("500", 10000), 500, "bare number is an amount");

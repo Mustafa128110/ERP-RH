@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { StockPurchaseCreateForm, DeleteStockPurchaseButton } from "@/components/modules/StockPurchaseForm";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
 import { Dialog } from "@/components/ui/Dialog";
@@ -21,7 +22,7 @@ type PurchaseDetail = NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>;
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-type PurchaseItemRow = { itemName: string; qty: string; unitPrice: string; lineTotal: string };
+type PurchaseItemRow = { itemName: string; qty: string; unitPrice: string; unitCost: string; lineTotal: string };
 type PurchaseBreakdown = {
   subtotal: string;
   discount: string | null;
@@ -157,13 +158,18 @@ export function StockPurchaseManager({
         );
       },
     },
-    { key: "company", label: "Company" },
-    { key: "supplier", label: "Supplier" },
+    // Date second: after the number, it's what a row gets found by. Supplier and
+    // company go to the far end — they're what a row is checked against once
+    // it's found, not what it's scanned for.
+    { key: "date", label: "Date" },
     { key: "item", label: "Item", render: (row) => stacked(row, (it) => it.itemName) },
     { key: "qty", label: "Qty", align: "right", render: (row) => stacked(row, (it) => it.qty) },
     { key: "unitPrice", label: "Unit Price", align: "right", render: (row) => stacked(row, (it) => it.unitPrice) },
+    // Price plus this unit's share of the delivery's shipping, discount and tax
+    // — what the piece actually cost, and what the rate list quotes the next
+    // sale from.
+    { key: "unitCost", label: "Unit Cost", align: "right", render: (row) => stacked(row, (it) => it.unitCost) },
     { key: "lineTotal", label: "Item Total", align: "right", render: (row) => stacked(row, (it) => it.lineTotal) },
-    { key: "date", label: "Date" },
     {
       key: "total",
       label: "Total",
@@ -175,7 +181,11 @@ export function StockPurchaseManager({
         </div>
       ),
     },
+    { key: "supplier", label: "Supplier" },
+    { key: "company", label: "Company" },
   ];
+
+  useNewEntry(() => setOpen(true));
 
   return (
     <div className="flex h-full flex-col gap-4">

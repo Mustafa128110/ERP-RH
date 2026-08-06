@@ -39,7 +39,7 @@ export default async function Page({
           // The date range is the whole of most reports' filtering, so it comes
           // from the shared bar rather than being rebuilt here. No name box:
           // finding a row inside the result is the table's own instant search.
-          <ListFilters>
+          <ListFilters key="filters">
             <StockFilter param="company" allLabel="All companies" options={companyRows.map((c) => ({ id: c.id, name: c.name }))} />
             {LOCATION_AWARE.has(reportType) && (
               <StockFilter key="location" param="location" allLabel="All locations" options={locationRows.map((l) => ({ id: l.id, name: l.name }))} />

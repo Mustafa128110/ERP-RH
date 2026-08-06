@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import type { CategoryNode } from "@/lib/actions/categories";
 import { saveCategoryTree, createCategoriesBatch } from "@/lib/actions/categories";
 import { CategoryTree } from "@/components/modules/CategoryTree";
@@ -106,6 +107,8 @@ export function CategoryManager({ roots }: { roots: CategoryNode[] }) {
       router.refresh();
     }
   }
+
+  useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-4">

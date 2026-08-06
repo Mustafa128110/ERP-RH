@@ -97,7 +97,7 @@ export function ContactEditForm({
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Credit Limit</span>
-        <input name="creditLimit" type="number" min="0" step="0.01" defaultValue={defaults?.creditLimit ?? "0"} className={inputClass} />
+        <input name="creditLimit" type="number" min="0" step="0.1" defaultValue={defaults?.creditLimit ?? "0"} className={inputClass} />
       </label>
       <label className="flex items-center gap-2 text-sm">
         <input name="isActive" type="checkbox" defaultChecked={defaults?.isActive ?? true} className="h-5 w-5 rounded border-sand" />
@@ -200,7 +200,7 @@ export function ContactBatchAddDialog({
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="0.1"
               value={row.creditLimit}
               onChange={(e) => update({ creditLimit: e.target.value })}
               className={batchInputClass}
@@ -390,7 +390,7 @@ export function ContactsBatchEditDialog({
                     <input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="0.1"
                       value={row.creditLimit ?? "0"}
                       onChange={(e) => update(i, { creditLimit: e.target.value })}
                       className={batchInputClass}

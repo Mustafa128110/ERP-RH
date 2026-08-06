@@ -133,11 +133,15 @@ export const getExpenseCategories = scopedLookup(CACHE.expenseCategories, expens
   db.select().from(expenseCategories).where(w),
 );
 
-// `rate` is the item's most recent purchase price, read from the rate_list view
-// (purchase_rate_1) — the sale grid shows it as the reference price next to the
-// price actually charged. The view isn't modeled in schema.ts, so it's a raw
-// query merged in JS rather than a correlated subquery per item (rate_list
-// already runs a LATERAL per item; nesting it per row would rescan it n times).
+// `rate` is what the item last cost landed — the purchase price plus its share
+// of that delivery's shipping, discount and tax, read from the rate_list view
+// (purchase_rate_1, see drizzle/0049). The sale grid shows it as the reference
+// price beside the price actually charged, and freight is part of what the goods
+// cost: quoting the bare invoice price there is how a sale ends up under water.
+//
+// The view isn't modeled in schema.ts, so it's a raw query merged in JS rather
+// than a correlated subquery per item (rate_list already runs a LATERAL per
+// item; nesting it per row would rescan it n times).
 export const getItemOptions = scopedLookup(CACHE.items, items.companyId, async (w) => {
   const [rows, rates, salesRates] = await Promise.all([
     db.select({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId }).from(items).where(w),

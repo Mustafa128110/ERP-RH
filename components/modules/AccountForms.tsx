@@ -17,7 +17,6 @@ import {
   type ChequeBatchRow,
 } from "@/lib/actions/accounts";
 import { CHEQUE_TYPES, CHEQUE_STATUSES } from "@/lib/cheque-constants";
-import { ContactBatchAddDialog, type CreatedContact } from "@/components/modules/SupplierForm";
 import { QuickAddButton } from "@/components/ui/QuickAddSelect";
 import { quickAddButtonClass } from "@/components/ui/form-styles";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
@@ -83,11 +82,11 @@ function BankAccountFields({ defaults, companyOptions }: { defaults?: BankAccoun
           its opening balance. */}
       <label className={labelClass}>
         <span className={labelTextClass}>Opening balance</span>
-        <input name="openingBalance" type="number" step="0.01" defaultValue={defaults?.openingBalance ?? "0"} className={inputClass} />
+        <input name="openingBalance" type="number" step="0.1" defaultValue={defaults?.openingBalance ?? "0"} className={inputClass} />
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Current balance</span>
-        <input name="currentBalance" type="number" step="0.01" defaultValue={defaults?.currentBalance ?? "0"} className={inputClass} />
+        <input name="currentBalance" type="number" step="0.1" defaultValue={defaults?.currentBalance ?? "0"} className={inputClass} />
         <span className="text-xs text-steel">Moves on its own with payments and expenses — set it by hand only to correct a drift.</span>
       </label>
       <label className="flex items-center gap-2 text-sm">
@@ -238,7 +237,7 @@ export function BankAccountBatchAddDialog({
             <input value={row.iban} onChange={(e) => update({ iban: e.target.value })} className={batchInputClass} />
           </td>
           <td className={batchCellClass}>
-            <input type="number" step="0.01" value={row.openingBalance} onChange={(e) => update({ openingBalance: e.target.value })} className={batchInputClass} />
+            <input type="number" step="0.1" value={row.openingBalance} onChange={(e) => update({ openingBalance: e.target.value })} className={batchInputClass} />
           </td>
           <td className={`${batchCellClass} text-center`}>
             <input type="checkbox" checked={row.isDefault} onChange={(e) => update({ isDefault: e.target.checked })} className="h-5 w-5 rounded border-sand" />
@@ -286,11 +285,11 @@ function CashAccountFields({ defaults, companyOptions }: { defaults?: CashAccoun
       {/* Same as bank accounts: both balances post, so an edit can't blank them. */}
       <label className={labelClass}>
         <span className={labelTextClass}>Opening balance</span>
-        <input name="openingBalance" type="number" step="0.01" defaultValue={defaults?.openingBalance ?? "0"} className={inputClass} />
+        <input name="openingBalance" type="number" step="0.1" defaultValue={defaults?.openingBalance ?? "0"} className={inputClass} />
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Current balance</span>
-        <input name="currentBalance" type="number" step="0.01" defaultValue={defaults?.currentBalance ?? "0"} className={inputClass} />
+        <input name="currentBalance" type="number" step="0.1" defaultValue={defaults?.currentBalance ?? "0"} className={inputClass} />
         <span className="text-xs text-steel">Moves on its own with payments and expenses — set it by hand only to correct a drift.</span>
       </label>
       <label className="flex items-center gap-2 text-sm">
@@ -413,7 +412,7 @@ export function CashAccountBatchAddDialog({
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Cash in Hand" />
           </td>
           <td className={batchCellClass}>
-            <input type="number" step="0.01" value={row.openingBalance} onChange={(e) => update({ openingBalance: e.target.value })} className={batchInputClass} />
+            <input type="number" step="0.1" value={row.openingBalance} onChange={(e) => update({ openingBalance: e.target.value })} className={batchInputClass} />
           </td>
           <td className={`${batchCellClass} text-center`}>
             <input type="checkbox" checked={row.isDefault} onChange={(e) => update({ isDefault: e.target.checked })} className="h-5 w-5 rounded border-sand" />
@@ -522,7 +521,7 @@ function ChequeFields({
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Amount</span>
-        <input name="amount" type="number" step="0.01" required defaultValue={defaults?.amount} className={inputClass} />
+        <input name="amount" type="number" step="0.1" required defaultValue={defaults?.amount} className={inputClass} />
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Cheque type</span>
@@ -596,13 +595,12 @@ export function ChequeBatchAddDialog({
   const defaultCompanyId = companyOptions[0]?.id ?? "";
   // Bank accounts added from the toolbar flow into every row's dropdown — a bank
   // account needs a title and a number, so it can't be created from a name typed
-  // into a cell. A contact can, so the contact cell is a ComboBox that accepts
-  // free text and lets the server create it (the toolbar button stays for the
-  // times you want to fill in the rest of the contact while you're here).
-  // Cheques themselves have no page beyond Accounts, so they're the thing being
-  // batch-created here, not a quick-add target.
+  // into a cell. A contact can: the contact cell is a ComboBox that takes free
+  // text and lets the server create it, which is why there's no + Add Contact
+  // button up here. Cheques themselves have no page beyond Accounts, so they're
+  // the thing being batch-created here, not a quick-add target.
   const [bankOpts, setBankOpts] = useState(bankAccountOptions);
-  const [contactOpts, setContactOpts] = useState(contactOptions);
+  const contactOpts = contactOptions;
 
   const emptyRow = (): ChequeBatchRowLocal => ({
     companyId: defaultCompanyId,
@@ -626,32 +624,13 @@ export function ChequeBatchAddDialog({
       emptyRow={emptyRow}
       headers={["Company", "Bank Account", "Contact", "Cheque #", "Date", "Amount", "Type", "Status", "By Company"]}
       toolbar={
-        <>
-          <QuickAddButton<CreatedBankAccount>
-            label="+ Add Bank Account"
-            onCreated={(rows) => setBankOpts((prev) => [...rows.map((r) => ({ id: r.id, label: r.name, companyId: r.companyId })), ...prev])}
-            renderDialog={({ onClose, onCreated }) => (
-              <BankAccountBatchAddDialog
-                companyOptions={companyOptions}
-                initialRows={1}
-                onClose={onClose}
-                onDone={(created) => onCreated(created ?? [])}
-              />
-            )}
-          />
-          <QuickAddButton<CreatedContact>
-            label="+ Add Contact"
-            onCreated={(rows) => setContactOpts((prev) => [...rows.map((r) => ({ id: r.id, displayName: r.name, companyId: r.companyId ?? null })), ...prev])}
-            renderDialog={({ onClose, onCreated }) => (
-              <ContactBatchAddDialog
-                companyOptions={companyOptions}
-                initialRows={1}
-                onClose={onClose}
-                onDone={(created) => onCreated(created ?? [])}
-              />
-            )}
-          />
-        </>
+        <QuickAddButton<CreatedBankAccount>
+          label="+ Add Bank Account"
+          onCreated={(rows) => setBankOpts((prev) => [...rows.map((r) => ({ id: r.id, label: r.name, companyId: r.companyId })), ...prev])}
+          renderDialog={({ onClose, onCreated }) => (
+            <BankAccountBatchAddDialog companyOptions={companyOptions} initialRows={1} onClose={onClose} onDone={(created) => onCreated(created ?? [])} />
+          )}
+        />
       }
       onSubmit={async (rows) => {
         const values: ChequeBatchRow[] = rows.map((r) => ({
@@ -728,7 +707,7 @@ export function ChequeBatchAddDialog({
             <DateField value={row.chequeDate} onChange={(chequeDate) => update({ chequeDate })} className={batchInputClass} />
           </td>
           <td className={batchCellClass}>
-            <input type="number" step="0.01" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />
+            <input type="number" step="0.1" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />
           </td>
           <td className={batchCellClass}>
             <select value={row.chequeType} onChange={(e) => update({ chequeType: e.target.value })} className={batchInputClass}>

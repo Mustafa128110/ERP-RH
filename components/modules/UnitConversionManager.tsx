@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { UnitConversionEditForm, DeleteUnitConversionButton, UnitConversionBatchAddDialog } from "@/components/modules/UnitConversionForm";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -62,6 +63,8 @@ export function UnitConversionManager({
     fromUnit: c.fromUnitName ?? "—",
     multiplier: c.multiplier,
   }));
+
+  useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-4">

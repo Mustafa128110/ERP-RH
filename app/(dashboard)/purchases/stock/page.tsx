@@ -27,6 +27,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
       itemName: it.itemName,
       qty: `${qty(it.quantity)} ${it.unitSymbol ?? ""}`.trim(),
       unitPrice: money(it.unitPrice),
+      // Purchases saved before the shipping share was worked out per line have
+      // no cost of their own; the price is the closest true thing to show.
+      unitCost: money(it.unitCost ?? it.unitPrice),
       lineTotal: money(it.lineTotal),
     })),
   }));

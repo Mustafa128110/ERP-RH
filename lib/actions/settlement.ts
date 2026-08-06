@@ -31,19 +31,27 @@ export async function adjustSettlementBalance(
   } else if (cashAccountId) {
     await tx.update(cashAccounts).set({ currentBalance: sql`${cashAccounts.currentBalance} + ${delta}` }).where(eq(cashAccounts.id, cashAccountId));
   } else if (chequeId) {
-    // Resolving the cheque's bank account in a subquery rather than a separate
-    // SELECT keeps this to one statement. Every statement inside a transaction
-    // is its own ~170ms round trip, and this runs on the create, update and
-    // delete path of payments, purchases, sales and expenses alike. A cheque
-    // with no bank account matches no rows, which is the same no-op the
-    // explicit null check produced.
+    // Only our own cheques move a bank balance, and only the account they're
+    // drawn on: writing one out is money leaving that account the moment it's
+    // handed over. A cheque someone gave us is a promise from their bank, not a
+    // balance in ours — it does nothing here until it's deposited and clears,
+    // which is why `issued_by_company` is part of the match rather than just the
+    // bank account.
+    //
+    // Resolving that in a subquery rather than a separate SELECT keeps this to
+    // one statement. Every statement inside a transaction is its own ~170ms
+    // round trip, and this runs on the create, update and delete path of
+    // payments, purchases, sales and expenses alike. A cheque that isn't ours,
+    // or has no bank account, matches no rows — the same no-op an explicit null
+    // check produced.
     await tx
       .update(bankAccounts)
       .set({ currentBalance: sql`${bankAccounts.currentBalance} + ${delta}` })
       .where(
         eq(
           bankAccounts.id,
-          sql`(select ${chequeRegister.bankAccountId} from ${chequeRegister} where ${chequeRegister.id} = ${chequeId})`,
+          sql`(select ${chequeRegister.bankAccountId} from ${chequeRegister}
+               where ${chequeRegister.id} = ${chequeId} and ${chequeRegister.issuedByCompany} = true)`,
         ),
       );
   }

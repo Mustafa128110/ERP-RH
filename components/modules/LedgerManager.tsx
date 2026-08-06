@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { createLedgerEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/actions/ledger";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -12,6 +13,8 @@ import { DateField } from "@/components/ui/DateField";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass } from "@/components/ui/form-styles";
 import type { ColumnDef, Row } from "@/lib/table";
 import { money, todayISO } from "@/lib/format";
+import { downloadNodeAsPdf, downloadNodeAsPng } from "@/lib/node-download";
+import { ContactStatementDocument, SheetRenderer, type Letterhead } from "@/components/modules/LedgerSheet";
 import { inCompany } from "@/lib/contact-scope";
 
 const readOnlyClass = `${fieldClass} flex items-center bg-ivory text-steel`;
@@ -37,6 +40,17 @@ const buildColumns = (byRowId: Map<string, ContactLedgerBalance>): ColumnDef[] =
   { key: "debtBalance", label: "Owes Us", align: "right" },
 ];
 
+// Sent to the contact to be checked against their own book, so it goes out one
+// contact at a time rather than as a page of everybody's balances.
+const statementColumn = (byRowId: Map<string, ContactLedgerBalance>, buttons: (contact: ContactLedgerBalance) => ReactNode): ColumnDef => ({
+  key: "statement",
+  label: "Statement",
+  render: (row) => {
+    const balance = byRowId.get(String(row.id));
+    return balance ? <div className="flex gap-1.5">{buttons(balance)}</div> : null;
+  },
+});
+
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type ModalState = { kind: "add" } | { kind: "edit"; balance: ContactLedgerBalance } | null;
@@ -45,17 +59,74 @@ export function LedgerManager({
   balances,
   companyOptions,
   contactOptions,
+  letterhead,
   filter,
 }: {
   balances: ContactLedgerBalance[];
   companyOptions: Option[];
   contactOptions: ScopedOption[];
+  // Whose name goes at the top of anything printed from here. One name, not the
+  // internal company a balance is booked under — the same reasoning the invoice
+  // generator states at INVOICE_COMPANY_NAME.
+  letterhead: Letterhead;
   // The company filter, built by the page — it drives a query param, so the
   // filtering happens up there rather than over the rows already handed down.
   filter?: React.ReactNode;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
   const router = useRouter();
+  // Whose statement is being taken, and as what. Null except for the moment the
+  // document is mounted off-screen and photographed.
+  const [sheet, setSheet] = useState<{ format: "pdf" | "png"; contact: ContactLedgerBalance } | null>(null);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  // Above the off-screen copy rather than inside it: development mounts that
+  // copy twice, and each mount is its own component with its own refs.
+  const capturing = useRef(false);
+
+  async function captureSheet(node: HTMLElement) {
+    if (!sheet || capturing.current) return;
+    capturing.current = true;
+    setSheetError(null);
+    // Named for what it is, so a folder of these is readable: the contact and
+    // the date it was taken.
+    const who = sheet.contact.displayName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    const fileName = `${who}-statement-${todayISO()}.${sheet.format}`;
+    try {
+      if (sheet.format === "pdf") await downloadNodeAsPdf(node, fileName);
+      else await downloadNodeAsPng(node, fileName);
+    } catch {
+      // Drawing the page into an image is the browser's job and it can decline.
+      // Said out loud rather than swallowed: a button that quietly does nothing
+      // is the worst version of this, and it is the version that shipped first.
+      setSheetError("Couldn't build that file. Try again, or use the browser's print dialog.");
+    } finally {
+      capturing.current = false;
+      setSheet(null);
+    }
+  }
+
+  // A statement goes out one contact at a time, so these live on the row rather
+  // than in the header.
+  const downloadButtons = (contact: ContactLedgerBalance, className: string) =>
+    (["pdf", "png"] as const).map((format) => (
+      <button
+        key={format}
+        type="button"
+        title={`Download ${contact.displayName}'s statement as ${format.toUpperCase()}`}
+        aria-label={`Download ${contact.displayName} statement as ${format.toUpperCase()}`}
+        disabled={sheet !== null}
+        // Both stopped: the cell opens the contact's row on click, and the row
+        // takes the highlight on mousedown. Neither should fire for this button.
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setSheet({ format, contact });
+        }}
+        className={className}
+      >
+        {sheet?.format === format && sheet.contact.contactId === contact.contactId ? "…" : format.toUpperCase()}
+      </button>
+    ));
 
   function close() {
     setModal(null);
@@ -63,7 +134,12 @@ export function LedgerManager({
   }
 
   const byRowId = new Map(balances.map((b) => [`${b.companyId}:${b.contactId}`, b]));
-  const columns = buildColumns(byRowId);
+  const columns = [
+    ...buildColumns(byRowId),
+    statementColumn(byRowId, (contact) =>
+      downloadButtons(contact, "rounded border border-sand px-2 py-1 text-xs font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"),
+    ),
+  ];
 
   const rows: Row[] = balances.map((b) => ({
     // A contact can hold a balance in both companies, so the row key is the pair
@@ -77,6 +153,8 @@ export function LedgerManager({
     debtBalance: b.balance < 0 ? money(-b.balance) : "—",
   }));
 
+  useNewEntry(() => setModal({ kind: "add" }));
+
   return (
     <div className="flex h-full flex-col gap-4">
       <PageHeader title="Ledger" subtitle={`${balances.length} contact(s) with ledger activity`}>
@@ -85,6 +163,14 @@ export function LedgerManager({
           + Add Entry
         </button>
       </PageHeader>
+
+      {sheetError && <p className="shrink-0 text-sm text-error">{sheetError}</p>}
+
+      {sheet && (
+        <SheetRenderer onReady={(node) => void captureSheet(node)}>
+          <ContactStatementDocument company={letterhead} row={sheet.contact} />
+        </SheetRenderer>
+      )}
 
       <DataTable
         columns={columns}
@@ -225,10 +311,10 @@ function LedgerEntryForm({
           <input
             name="amount"
             type="number"
-            min="0.01"
-            step="0.01"
+            min="0.1"
+            step="0.1"
             required
-            defaultValue={balance ? Math.abs(balance.balance).toFixed(2) : undefined}
+            defaultValue={balance ? Math.abs(balance.balance).toFixed(1) : undefined}
             className={fieldClass}
           />
         </label>

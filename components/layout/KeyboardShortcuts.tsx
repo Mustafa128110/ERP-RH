@@ -46,6 +46,29 @@ const SEQUENCE_MS = 1200;
 export const SHORTCUTS_EVENT = "erp:shortcuts";
 export const openShortcuts = () => window.dispatchEvent(new Event(SHORTCUTS_EVENT));
 
+// Alt+N — "one more of whatever this page makes". Ctrl+N is Chrome's own (new
+// window) and never reaches a page, and Alt is what lets it work from inside a
+// text box, which is where the cursor always is in a half-typed purchase.
+export const NEW_ENTRY_EVENT = "erp:new";
+
+// What each screen does about Alt+N, registered by the screen itself rather than
+// guessed at from here: a list opens its add popup, and a form already inside a
+// popup saves and starts the next one. `inDialog` is which of the two this is —
+// with a popup on screen the list behind it must stay quiet, or Alt+N would open
+// a second one on top of the first.
+export function useNewEntry(handler: () => void, inDialog = false) {
+  useEffect(() => {
+    function onNew() {
+      if (!!document.querySelector('[role="dialog"]') !== inDialog) return;
+      handler();
+    }
+    window.addEventListener(NEW_ENTRY_EVENT, onNew);
+    return () => window.removeEventListener(NEW_ENTRY_EVENT, onNew);
+    // No dep array: the handler closes over current state, and re-subscribing a
+    // single listener costs nothing next to reading a stale `open`.
+  });
+}
+
 export function KeyboardShortcuts() {
   const router = useRouter();
   const [helpOpen, setHelpOpen] = useState(false);
@@ -55,6 +78,22 @@ export function KeyboardShortcuts() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      // Up/Down in a number field steps its value. In a grid that means arrowing
+      // between rows quietly rewrites a price or a quantity, and nothing here
+      // wants that — the keys stay a way to move, never a way to edit. No
+      // return: the grid's own arrow handling still runs, only the step is off.
+      if ((e.key === "ArrowUp" || e.key === "ArrowDown") && e.target instanceof HTMLInputElement && e.target.type === "number") {
+        e.preventDefault();
+      }
+
+      // Alt+N: whoever is listening decides what "new" means here. Fires from
+      // inside a field too — the purchase popup's Next Purchase is the point.
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        window.dispatchEvent(new Event(NEW_ENTRY_EVENT));
+        return;
+      }
+
       // --- Modified keys: work everywhere, including inside a field ----------
       if (e.ctrlKey || e.metaKey) {
         const el = e.target;

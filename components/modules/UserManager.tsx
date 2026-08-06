@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { getUserDetail, type UserListItem } from "@/lib/actions/users";
 import { UserBatchAddDialog } from "@/components/modules/UserForm";
 import { UserEditForm, UserRoleAssignments, DeleteUserButton } from "@/components/modules/UserDetail";
@@ -59,6 +60,8 @@ export function UserManager({
         : u.roleAssignments.map((a) => `${a.roleName}${a.companyName ? ` (${a.companyName})` : " (Global)"}`).join(", "),
     status: u.status.charAt(0).toUpperCase() + u.status.slice(1),
   }));
+
+  useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-4">

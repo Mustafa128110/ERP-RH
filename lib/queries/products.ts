@@ -22,10 +22,13 @@ export interface ProductRateRow {
   id: string;
   name: string;
   categoryId: string | null;
-  // A real purchase invoice always wins here, straight from rate_list. With no
-  // purchase history the fallback is the cost typed into the sale's rate column
-  // (document_lines.unit_cost) — the only rate an item first seen on a sale line
-  // has. Once it is actually purchased, rate_list takes over.
+  // What the item last cost landed — price plus its share of that delivery's
+  // shipping, discount and tax (drizzle/0049) — straight from rate_list, and a
+  // real purchase
+  // always wins here. With no purchase history the fallback is the cost typed
+  // into the sale's rate column (document_lines.unit_cost) — the only rate an
+  // item first seen on a sale line has. Once it is actually purchased,
+  // rate_list takes over.
   purchaseRate1: string | null;
   purchaseRate2: string | null;
   purchaseRate3: string | null;

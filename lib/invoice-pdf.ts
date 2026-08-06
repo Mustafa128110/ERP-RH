@@ -61,17 +61,20 @@ const MARGIN = 15;
 // company the sale is booked under internally. The document's own companyName
 // is deliberately not read here — it's an accounting fact, not the name the
 // customer is meant to see. The on-screen copy still shows the real one.
-const INVOICE_COMPANY_NAME = "Royal Hardware";
+// Exported because it is not the invoice's fact: it's the name at the top of
+// anything that leaves the building, statements and balance sheets included.
+export const INVOICE_COMPANY_NAME = "Royal Hardware";
 
-// The invoice number and nothing else: SI-0042.pdf.
-export function invoiceFileName(invoice: Invoice) {
+// The invoice number and nothing else: SI-0042.pdf, or SI-0042.png for the
+// image copy.
+export function invoiceFileName(invoice: Invoice, extension = "pdf") {
   // Anything a filesystem objects to becomes a hyphen. Document numbers are
   // "SI-0007" today, but the number can be typed by hand on a purchase-style
   // entry, so this doesn't assume the shape. A number made entirely of such
   // characters would sanitise away to nothing and produce a bare ".pdf", which
   // downloads as an extensionless hidden file — hence the fallback.
   const safe = invoice.number.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return `${safe || "invoice"}.pdf`;
+  return `${safe || "invoice"}.${extension}`;
 }
 
 export function buildInvoicePdf(invoice: Invoice): jsPDF {

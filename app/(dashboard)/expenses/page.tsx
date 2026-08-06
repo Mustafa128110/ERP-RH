@@ -38,7 +38,7 @@ export default async function Page({
       cashAccountOptions={cashAccountOptions}
       chequeOptions={chequeOptions}
       filters={
-        <ListFilters>
+        <ListFilters key="filters">
           <StockFilter param="company" allLabel="All Companies" options={companyRows.map((c) => ({ id: c.id, name: c.name }))} />
         </ListFilters>
       }

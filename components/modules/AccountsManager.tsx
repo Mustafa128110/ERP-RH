@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -24,6 +25,7 @@ import {
 import { CashTransferDialog, DeleteCashTransferButton, transferAccounts } from "@/components/modules/CashTransferForm";
 import type { CashTransferRow } from "@/lib/actions/transfers";
 import { formatDate } from "@/lib/format";
+import { isChequeSpent, UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { bankAccountLabel } from "@/lib/account-label";
 
 interface BankAccount extends BankAccountValues {
@@ -112,6 +114,7 @@ export function AccountsManager({
   contactOptions: { id: string; displayName: string; companyId: string | null }[];
 }) {
   const [tab, setTab] = useState<Tab>("cash");
+  const [showSpent, setShowSpent] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const router = useRouter();
 
@@ -154,17 +157,22 @@ export function AccountsManager({
     if (account) setModal({ kind: "edit-cash", row: account });
   }
 
-  const chequeRows: Row[] = cheques.map((c) => ({
-    id: c.id,
-    chequeNumber: c.chequeNumber,
-    date: c.chequeDate,
-    amount: c.amount,
-    type: c.chequeType.replace(/_/g, " "),
-    status: c.status.replace(/_/g, " "),
-    bankAccount: bankAccountFor(c.bankAccountId),
-    contact: contactName(c.contactId),
-    company: companyName(c.companyId),
-  }));
+  // Spent cheques stay in the register but off the working list — see the
+  // checkbox on the cheques tab.
+  const spentCount = cheques.filter((c) => isChequeSpent(c.status)).length;
+  const chequeRows: Row[] = cheques
+    .filter((c) => showSpent || !isChequeSpent(c.status))
+    .map((c) => ({
+      id: c.id,
+      chequeNumber: c.chequeNumber,
+      date: c.chequeDate,
+      amount: c.amount,
+      type: c.chequeType.replace(/_/g, " "),
+      status: c.status.replace(/_/g, " "),
+      bankAccount: bankAccountFor(c.bankAccountId),
+      contact: contactName(c.contactId),
+      company: companyName(c.companyId),
+    }));
   function openEditCheque(row: Row) {
     const cheque = cheques.find((c) => c.id === row.id);
     if (cheque) setModal({ kind: "edit-cheque", row: cheque });
@@ -187,10 +195,29 @@ export function AccountsManager({
     if (transfer) setModal({ kind: "view-transfer", row: transfer });
   }
 
-  // Both kinds of account in one list, which is what the transfer form picks from.
+  // Both kinds of account in one list, which is what the transfer form picks
+  // from — plus the cheques still in hand, which can only be a source: paying a
+  // transfer out with one spends it.
   const accountsForTransfer = transferAccounts(
     bankAccounts.map((b) => ({ id: b.id, name: bankAccountLabel(b) })),
     cashAccounts.map((c) => ({ id: c.id, name: c.name })),
+    // In hand only: a cheque already received against a payment or issued
+    // against one is spoken for, and taking it here would cut it loose from the
+    // document it settled.
+    cheques.filter((c) => c.status === UNSPENT_CHEQUE_STATUS).map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` })),
+  );
+
+  // Whatever the open tab makes, same as the button beside it.
+  useNewEntry(() =>
+    setModal(
+      tab === "bank"
+        ? { kind: "batch-bank" }
+        : tab === "cash"
+          ? { kind: "batch-cash" }
+          : tab === "transfers"
+            ? { kind: "add-transfer" }
+            : { kind: "batch-cheque" },
+    ),
   );
 
   return (
@@ -213,9 +240,7 @@ export function AccountsManager({
           }
           className={primaryActionClass}
         >
-          {tab === "transfers"
-            ? "+ Transfer Money"
-            : `+ Add ${tab === "cash" ? "Cash Accounts" : tab === "bank" ? "Bank Accounts" : "Cheques"}`}
+          {tab === "transfers" ? "+ Transfer Money" : `+ Add ${tab === "cash" ? "Cash Accounts" : tab === "bank" ? "Bank Accounts" : "Cheques"}`}
         </button>
       </PageHeader>
 
@@ -258,14 +283,24 @@ export function AccountsManager({
       )}
 
       {tab === "cheques" && (
-        <DataTable
-          columns={chequeColumns}
-          rows={chequeRows}
-          idKey="id"
-          onRowClick={openEditCheque}
-          emptyMessage="No cheques yet."
-          searchPlaceholder="Search cheques…"
-        />
+        <>
+          {/* A cheque that has been issued, cleared, cancelled or voided is done
+              with — off the working list, not deleted. The box brings the
+              history back, because "what happened to cheque 44215" is a real
+              question and the register is where it's answered. */}
+          <label className="flex shrink-0 items-center gap-2 text-sm text-steel">
+            <input type="checkbox" checked={showSpent} onChange={(e) => setShowSpent(e.target.checked)} className="h-5 w-5 rounded border-sand" />
+            Show settled cheques{spentCount > 0 && ` (${spentCount})`}
+          </label>
+          <DataTable
+            columns={chequeColumns}
+            rows={chequeRows}
+            idKey="id"
+            onRowClick={openEditCheque}
+            emptyMessage={showSpent ? "No cheques yet." : "No cheques in hand."}
+            searchPlaceholder="Search cheques…"
+          />
+        </>
       )}
 
       {tab === "transfers" && (
@@ -280,12 +315,7 @@ export function AccountsManager({
       )}
 
       {modal?.kind === "add-transfer" && (
-        <CashTransferDialog
-          companyOptions={companyOptions}
-          accounts={accountsForTransfer}
-          onClose={() => setModal(null)}
-          onDone={close}
-        />
+        <CashTransferDialog companyOptions={companyOptions} accounts={accountsForTransfer} onClose={() => setModal(null)} onDone={close} />
       )}
 
       {modal?.kind === "view-transfer" && (

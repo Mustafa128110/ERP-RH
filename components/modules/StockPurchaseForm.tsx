@@ -1,12 +1,14 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import { createStockPurchase, updateStockPurchase, deleteStockPurchase } from "@/lib/actions/purchases";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import type { SettlementType } from "@/lib/actions/settlement";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
-import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
+import { landedUnitCost, money, perUnitShare, resolveAdjustment, round1, todayISO } from "@/lib/format";
 
 import { fieldClass, labelClass, labelTextClass, errorTextClass } from "@/components/ui/form-styles";
 import { inCompany } from "@/lib/contact-scope";
@@ -96,7 +98,7 @@ export function StockPurchaseCreateForm({
   supplierOptions: ScopedOption[];
   itemOptions: ScopedOption[];
   documentTypeOptions: DocumentTypeOption[];
-  locationOptions: Option[];
+  locationOptions: (Option & { locationType?: string })[];
   unitOptions: Option[];
   categoryOptions: Option[];
   brandOptions: Option[];
@@ -140,8 +142,13 @@ export function StockPurchaseCreateForm({
   const locationOpts = locationOptions;
   // One delivery arrives in one place, so this is a header field rather than a
   // column repeated down every line.
-  const [locationId, setLocationId] = useState(() => defaults?.locationId ?? "");
-  const [locationText, setLocationText] = useState(() => locationOptions.find((l) => l.id === defaults?.locationId)?.name ?? "");
+  // Goods almost always land at the shop, so that's what the field starts on —
+  // same "first location of type shop" the sale form assumes outright.
+  const shopLocation = locationOptions.find((l) => l.locationType === "shop");
+  const [locationId, setLocationId] = useState(() => defaults?.locationId ?? shopLocation?.id ?? "");
+  const [locationText, setLocationText] = useState(
+    () => locationOptions.find((l) => l.id === (defaults?.locationId ?? shopLocation?.id))?.name ?? "",
+  );
 
   // --- Draft ----------------------------------------------------------------
   // The same protection the sale form has, for the same reason: a purchase is a
@@ -179,13 +186,41 @@ export function StockPurchaseCreateForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxTotal, shippingTotal, isPaid, settlementType, isEdit]);
 
+  // A delivery usually arrives as a stack of invoices, and closing the popup
+  // between them costs a click, a reopen and the scroll back down to the grid.
+  // Next Purchase saves and empties the form instead, so the next one is typed
+  // straight into the popup that's already open.
+  //
+  // A ref, not state: it's read once by the effect that runs after the save and
+  // must not be part of what re-renders the grid mid-typing.
+  const startNext = useRef(false);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+  const router = useRouter();
+
+  // Alt+N from inside the popup is the button — clicked rather than submitted
+  // directly, so the browser runs the same required-field checks it would on a
+  // real press, and so there is one path to keep working.
+  useNewEntry(() => {
+    if (!isEdit && !pending) nextButtonRef.current?.click();
+  }, true);
+
   useEffect(() => {
     if (!state?.success) return;
     // Saved — the local copy has nothing left to protect.
     clearDraft(PURCHASE_DRAFT_KEY);
+    if (startNext.current) {
+      startNext.current = false;
+      // The list behind the popup still has to learn about what was just saved;
+      // that's the half of onDone() worth keeping when the popup stays open.
+      router.refresh();
+      resetForm();
+      return;
+    }
     onDone();
+    // `state`, not `state.success`: a second save leaves the flag at true, so
+    // keying off the flag alone would fire once and never again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
+  }, [state]);
 
   const purchaseInvoiceType = useMemo(
     () => documentTypeOptions.find((dt) => dt.companyId === companyId && dt.code === "PURCHASE_INVOICE"),
@@ -223,14 +258,20 @@ export function StockPurchaseCreateForm({
   function clearForm() {
     const started = lines.some((l) => l.itemText.trim() || l.itemId) || supplierText.trim();
     if (started && !confirm("Clear this purchase and start over?")) return;
+    resetForm();
+  }
+
+  // The emptying itself, with nothing asked. Clear asks first because it throws
+  // away work; Next Purchase doesn't, because the work is already saved.
+  function resetForm() {
     // Cleared on purpose, so the draft goes with it rather than being offered
     // back on the next visit.
     clearDraft(PURCHASE_DRAFT_KEY);
     setLines([emptyLine()]);
     setContactId("");
     setSupplierText("");
-    setLocationId("");
-    setLocationText("");
+    setLocationId(shopLocation?.id ?? "");
+    setLocationText(shopLocation?.name ?? "");
     setDiscountTotal("0");
     setTaxTotal("0");
     setShippingTotal("0");
@@ -262,6 +303,18 @@ export function StockPurchaseCreateForm({
   const taxAmount = resolveAdjustment(taxTotal, subtotal);
   const grandTotal = round1(subtotal - discountAmount + taxAmount + (Number(shippingTotal) || 0));
 
+  // Shipping, discount and tax are charged on the delivery, not on any one line
+  // of it, so what a piece actually cost landed is its price plus its share of
+  // all three — spread over every unit that came in the same load, with the
+  // signs the grand total uses. Spread this way the column adds up:
+  // sum(unit cost x qty) is the grand total.
+  //
+  // unitPrice is still what the line saves as: it's what the supplier billed and
+  // what the payable is settled against. The landed figure rides along in
+  // unit_cost, for the rate list to quote the next sale from.
+  const totalQty = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0);
+  const adjustmentPerUnit = perUnitShare((Number(shippingTotal) || 0) - discountAmount + taxAmount, totalQty);
+
   return (
     <>
     <form ref={formRef} action={action} className="flex flex-col gap-5">
@@ -273,7 +326,12 @@ export function StockPurchaseCreateForm({
             ...l,
             itemName: l.itemText,
             unitName: l.unitText,
-            unitCost: String((Number(l.quantity) || 0) * (Number(l.unitPrice) || 0)),
+            // The landed cost shown in the grid, saved as the line's unit_cost —
+            // it's what rate_list reports as "what we last paid", so a sale
+            // priced off it is priced above what the goods actually cost.
+            // (This used to send quantity x price: a line total under a
+            // per-unit name. drizzle/0049 rebuilt the rows it wrote.)
+            unitCost: Number(l.quantity) > 0 ? String(landedUnitCost(Number(l.unitPrice) || 0, adjustmentPerUnit)) : "",
           })),
         )}
       />
@@ -410,7 +468,7 @@ export function StockPurchaseCreateForm({
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
         <div className="overflow-x-auto rounded border border-sand">
-          <table className="w-full min-w-[960px] border-collapse text-sm">
+          <table className="w-full min-w-[1060px] border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>
@@ -418,7 +476,10 @@ export function StockPurchaseCreateForm({
                 <th className={`${thClass} w-32`}>Unit</th>
                 <th className={`${thClass} w-24`}>Qty</th>
                 <th className={`${thClass} w-28`}>Unit Price</th>
-                <th className={`${thClass} w-28 text-right`}>Cost</th>
+                <th className={`${thClass} w-28 text-right`} title="Unit price plus this unit's share of the shipping">
+                  Unit Cost
+                </th>
+                <th className={`${thClass} w-28 text-right`}>Total</th>
                 <th className="w-8 border border-sand" />
               </tr>
             </thead>
@@ -448,7 +509,7 @@ export function StockPurchaseCreateForm({
                     <input
                       type="number"
                       min="0"
-                      step="0.001"
+                      step="0.01"
                       value={line.quantity}
                       onChange={(e) => updateLine(i, { quantity: e.target.value })}
                       placeholder="Qty"
@@ -459,12 +520,17 @@ export function StockPurchaseCreateForm({
                     <input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="0.1"
                       value={line.unitPrice}
                       onChange={(e) => updateLine(i, { unitPrice: e.target.value })}
                       placeholder="Rate"
                       className={`${cellInput} text-right`}
                     />
+                  </td>
+                  {/* Blank rather than a shipping-only figure on an empty row —
+                      a line with no quantity bought nothing to carry. */}
+                  <td className="border border-sand px-2 text-right tabular-nums text-steel">
+                    {Number(line.quantity) > 0 ? money(landedUnitCost(Number(line.unitPrice) || 0, adjustmentPerUnit)) : ""}
                   </td>
                   <td className="border border-sand px-2 text-right tabular-nums text-steel">
                     {money((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
@@ -583,13 +649,32 @@ export function StockPurchaseCreateForm({
       )}
 
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      <button
-        type="submit"
-        disabled={pending}
-        className="h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
-      >
-        {pending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save" : "Create Purchase"}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={pending}
+          className="h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
+        >
+          {pending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save" : "Create Purchase"}
+        </button>
+        {/* Both are submit buttons on the same form — the only difference is the
+            flag set on the way down, which the save effect reads to decide
+            whether the popup closes or empties. */}
+        {!isEdit && (
+          <button
+            ref={nextButtonRef}
+            type="submit"
+            disabled={pending}
+            onClick={() => {
+              startNext.current = true;
+            }}
+            title="Save this purchase and start the next one without closing (Alt+N)"
+            className="h-12 w-fit rounded border border-navy-800 px-6 text-base font-semibold text-navy-800 hover:bg-ivory disabled:opacity-40"
+          >
+            Next Purchase
+          </button>
+        )}
+      </div>
     </form>
 
     </>

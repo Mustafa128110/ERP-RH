@@ -175,7 +175,7 @@ export function ExpenseBatchAddDialog({
             <DateField value={row.expenseDate} onChange={(expenseDate) => update({ expenseDate })} className={batchInputClass} />
           </td>
           <td className={batchCellClass}>
-            <input type="number" step="0.01" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />
+            <input type="number" step="0.1" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />
           </td>
           <td className={batchCellClass}>
             {/* Changing settle-via clears the picked account, since the old id
@@ -313,7 +313,7 @@ function Fields({
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Amount</span>
-        <input name="amount" type="number" step="0.01" min="0.01" required defaultValue={defaults?.amount} className={inputClass} />
+        <input name="amount" type="number" step="0.1" min="0.1" required defaultValue={defaults?.amount} className={inputClass} />
       </label>
 
       <div className={labelClass}>

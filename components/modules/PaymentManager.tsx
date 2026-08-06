@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -10,6 +11,7 @@ import { primaryActionClass } from "@/components/ui/form-styles";
 import type { ColumnDef, Row } from "@/lib/table";
 import { PaymentEditForm, DeletePaymentButton, PaymentBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/PaymentForm";
 import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
+import type { ContactBalanceHint } from "@/lib/payment-constants";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
 
@@ -87,6 +89,7 @@ export function PaymentManager({
   filtered,
   companyOptions,
   contactOptions,
+  contactBalances,
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
@@ -97,6 +100,9 @@ export function PaymentManager({
   filtered?: boolean;
   companyOptions: Option[];
   contactOptions: ScopedOption[];
+  // Per company, where each contact's ledger stands — a new payment reads it to
+  // land in the books holding the balance it settles (lib/payment-constants.ts).
+  contactBalances: ContactBalanceHint[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
   chequeOptions: Option[];
@@ -150,19 +156,23 @@ export function PaymentManager({
       // record, and openEdit is given the id it picks rather than the row's.
       id: key,
       number: members.length > 1 ? `${first.number} +${members.length - 1} more` : first.number,
-      type: first.code === "PAYMENT_MADE" ? "Made" : "Received",
+      // A purchase settled on the spot is money out, and says where it came
+      // from: it's edited on the purchase itself, not here.
+      type: first.code === "PURCHASE_INVOICE" ? "Made (purchase)" : first.code === "PAYMENT_MADE" ? "Made" : "Received",
       contact: first.contact ?? "—",
       date: formatDate(first.documentDate),
       // One method named, or the fact that they differ — naming the first would
       // claim the other two went the same way.
       method: methods.size === 1 ? [...methods][0] : "Mixed",
-      amount: `${first.code === "PAYMENT_MADE" ? "-" : "+"}${money(total)}`,
+      amount: `${first.code === "PAYMENT_RECEIVED" ? "+" : "-"}${money(total)}`,
       company: first.company,
       // Not rendered, but DataTable searches every value on a row: without this
       // the numbers folded into a group would stop being findable.
       _numbers: members.map((m) => m.number).join(" "),
     };
   });
+
+  useNewEntry(() => setBatchOpen(true));
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -183,6 +193,13 @@ export function PaymentManager({
         onRowClick={(row) => {
           const group = byRowId.get(String(row.id));
           if (!group) return;
+          // A purchase's own settlement is edited on the purchase — opening the
+          // payment form on it would offer to change a payment that doesn't
+          // exist as a document.
+          if (group.members[0].code === "PURCHASE_INVOICE") {
+            router.push("/purchases/stock");
+            return;
+          }
           if (group.members.length === 1) openEdit(group.members[0].id);
           else setChoosing(group);
         }}
@@ -195,6 +212,7 @@ export function PaymentManager({
         <PaymentBatchAddDialog
           companyOptions={companyOptions}
           contactOptions={contactOptions}
+          contactBalances={contactBalances}
           bankAccountOptions={bankAccountOptions}
           cashAccountOptions={cashAccountOptions}
           chequeOptions={chequeOptions}

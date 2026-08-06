@@ -39,7 +39,7 @@ import {
 import { resolveContactId, resolveItemId, resolveLocationId, resolveUnitId } from "@/lib/actions/resolve-refs";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { inCompany } from "@/lib/contact-scope";
-import { formatDate, resolveAdjustment, round1, toISODate } from "@/lib/format";
+import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
 import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -48,6 +48,10 @@ export interface StockPurchaseItemRow {
   itemName: string;
   quantity: string;
   unitPrice: string;
+  // What the piece cost landed — the price plus its share of the delivery's
+  // shipping, discount and tax, worked out when the purchase was saved. Null on
+  // lines written before drizzle/0049, which the list shows as the price alone.
+  unitCost: string | null;
   lineTotal: string;
   unitSymbol: string | null;
 }
@@ -76,7 +80,11 @@ export async function listStockPurchases(companyId?: string) {
         taxTotal: documents.taxTotal,
         shippingTotal: documents.shippingTotal,
         supplier: contacts.displayName,
-        company: companies.name,
+        // The short name, not the full one: on this list the company is a tag
+        // saying which set of books a row belongs to, and "Royal Hardware
+        // (Private) Limited" spends a column saying it. Falls back to the full
+        // name for a company that hasn't got a short one.
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
@@ -90,6 +98,7 @@ export async function listStockPurchases(companyId?: string) {
         itemName: items.name,
         quantity: documentLines.quantity,
         unitPrice: documentLines.unitPrice,
+        unitCost: documentLines.unitCost,
         lineTotal: documentLines.lineTotal,
         unitSymbol: units.symbol,
       })
@@ -105,7 +114,14 @@ export async function listStockPurchases(companyId?: string) {
   const linesByDoc = new Map<string, StockPurchaseItemRow[]>();
   for (const l of lineRows) {
     const arr = linesByDoc.get(l.documentId) ?? [];
-    arr.push({ itemName: l.itemName, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal, unitSymbol: l.unitSymbol });
+    arr.push({
+      itemName: l.itemName,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      unitCost: l.unitCost,
+      lineTotal: l.lineTotal,
+      unitSymbol: l.unitSymbol,
+    });
     linesByDoc.set(l.documentId, arr);
   }
 
@@ -364,8 +380,10 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
         .returning({ id: documentLines.id });
 
       // Purchases add stock — one +1 inventory movement per line, valued at
-      // its own unit price (documentLines.unitCost stores the line's total,
-      // not a per-unit figure, so it isn't reused here). A rate-only line
+      // its own unit price. Not at documentLines.unitCost, which since
+      // drizzle/0049 is the landed cost: moving stock in at a freight-inclusive
+      // value would restate every stock figure the day this shipped, which is a
+      // decision about the books, not a display change. A rate-only line
       // carries no quantity and gets no movement: a row of zero would be a
       // stock event that never happened.
       const stockRows = lineRows
@@ -1107,9 +1125,9 @@ export async function importStockPurchasesCsv(
           unitName: unit,
           quantity,
           unitPrice,
-          // The popup computes this from the two columns beside it rather than
-          // asking, so the file doesn't ask either.
-          unitCost: String((Number(quantity) || 0) * (Number(unitPrice) || 0)),
+          // Filled in below: it needs the shipping and every line of this
+          // purchase, and neither is in hand yet.
+          unitCost: "",
         });
       }
 
@@ -1119,6 +1137,19 @@ export async function importStockPurchasesCsv(
       // "5%"), the same as the boxes in the popup — which post the resolved amount,
       // never the percentage, so the resolving happens here too.
       const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
+      const discount = resolveAdjustment(head.discountTotal ?? "", subtotal);
+      const tax = resolveAdjustment(head.taxTotal ?? "", subtotal);
+
+      // The landed cost the popup shows in its Unit Cost column — shipping,
+      // discount and tax spread over every unit that came in the delivery. All
+      // three are per-purchase figures in the file, and the discount and tax can
+      // be percentages of the subtotal, so a line's share can only be worked out
+      // once every line has been read and those two resolved.
+      const perUnit = perUnitShare(
+        (Number((head.shippingTotal ?? "").trim()) || 0) - discount + tax,
+        lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
+      );
+      for (const l of lines) l.unitCost = String(landedUnitCost(Number(l.unitPrice) || 0, perUnit));
 
       const form = new FormData();
       form.set("companyId", companyId);
@@ -1133,8 +1164,8 @@ export async function importStockPurchasesCsv(
       form.set("contactName", supplier);
       form.set("locationId", locationByName.get(key(location)) ?? "");
       form.set("locationName", location);
-      form.set("discountTotal", String(resolveAdjustment(head.discountTotal ?? "", subtotal)));
-      form.set("taxTotal", String(resolveAdjustment(head.taxTotal ?? "", subtotal)));
+      form.set("discountTotal", String(discount));
+      form.set("taxTotal", String(tax));
       form.set("shippingTotal", (head.shippingTotal ?? "").trim());
       form.set("isPaid", paid ? "yes" : "no");
       if (paid) {

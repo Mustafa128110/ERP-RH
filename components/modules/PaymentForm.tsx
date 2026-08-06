@@ -26,11 +26,13 @@ import { DateField } from "@/components/ui/DateField";
 import { todayISO } from "@/lib/format";
 import { inCompany } from "@/lib/contact-scope";
 import { ChequeQuickAddButton } from "@/components/modules/AccountForms";
+import { settlingCompanyId, type ContactBalanceHint } from "@/lib/payment-constants";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-// Cash accounts carry their default flag so a new row can preselect the drawer.
-export type CashOption = Option & { isDefault: boolean };
+// Cash accounts carry their default flag so a new row can preselect the drawer,
+// and their company so a row only offers the drawers that company actually has.
+export type CashOption = Option & { isDefault: boolean; companyId: string | null };
 // Bank accounts carry their company (null = global) — the cheque quick-add needs
 // it to narrow its own bank picker.
 export type BankOption = Option & { companyId: string | null };
@@ -78,6 +80,7 @@ type PaymentBatchRowLocal = {
 export function PaymentBatchAddDialog({
   companyOptions,
   contactOptions,
+  contactBalances,
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
@@ -86,6 +89,9 @@ export function PaymentBatchAddDialog({
 }: {
   companyOptions: Option[];
   contactOptions: ScopedOption[];
+  // What each contact's ledger stands at, per company — what tells a receipt
+  // which set of books the receivable it settles is in. See settlingCompanyId.
+  contactBalances: ContactBalanceHint[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
   chequeOptions: Option[];
@@ -94,11 +100,36 @@ export function PaymentBatchAddDialog({
 }) {
   const defaultCompanyId = companyOptions[0]?.id ?? "";
 
+  // Picking a contact (or flipping the direction) moves the row to the company
+  // where that contact's balance is on the side this payment settles — the whole
+  // point of the row is to clear something, and it can only clear what's in the
+  // same books. Silent when the contact owes on both sides, or on neither.
+  //
+  // The account is fixed up in the same pass: moving a row to another company —
+  // by hand or by the rule above — leaves it pointing at an account that company
+  // hasn't got, and a picker that no longer lists it shows a blank while the row
+  // still carries the id.
+  const settledIn = (row: PaymentBatchRowLocal, patch: Partial<PaymentBatchRowLocal>): Partial<PaymentBatchRowLocal> => {
+    const next = { ...row, ...patch };
+    const companyId = (next.contactId && settlingCompanyId(contactBalances, next.contactId, next.direction)) || next.companyId;
+    const options = settlementList(next.settlementType, companyId);
+    const settlementId = options.some((o) => o.id === next.settlementId)
+      ? next.settlementId
+      : next.settlementType === "cash"
+        ? drawerFor(companyId)
+        : "";
+    return { ...patch, companyId, settlementId };
+  };
+
   // Cheques created from a row's "+" join the shared list, so they're pickable
   // from every row — and the row that opened the dialog gets the first one
   // selected, which is what it was opened for.
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
-  const settlementList = (t: SettlementType) => (t === "account" ? bankAccountOptions : t === "cash" ? cashAccountOptions : chequeOpts);
+  // An account belongs to one company (or to none, which means all of them), and
+  // money moves within one set of books — so a row offers that company's
+  // accounts and the global ones, nothing else.
+  const settlementList = (t: SettlementType, companyId: string) =>
+    t === "account" ? bankAccountOptions.filter(inCompany(companyId)) : t === "cash" ? cashAccountOptions.filter(inCompany(companyId)) : chequeOpts;
 
   // Payments are nearly always made out of the drawer, on the day they happen, so
   // that's where a fresh row starts. Which cash account is "the drawer" comes from
@@ -106,7 +137,13 @@ export function PaymentBatchAddDialog({
   // input wants, in local time — toISOString() would hand back yesterday for
   // anything entered before 05:00 here.
   const today = new Date().toLocaleDateString("en-CA");
-  const defaultCashId = cashAccountOptions.find((a) => a.isDefault)?.id ?? cashAccountOptions[0]?.id ?? "";
+  // The drawer of the company the row starts in — the default account of another
+  // company isn't offered by the picker, so it can't be what a row starts on.
+  const drawerFor = (companyId: string) => {
+    const drawers = cashAccountOptions.filter(inCompany(companyId));
+    return drawers.find((a) => a.isDefault)?.id ?? drawers[0]?.id ?? "";
+  };
+  const defaultCashId = drawerFor(defaultCompanyId);
 
   const emptyRow = (): PaymentBatchRowLocal => ({
     direction: "made",
@@ -146,7 +183,11 @@ export function PaymentBatchAddDialog({
       renderRow={(row, i, update) => (
         <>
           <td className={batchCellClass}>
-            <select value={row.direction} onChange={(e) => update({ direction: e.target.value as PaymentDirection })} className={batchInputClass}>
+            <select
+              value={row.direction}
+              onChange={(e) => update(settledIn(row, { direction: e.target.value as PaymentDirection }))}
+              className={batchInputClass}
+            >
               <option value="received">Received</option>
               <option value="made">Made</option>
             </select>
@@ -159,7 +200,10 @@ export function PaymentBatchAddDialog({
                 // the picked id — the text stays and re-resolves against the new
                 // company's list on save.
                 const stillValid = contactOptions.some((c) => c.id === row.contactId && inCompany(e.target.value)(c));
-                update({ companyId: e.target.value, ...(stillValid ? {} : { contactId: "" }) });
+                const patch = { companyId: e.target.value, ...(stillValid ? {} : { contactId: "" }) };
+                // Chosen by hand, so the contact's own balance doesn't get to
+                // overrule it — only the account is re-pointed at this company.
+                update({ ...patch, ...settledIn({ ...row, contactId: "" }, patch) });
               }}
               className={batchInputClass}
             >
@@ -180,17 +224,19 @@ export function PaymentBatchAddDialog({
               placeholder="Pick or type a new one"
               className={batchInputClass}
               onChange={(name) =>
-                update({
-                  contactText: name,
-                  contactId: contactOptions.find((c) => inCompany(row.companyId)(c) && c.name === name)?.id ?? "",
-                })
+                update(
+                  settledIn(row, {
+                    contactText: name,
+                    contactId: contactOptions.find((c) => inCompany(row.companyId)(c) && c.name === name)?.id ?? "",
+                  }),
+                )
               }
             />
           </td>
           <td className={batchCellClass}>
             <select
               value={row.settlementType}
-              onChange={(e) => update({ settlementType: e.target.value as SettlementType, settlementId: "" })}
+              onChange={(e) => update(settledIn(row, { settlementType: e.target.value as SettlementType, settlementId: "" }))}
               className={batchInputClass}
             >
               <option value="account">Account</option>
@@ -205,7 +251,7 @@ export function PaymentBatchAddDialog({
             <div className="flex gap-1.5">
               <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
                 <option value="">—</option>
-                {settlementList(row.settlementType).map((o) => (
+                {settlementList(row.settlementType, row.companyId).map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.name}
                   </option>
@@ -229,8 +275,8 @@ export function PaymentBatchAddDialog({
                 cheque. */}
             <input
               type="number"
-              min="0.01"
-              step="0.01"
+              min="0.1"
+              step="0.1"
               value={row.settlementType === "cheque" ? "" : row.amount}
               disabled={row.settlementType === "cheque"}
               placeholder={row.settlementType === "cheque" ? "from cheque" : ""}
@@ -275,7 +321,14 @@ function Fields({
   const visibleContacts = useMemo(() => contactOptions.filter(inCompany(companyId)), [contactOptions, companyId]);
   // Cheques created from the "+" beside the picker, newest first.
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
-  const settlementOptions = paymentType === "account" ? bankAccountOptions : paymentType === "cash" ? cashAccountOptions : chequeOpts;
+  // This company's accounts and the global ones, same rule as the batch grid:
+  // an account belongs to one set of books and money moves within one.
+  const settlementOptions =
+    paymentType === "account"
+      ? bankAccountOptions.filter(inCompany(companyId))
+      : paymentType === "cash"
+        ? cashAccountOptions.filter(inCompany(companyId))
+        : chequeOpts;
   const settlementFieldName = paymentType === "account" ? "bankAccountId" : paymentType === "cash" ? "cashAccountId" : "chequeId";
   const settlementDefault =
     paymentType === "account" ? defaults?.bankAccountId : paymentType === "cash" ? defaults?.cashAccountId : defaults?.chequeId;
@@ -382,7 +435,7 @@ function Fields({
       {paymentType !== "cheque" && (
         <label className={labelClass}>
           <span className={labelTextClass}>Amount</span>
-          <input name="amount" type="number" step="0.01" min="0.01" required defaultValue={defaults?.amount} className={inputClass} />
+          <input name="amount" type="number" step="0.1" min="0.1" required defaultValue={defaults?.amount} className={inputClass} />
         </label>
       )}
     </>

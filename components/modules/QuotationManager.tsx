@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { primaryActionClass } from "@/components/ui/form-styles";
@@ -41,6 +43,7 @@ const columns: ColumnDef[] = [
 ];
 
 export function QuotationManager({ quotations }: { quotations: QuotationListRow[] }) {
+  const router = useRouter();
   const rows: Row[] = quotations.map((q) => ({
     id: q.id,
     number: q.number,
@@ -56,6 +59,10 @@ export function QuotationManager({ quotations }: { quotations: QuotationListRow[
   }));
 
   const open = quotations.filter((q) => q.status === "Open" || q.status === "Partly converted").length;
+
+  // No popup here — a quotation is its own page, so Alt+N goes where the button
+  // links.
+  useNewEntry(() => router.push("/sales/quotations/new"));
 
   return (
     <div className="flex h-full flex-col gap-4">

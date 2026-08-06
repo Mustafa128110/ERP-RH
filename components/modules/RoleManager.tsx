@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { getRolePermissionKeys, type PermissionCatalog, type RoleListItem } from "@/lib/actions/roles";
 import { RoleCreateForm, RoleEditForm, DeleteRoleButton } from "@/components/modules/RoleForm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -50,6 +51,8 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
     permissions: r.permissionCount,
     users: r.userCount,
   }));
+
+  useNewEntry(() => setCreating(true));
 
   return (
     <div className="flex h-full flex-col gap-4">

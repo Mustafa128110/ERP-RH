@@ -13,12 +13,17 @@ type Option = { id: string; name: string };
 // where the money goes is one choice, not an account kind plus an account.
 export type TransferAccount = { value: string; label: string };
 
-export function transferAccounts(bank: Option[], cash: Option[]): TransferAccount[] {
+// Cheques are a way of paying out, so they're listed as sources only — see the
+// From picker below, and the server rejects one on the receiving side.
+export function transferAccounts(bank: Option[], cash: Option[], cheques: Option[] = []): TransferAccount[] {
   return [
     ...cash.map((c) => ({ value: `cash:${c.id}`, label: `Cash: ${c.name}` })),
     ...bank.map((b) => ({ value: `bank:${b.id}`, label: `Account: ${b.name}` })),
+    ...cheques.map((c) => ({ value: `cheque:${c.id}`, label: `Cheque: ${c.name}` })),
   ];
 }
+
+const isCheque = (value: string) => value.startsWith("cheque:");
 
 export function CashTransferDialog({
   companyOptions,
@@ -79,7 +84,8 @@ export function CashTransferDialog({
               Select an account
             </option>
             {accounts
-              .filter((a) => a.value !== from)
+              // Not the source, and never a cheque: money lands in an account.
+              .filter((a) => a.value !== from && !isCheque(a.value))
               .map((a) => (
                 <option key={a.value} value={a.value}>
                   {a.label}
@@ -91,7 +97,7 @@ export function CashTransferDialog({
         <div className="flex flex-wrap gap-3">
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Amount</span>
-            <input name="amount" type="number" min="0.01" step="0.01" required className={inputClass} />
+            <input name="amount" type="number" min="0.1" step="0.1" required className={inputClass} />
           </label>
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Date</span>

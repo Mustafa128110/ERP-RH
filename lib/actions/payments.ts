@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, gte, ilike, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -24,6 +24,7 @@ import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/loo
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { paymentLedgerSide } from "@/lib/payment-constants";
+import { chequeStatusAfterSettling, UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { recordAudit } from "@/lib/actions/audit";
 
 export type PaymentDirection = "made" | "received";
@@ -95,7 +96,16 @@ export async function listPayments(filters: PaymentFilters = {}) {
     .leftJoin(chequeRegister, eq(chequeRegister.documentId, documents.id))
     .where(
       and(
-        inArray(documentTypes.code, [...codes]),
+        // Payments proper, plus purchases that were settled on the spot. Paying
+        // a supplier at the counter is money out whether it was entered here or
+        // ticked "paid" on the delivery, and a payments page that omits half of
+        // it can't be reconciled against the drawer. A purchase raises no
+        // payment document of its own — it carries the settlement account on
+        // itself — so it's picked up here rather than duplicated as one.
+        or(
+          inArray(documentTypes.code, [...codes]),
+          filters.direction === "received" ? undefined : and(eq(documentTypes.code, "PURCHASE_INVOICE"), eq(documents.isPaid, true)),
+        ),
         await companyInScope(documents.companyId),
         // Narrows within the scope, never widens it — companyInScope still gates
         // every row.
@@ -215,7 +225,7 @@ export async function createPayment(
       });
 
       if (values.chequeId) {
-        await tx.update(chequeRegister).set({ documentId: doc.id }).where(eq(chequeRegister.id, values.chequeId));
+        await tx.update(chequeRegister).set({ documentId: doc.id, status: chequeStatusAfterSettling(SETTLE_DIRECTION[direction]) }).where(eq(chequeRegister.id, values.chequeId));
       }
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
 
@@ -366,7 +376,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[]): Promise<Acti
         await tx.insert(documentNumberLedger).values({ companyId: r.companyId, documentTypeId: documentType.id, number, documentId: doc.id });
 
         if (r.chequeId) {
-          await tx.update(chequeRegister).set({ documentId: doc.id }).where(eq(chequeRegister.id, r.chequeId));
+          await tx.update(chequeRegister).set({ documentId: doc.id, status: chequeStatusAfterSettling(SETTLE_DIRECTION[r.direction]) }).where(eq(chequeRegister.id, r.chequeId));
         }
         await adjustSettlementBalance(tx, SETTLE_DIRECTION[r.direction], amount, r.bankAccountId, r.cashAccountId, r.chequeId, 1);
 
@@ -430,7 +440,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
       // drop-and-reapply approach as the ledger resync below.
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], existing.amount, existing.bankAccountId, existing.cashAccountId, existingCheque?.id ?? null, -1);
       if (existingCheque) {
-        await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
+        await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
       }
 
       const contactId = await resolveContactId(tx, existing.companyId, values.contactId, values.contactName);
@@ -447,7 +457,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         .where(eq(documents.id, paymentId));
 
       if (values.chequeId) {
-        await tx.update(chequeRegister).set({ documentId: paymentId }).where(eq(chequeRegister.id, values.chequeId));
+        await tx.update(chequeRegister).set({ documentId: paymentId, status: chequeStatusAfterSettling(SETTLE_DIRECTION[direction]) }).where(eq(chequeRegister.id, values.chequeId));
       }
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
 
@@ -502,7 +512,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
     await db.transaction(async (tx) => {
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], existing.amount, existing.bankAccountId, existing.cashAccountId, existingCheque?.id ?? null, -1);
       if (existingCheque) {
-        await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
+        await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
       }
       await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
       await tx.delete(documents).where(eq(documents.id, paymentId));

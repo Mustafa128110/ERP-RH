@@ -224,7 +224,7 @@ export function StockTransferFormPage({
                       data-cell={`${r}-2`}
                       type="number"
                       min="0"
-                      step="0.001"
+                      step="0.01"
                       placeholder="Qty"
                       value={line.quantity}
                       onChange={(e) => updateLine(r, { quantity: e.target.value })}

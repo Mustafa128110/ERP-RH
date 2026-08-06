@@ -1,4 +1,5 @@
 import { listPayments } from "@/lib/actions/payments";
+import { listLedgerBalances } from "@/lib/actions/ledger";
 import {
   getAvailableCheques,
   getBankAccountOptions,
@@ -16,13 +17,16 @@ export default async function Page({
   searchParams: Promise<{ contact?: string; direction?: string; company?: string; from?: string; to?: string }>;
 }) {
   const filters = await searchParams;
-  const [payments, companyRows, contactRows, bankAccountOptions, cashAccountOptions, chequeOptions] = await Promise.all([
+  const [payments, companyRows, contactRows, bankAccountOptions, cashAccountOptions, chequeOptions, ledgerBalances] = await Promise.all([
     listPayments(filters),
     getCompanies(),
     getContactOptions(),
     getBankAccountOptions(),
     getCashAccountOptions(),
     getAvailableCheques(),
+    // Which company each contact's balance sits in, so a new payment settles the
+    // books that actually hold it rather than whichever company sorts first.
+    listLedgerBalances(),
   ]);
 
   return (
@@ -31,11 +35,12 @@ export default async function Page({
       filtered={Object.values(filters).some(Boolean)}
       companyOptions={companyRows}
       contactOptions={contactRows.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" }))}
+      contactBalances={ledgerBalances.map((b) => ({ contactId: b.contactId, companyId: b.companyId, balance: b.balance }))}
       bankAccountOptions={bankAccountOptions}
       cashAccountOptions={cashAccountOptions}
       chequeOptions={chequeOptions}
       filters={
-        <ListFilters nameParam="contact" namePlaceholder="Contact name">
+        <ListFilters key="filters" nameParam="contact" namePlaceholder="Contact name">
           <StockFilter
             param="direction"
             allLabel="Made & Received"

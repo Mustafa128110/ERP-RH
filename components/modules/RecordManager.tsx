@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -74,6 +75,8 @@ export function RecordManager<T extends { id: string }>({
 
   const rows = records.map(toRow);
   const many = plural ?? `${noun}s`;
+
+  useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-4">

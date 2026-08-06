@@ -181,7 +181,7 @@ export function StockAdjustmentFormPage({
                     <input
                       data-cell={`${r}-2`}
                       type="number"
-                      step="0.001"
+                      step="0.01"
                       placeholder="+/- Qty"
                       value={line.quantity}
                       onChange={(e) => updateLine(r, { quantity: e.target.value })}

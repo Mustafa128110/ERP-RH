@@ -28,7 +28,7 @@ export default async function Page({
         // The name box filters by user, since "who did this" is the question this
         // page gets opened with. Entity and action narrow it from there, and the
         // date range is what reaches past the 200-row cap.
-        <ListFilters nameParam="user" namePlaceholder="User name">
+        <ListFilters key="filters" nameParam="user" namePlaceholder="User name">
           <StockFilter
             param="entity"
             allLabel="All records"

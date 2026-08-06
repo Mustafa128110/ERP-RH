@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { handoffWhatsAppMessage, retryWhatsAppMessage, sendWhatsAppMessage, type WhatsAppRow } from "@/lib/actions/whatsapp";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -75,6 +76,8 @@ export function WhatsAppManager({
     error: m.error,
     status: m.status,
   }));
+
+  useNewEntry(() => setComposing(true));
 
   return (
     <div className="flex h-full flex-col gap-4">

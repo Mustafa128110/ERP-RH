@@ -554,7 +554,7 @@ export function ProductsBatchEditDialog({
                           <input
                             type="number"
                             min="0"
-                            step="0.001"
+                            step="0.01"
                             value={row.targetQty}
                             onChange={(e) => update(i, { targetQty: e.target.value })}
                             placeholder="Blank — leave alone"

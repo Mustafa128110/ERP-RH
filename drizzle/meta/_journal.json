@@ -344,6 +344,20 @@
       "when": 1785888000000,
       "tag": "0048_backfill_payments_received",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786060800000,
+      "tag": "0049_landed_unit_cost",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786064400000,
+      "tag": "0050_whole_rupee_unit_cost",
+      "breakpoints": true
     }
   ]
 }

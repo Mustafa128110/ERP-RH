@@ -22,10 +22,16 @@ const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-// `rate` is the item's last purchase price from the rate_list view — prefilled
-// into the reference column. `salesRate` is its selling price, the price it last
-// went out at, which prefills what it's being sold for now.
+// `rate` is what the item last cost landed — purchase price plus its share of
+// that delivery's shipping, discount and tax, from the rate_list view —
+// prefilled into the
+// reference column. `salesRate` is its selling price, the price it last went out
+// at, which prefills what it's being sold for now.
 type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null };
+// Both rates are stored with four decimals, but every total on this form is
+// round1 — so a price box prefilled with 1250.7500 shows precision the sale
+// itself will never carry. One decimal in, one decimal out.
+const rate1 = (v: string | null | undefined) => (v ? String(round1(Number(v))) : "");
 type PaidMode = "yes" | "partial" | "no";
 type Line = {
   itemId: string;
@@ -173,7 +179,7 @@ export function SaleFormPage({
             itemText: itemOptions.find((it) => it.id === l.itemId)?.name ?? "",
             unitText: unitOptions.find((u) => u.id === l.unitId)?.name ?? "",
             // What was typed on this line wins over the item's current rate list price.
-            listPrice: unitCost || (itemOptions.find((it) => it.id === l.itemId)?.rate ?? ""),
+            listPrice: rate1(unitCost || itemOptions.find((it) => it.id === l.itemId)?.rate),
           })),
           emptyLine(),
         ]
@@ -373,8 +379,8 @@ export function SaleFormPage({
         ...l,
         itemText: name,
         itemId: opt?.id ?? "",
-        listPrice: sameItem ? l.listPrice : (opt?.rate ?? ""),
-        unitPrice: sameItem ? l.unitPrice : (opt?.salesRate ?? ""),
+        listPrice: sameItem ? l.listPrice : rate1(opt?.rate),
+        unitPrice: sameItem ? l.unitPrice : rate1(opt?.salesRate),
       };
     });
   }
@@ -590,7 +596,7 @@ export function SaleFormPage({
                         data-cell={`${r}-2`}
                         type="number"
                         min="0"
-                        step="0.001"
+                        step="0.01"
                         placeholder="Qty"
                         value={line.quantity}
                         onChange={(e) => updateLine(r, { quantity: e.target.value })}
@@ -605,7 +611,7 @@ export function SaleFormPage({
                         data-cell={`${r}-3`}
                         type="number"
                         min="0"
-                        step="0.01"
+                        step="0.1"
                         placeholder="Rate"
                         value={line.listPrice}
                         onChange={(e) => updateLine(r, { listPrice: e.target.value })}
@@ -617,7 +623,7 @@ export function SaleFormPage({
                         data-cell={`${r}-4`}
                         type="number"
                         min="0"
-                        step="0.01"
+                        step="0.1"
                         placeholder="Price"
                         value={line.unitPrice}
                         onChange={(e) => updateLine(r, { unitPrice: e.target.value })}
@@ -712,7 +718,7 @@ export function SaleFormPage({
                 type="number"
                 min="0"
                 max={grandTotal}
-                step="0.01"
+                step="0.1"
                 value={paidAmount}
                 onChange={(e) => setPaidAmount(e.target.value)}
                 className={`${fieldClass}`}

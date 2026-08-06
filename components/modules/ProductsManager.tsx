@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ProductBatchAddDialog, ProductsBatchEditDialog } from "@/components/modules/ProductForm";
 import { MergeProductsDialog } from "@/components/modules/MergeProductsDialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -86,6 +87,8 @@ export function ProductsManager({
     setSelected([]);
     router.refresh();
   }
+
+  useNewEntry(() => setBatchOpen(true));
 
   return (
     <div className="flex h-full flex-col gap-4">

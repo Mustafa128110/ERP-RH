@@ -278,7 +278,7 @@ export function QuotationForm({
                   <input
                     data-cell={`${r}-2`}
                     type="number"
-                    step="any"
+                    step="0.01"
                     min="0"
                     value={line.quantity}
                     onChange={(e) => update(r, { quantity: e.target.value })}
@@ -290,7 +290,7 @@ export function QuotationForm({
                   <input
                     data-cell={`${r}-3`}
                     type="number"
-                    step="any"
+                    step="0.1"
                     min="0"
                     value={line.unitPrice}
                     onChange={(e) => update(r, { unitPrice: e.target.value })}

@@ -105,7 +105,7 @@ export function ConvertQuotationDialog({
                 <td className="border border-sand p-0">
                   <input
                     type="number"
-                    step="any"
+                    step="0.01"
                     min="0"
                     max={remaining[i]}
                     value={take[i] ?? ""}

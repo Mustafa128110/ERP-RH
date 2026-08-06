@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoice } from "@/lib/actions/sales";
 import { whatsappStatus } from "@/lib/actions/whatsapp";
-import { InvoiceDocument, DownloadInvoiceButton } from "@/components/modules/InvoiceDocument";
+import { InvoiceDocument, DownloadInvoiceButton, DownloadInvoiceImageButton } from "@/components/modules/InvoiceDocument";
 import { SendWhatsAppButton } from "@/components/modules/SendWhatsAppButton";
 import { formatDate, money } from "@/lib/format";
 
@@ -53,6 +53,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             disabledReason={cannotSend}
             providerConfigured={configured}
           />
+          <DownloadInvoiceImageButton invoice={invoice} />
           <DownloadInvoiceButton invoice={invoice} />
         </div>
       </div>

@@ -44,6 +44,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: "Anywhere",
     shortcuts: [
       { keys: "Ctrl K", label: "Search products, contacts and invoices" },
+      { keys: "Alt N", label: "Add a new record on this page — in the purchase popup, save and start the next one" },
       { keys: "?", label: "Show this list" },
       { keys: "Esc", label: "Close a popup, or clear a search box" },
       ...Object.entries(GO_TO).map(([key, { href, label }]) => ({ keys: `g then ${key}`, label: `Go to ${label}`, go: href })),

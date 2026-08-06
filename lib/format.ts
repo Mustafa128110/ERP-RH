@@ -61,6 +61,31 @@ export function qty(value: string | number): string {
   return Number.isFinite(n) ? qtyFormat.format(n) : String(value);
 }
 
+// --- Landed cost -------------------------------------------------------------
+// Shipping, discount and tax are charged on a delivery, never on one line of it,
+// so a unit's share is the whole adjustment spread over every unit that arrived
+// in the same load: shipping - discount + tax, the same signs the grand total
+// uses. Kept unrounded on purpose — rounding here and then multiplying by the
+// quantity is what makes a column of unit costs stop adding up to the invoice.
+//
+// No units, nothing to share — dividing by nothing would hand back Infinity and
+// paint it down the grid.
+export function perUnitShare(amount: number, totalQuantity: number): number {
+  return totalQuantity > 0 ? amount / totalQuantity : 0;
+}
+
+// The landed cost itself, rounded up to the rupee. Up, not to the nearest: this
+// is the floor under a selling price, and the half of a rupee that rounding down
+// would shave off is sold at a loss every time the item goes out.
+//
+// It follows that the column no longer adds back to the invoice — the landed
+// costs sum to a little *over* the grand total, by under one rupee per line.
+// That is the price of a whole-rupee cost, and it is the reason the payable is
+// settled against unit_price, which is untouched by any of this.
+export function landedUnitCost(unitPrice: number, share: number): number {
+  return Math.ceil(unitPrice + share);
+}
+
 // --- Discount / tax entry ----------------------------------------------------
 // One field, not a number plus a Rs/% dropdown: "500" is five hundred rupees,
 // "5%" is five percent of the subtotal. Returns the resolved amount.

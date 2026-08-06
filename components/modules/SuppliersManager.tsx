@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/SupplierForm";
 import { getContact } from "@/lib/actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
@@ -79,6 +80,8 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
     setModal({ kind: "edit", id });
     setDetail(await getContact(id));
   }
+
+  useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-4">
