@@ -53,6 +53,11 @@ export const documentStatusEnum = pgEnum("document_status", [
 
 export const userStatusEnum = pgEnum("user_status", ["active", "inactive", "locked"]);
 
+// How a person wants this app to look. Per user rather than per company: two
+// people share a shop counter and a company's settings, but not their eyesight
+// or the light they're standing in.
+export const themePreferenceEnum = pgEnum("theme_preference", ["light", "dark"]);
+
 // Where a sale came from. Everything sold over the counter is the default and
 // always will be the bulk of it; the other two are the channels that need to be
 // told apart afterwards when the takings are reconciled.
@@ -145,8 +150,24 @@ export const users = pgTable("users", {
   // UNIQUE because two people cannot share a handset without the agent being
   // unable to say whose permissions to apply.
   whatsappNumber: varchar("whatsapp_number", { length: 20 }).unique(),
+  // --- Display preferences -------------------------------------------------
+  // These two ride along on the users row rather than living in a preferences
+  // table of their own: they are one value each, read on every single request,
+  // and the session query already fetches this row. A second table would be a
+  // second round trip to a database ~170ms away to learn a font size.
+  //
+  // NOT NULL with defaults, so a user who has never opened Settings still
+  // renders — the app reads these before it reads anything else.
+  uiTheme: themePreferenceEnum("ui_theme").notNull().default("light"),
+  // Root font size as a percentage. Tailwind sizes everything in rem, so this
+  // one number scales text, padding and icons together. Bounded by a check
+  // constraint, not just by the buttons that set it: a hand-written UPDATE of
+  // 10000 would otherwise render the app unusable with no way back to Settings.
+  uiScale: smallint("ui_scale").notNull().default(100),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+}, (table) => [
+  check("ui_scale_range", sql`${table.uiScale} BETWEEN 75 AND 175`),
+]);
 
 export const roles = pgTable("roles", {
   id: uuid("id").primaryKey().defaultRandom(),

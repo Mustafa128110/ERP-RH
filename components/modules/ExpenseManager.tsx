@@ -7,7 +7,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DetailHover } from "@/components/ui/DetailHover";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import { ExpenseEditForm, DeleteExpenseButton, ExpenseBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/ExpenseForm";
 import { listChequesForExpenses } from "@/lib/actions/expenses";
@@ -169,14 +170,20 @@ export function ExpenseManager({
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Expenses"
         subtitle={`${expenses.length} expense(s)${expenses.length !== groups.length ? ` on ${groups.length} line(s)` : ""}${filtered ? " matching" : ""}`}
       >
         {filters}
-        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryActionClass}>
-          + Add Expenses
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "batch" })}
+          className={primaryIconButtonClass}
+          aria-label="Add expenses"
+          title="Add expenses — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

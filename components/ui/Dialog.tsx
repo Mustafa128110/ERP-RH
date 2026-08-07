@@ -92,7 +92,7 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-ink/30 backdrop-blur-sm sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-scrim/50 backdrop-blur-sm sm:items-center sm:p-6"
       onClick={onClose}
       role="presentation"
     >

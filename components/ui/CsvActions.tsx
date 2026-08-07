@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/ui/Dialog";
-import { secondaryActionClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
+import { iconButtonClass } from "@/components/ui/form-styles";
 import { csvToObjects, objectsToCsv, templateCsv, type CsvColumn } from "@/lib/csv";
 
 // The Import / Export / Template trio that sits in a list page's header. The
@@ -45,6 +46,29 @@ export function CsvActions({
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ title: string; body: string } | null>(null);
+  // Collapsed by default. Three CSV buttons sat permanently across the top of
+  // every list for the sake of an operation most people run once a month.
+  const [open, setOpen] = useState(false);
+  const groupRef = useRef<HTMLDivElement>(null);
+
+  // Closing on an outside click (and on Escape) rather than on blur: the group
+  // contains three focusable buttons, so a blur handler would close it while
+  // tabbing between its own children.
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(e: PointerEvent) {
+      if (!groupRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   async function pick(file: File) {
     setBusy(true);
@@ -88,15 +112,55 @@ export function CsvActions({
           if (file) void pick(file);
         }}
       />
-      <button type="button" onClick={() => download(templateCsv(columns), `${name}-template.csv`)} className={secondaryActionClass}>
-        Template
-      </button>
-      <button type="button" onClick={() => void exportCsv()} disabled={busy} className={secondaryActionClass}>
-        Export CSV
-      </button>
-      <button type="button" onClick={() => fileRef.current?.click()} disabled={busy} className={secondaryActionClass}>
-        {busy ? "Working…" : "Import CSV"}
-      </button>
+      {/* One button that becomes three. The expanded trio sits inline rather
+          than in a floating menu so it pushes the other header buttons along
+          instead of covering them — on a phone the header wraps, and a dropdown
+          would open over the first row of the list. */}
+      <div ref={groupRef} className="flex items-center gap-2">
+        {open && (
+          <div className="reveal-right flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              className={iconButtonClass}
+              aria-label="Import a CSV file"
+              title={busy ? "Working…" : "Import CSV"}
+            >
+              <Icon name="import" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportCsv()}
+              disabled={busy}
+              className={iconButtonClass}
+              aria-label="Export these rows as CSV"
+              title="Export CSV"
+            >
+              <Icon name="export" />
+            </button>
+            <button
+              type="button"
+              onClick={() => download(templateCsv(columns), `${name}-template.csv`)}
+              className={iconButtonClass}
+              aria-label="Download a blank CSV template"
+              title="Blank template"
+            >
+              <Icon name="template" />
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={iconButtonClass}
+          aria-expanded={open}
+          aria-label={open ? "Hide CSV actions" : "Show CSV actions"}
+          title="Import, export, template"
+        >
+          <Icon name={open ? "close" : "more"} />
+        </button>
+      </div>
 
       {message && (
         <Dialog title={message.title} onClose={() => setMessage(null)}>

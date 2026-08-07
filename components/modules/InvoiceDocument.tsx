@@ -82,7 +82,9 @@ export function InvoiceImageRenderer({ invoice, onReady }: { invoice: Invoice; o
   }, []);
 
   return (
-    <div ref={ref} aria-hidden className="pointer-events-none fixed top-0 left-0 z-[-1000] w-[768px] bg-white">
+    // force-light: this becomes a PNG in a customer's chat, so it keeps the
+    // light palette regardless of the theme the app is in (globals.css).
+    <div ref={ref} aria-hidden className="force-light pointer-events-none fixed top-0 left-0 z-[-1000] w-[768px] bg-white">
       <InvoiceDocument invoice={invoice} />
     </div>
   );

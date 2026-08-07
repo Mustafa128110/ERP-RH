@@ -10,7 +10,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { ContactPaymentsHover } from "@/components/modules/ContactPaymentsHover";
 import { DateField } from "@/components/ui/DateField";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import { money, todayISO } from "@/lib/format";
 import { downloadNodeAsPdf, downloadNodeAsPng } from "@/lib/node-download";
@@ -156,11 +157,17 @@ export function LedgerManager({
   useNewEntry(() => setModal({ kind: "add" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Ledger" subtitle={`${balances.length} contact(s) with ledger activity`}>
         {filter}
-        <button type="button" onClick={() => setModal({ kind: "add" })} className={primaryActionClass}>
-          + Add Entry
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "add" })}
+          className={primaryIconButtonClass}
+          aria-label="Add ledger entry"
+          title="Add ledger entry — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

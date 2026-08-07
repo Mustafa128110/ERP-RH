@@ -21,6 +21,11 @@ export interface AuthSession {
   permissionsByCompany: Map<string, Set<string>>;
   companyIds: string[];
   warehouseIds: string[];
+  // How this person wants the app to look (lib/actions/preferences.ts). Carried
+  // on the session because the root layout has to know both before it renders a
+  // single element, and because they arrive free with the row it already reads.
+  uiTheme: "light" | "dark";
+  uiScale: number;
 }
 
 // A page's own queries can't start until getSession() resolves, so this sat in
@@ -93,6 +98,8 @@ const getCookieSession = cache(async (): Promise<AuthSession | null> => {
       permissionsByCompany,
       companyIds: row.company_ids,
       warehouseIds: row.warehouse_ids,
+      uiTheme: row.ui_theme,
+      uiScale: row.ui_scale,
     } satisfies AuthSession;
   });
 

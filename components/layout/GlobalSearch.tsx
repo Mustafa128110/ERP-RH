@@ -2,14 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { globalSearch, type SearchHit } from "@/lib/actions/search";
-
-const KIND_LABEL: Record<SearchHit["kind"], string> = {
-  product: "Product",
-  contact: "Contact",
-  invoice: "Invoice",
-  purchase: "Purchase",
-};
+import { globalSearch } from "@/lib/actions/search";
+import { KIND_LABEL, type SearchHit } from "@/lib/search-constants";
 
 // The top bar's search box. It used to be an <input> attached to nothing at all.
 //
@@ -110,7 +104,7 @@ export function GlobalSearch() {
             setOpen(false);
           }
         }}
-        placeholder="Search products, contacts, invoices…   Ctrl+K"
+        placeholder="Search everything…   Ctrl+K"
         aria-label="Search everything"
         role="combobox"
         aria-expanded={open}

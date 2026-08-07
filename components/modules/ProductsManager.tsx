@@ -11,7 +11,8 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import { CsvActions } from "@/components/ui/CsvActions";
 import { exportProductsCsv, importProductsCsv } from "@/lib/actions/products";
 import { PRODUCT_CSV_COLUMNS } from "@/lib/csv-columns";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 
 // No S.No column here — DataTable numbers every row itself.
@@ -91,7 +92,7 @@ export function ProductsManager({
   useNewEntry(() => setBatchOpen(true));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Products"
         subtitle={selected.length > 0 ? `${selected.length} of ${rows.length} item(s) selected` : `${rows.length} item(s)`}
@@ -119,8 +120,14 @@ export function ProductsManager({
           onExport={exportProductsCsv}
           onDone={() => router.refresh()}
         />
-        <button type="button" onClick={() => setBatchOpen(true)} className={primaryActionClass}>
-          + Add Products
+        <button
+          type="button"
+          onClick={() => setBatchOpen(true)}
+          className={primaryIconButtonClass}
+          aria-label="Add products"
+          title="Add products — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

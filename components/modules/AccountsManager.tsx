@@ -6,7 +6,8 @@ import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import {
   BankAccountEditForm,
@@ -220,10 +221,16 @@ export function AccountsManager({
     ),
   );
 
+  // Every tab creates in batch. The label just names whichever the active tab
+  // is about — and since the button became a bare plus, this label is now the
+  // whole of what says so, to a hover and to a screen reader alike.
+  const addLabel =
+    tab === "transfers"
+      ? "Transfer money"
+      : `Add ${tab === "cash" ? "cash accounts" : tab === "bank" ? "bank accounts" : "cheques"}`;
+
   return (
-    <div className="flex h-full flex-col gap-4">
-      {/* Every tab creates in batch. The label just names whichever the active
-          tab is about. */}
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Accounts">
         <button
           type="button"
@@ -238,9 +245,13 @@ export function AccountsManager({
                     : { kind: "batch-cheque" },
             )
           }
-          className={primaryActionClass}
+          className={primaryIconButtonClass}
+          // The label still changes with the tab even though the glyph doesn't
+          // — it is the only thing left saying what the plus will add.
+          aria-label={addLabel}
+          title={`${addLabel} — Alt+N`}
         >
-          {tab === "transfers" ? "+ Transfer Money" : `+ Add ${tab === "cash" ? "Cash Accounts" : tab === "bank" ? "Bank Accounts" : "Cheques"}`}
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

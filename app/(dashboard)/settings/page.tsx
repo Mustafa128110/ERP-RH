@@ -2,17 +2,30 @@ import Link from "next/link";
 import { getSettings, settingsOverview } from "@/lib/actions/settings";
 import { SETTING_DEFS } from "@/lib/setting-constants";
 import { SettingsForm } from "@/components/modules/SettingsForm";
+import { AppearanceSettings } from "@/components/modules/AppearanceSettings";
 import { StockFilter } from "@/components/modules/StockFilters";
 import { SALE_TYPES } from "@/lib/sale-constants";
+import { requireSession } from "@/lib/auth/session";
+import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ company?: string }> }) {
-  const [{ company }, overview] = await Promise.all([searchParams, settingsOverview()]);
+  // Everything below the Appearance card needs settings.view; Appearance itself
+  // needs nothing but a session, because it changes how the app looks to this
+  // one person and to nobody else. Swallowing the permission error rather than
+  // gating the route is what lets a salesman who cannot configure a company
+  // still turn the lights down — without it, the only screen holding the
+  // theme switch is the one screen they aren't allowed to open.
+  const [{ company }, session, overview] = await Promise.all([
+    searchParams,
+    requireSession(),
+    settingsOverview().catch(() => null),
+  ]);
 
   // Settings are per company, so one has to be chosen. Default to the first the
   // user can see, which for a single-company user is the only answer there is.
-  const selected = overview.companies.find((c) => c.id === company) ?? overview.companies[0];
+  const selected = overview?.companies.find((c) => c.id === company) ?? overview?.companies[0];
   const values = selected ? await getSettings(selected.id) : {};
 
   return (
@@ -23,26 +36,40 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
           <p className="text-sm text-steel">Thresholds and text this app actually reads. Stored per company.</p>
         </div>
         <div className="flex items-center gap-2">
-          {overview.companies.length > 1 && (
+          {overview && overview.companies.length > 1 && (
             <StockFilter param="company" allLabel={overview.companies[0]?.name ?? "Company"} options={overview.companies.map((c) => ({ id: c.id, name: c.name }))} />
           )}
-          <Link href="/settings/backups" className="flex h-11 items-center rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory">
-            Backups &amp; Export →
-          </Link>
+          {overview && (
+            <Link href="/settings/backups" className="flex h-11 items-center rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory">
+              Backups &amp; Export →
+            </Link>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-lg border border-sand bg-white p-5 lg:col-span-2">
-          <h2 className="mb-4 text-sm font-semibold text-navy-800">{selected ? `${selected.name} settings` : "Settings"}</h2>
-          {selected ? (
-            <SettingsForm companyId={selected.id} defs={SETTING_DEFS} values={values} />
-          ) : (
-            <p className="text-sm text-steel">You don&apos;t have access to any company yet, so there is nothing to configure.</p>
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          {/* First, and for everyone: it is the only card here that every user
+              can act on, so it should not be below three they may not. */}
+          <div className="rounded-lg border border-sand bg-white p-5">
+            <h2 className="mb-4 text-sm font-semibold text-navy-800">Appearance</h2>
+            <AppearanceSettings theme={session.uiTheme} scale={nearestStep(session.uiScale ?? DEFAULT_SCALE)} />
+          </div>
+
+          {overview && (
+            <div className="rounded-lg border border-sand bg-white p-5">
+              <h2 className="mb-4 text-sm font-semibold text-navy-800">{selected ? `${selected.name} settings` : "Settings"}</h2>
+              {selected ? (
+                <SettingsForm companyId={selected.id} defs={SETTING_DEFS} values={values} />
+              ) : (
+                <p className="text-sm text-steel">You don&apos;t have access to any company yet, so there is nothing to configure.</p>
+              )}
+            </div>
           )}
         </div>
 
         <div className="flex flex-col gap-6">
+          {overview && (
           <div className="rounded-lg border border-sand bg-white p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-navy-800">Companies</h2>
@@ -60,7 +87,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
               {overview.companies.length === 0 && <li className="py-2 text-sm text-steel">None yet.</li>}
             </ul>
           </div>
+          )}
 
+          {overview && (
           <div className="rounded-lg border border-sand bg-white p-5">
             <h2 className="mb-3 text-sm font-semibold text-navy-800">Connections</h2>
             <ul className="flex flex-col divide-y divide-sand">
@@ -77,7 +106,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
               ))}
             </ul>
           </div>
+          )}
 
+          {overview && (
           <div className="rounded-lg border border-sand bg-white p-5">
             <h2 className="mb-3 text-sm font-semibold text-navy-800">Sale channels</h2>
             {/* Read from lib/sale-constants.ts — the list the sale form itself
@@ -91,6 +122,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
             </ul>
             <p className="mt-2 text-xs text-steel">Every sale is filed under one of these. Add one in lib/sale-constants.ts and the schema enum.</p>
           </div>
+          )}
         </div>
       </div>
     </div>

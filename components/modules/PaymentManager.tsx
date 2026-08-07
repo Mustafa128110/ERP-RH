@@ -7,7 +7,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DetailHover } from "@/components/ui/DetailHover";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import { PaymentEditForm, DeletePaymentButton, PaymentBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/PaymentForm";
 import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
@@ -175,14 +176,20 @@ export function PaymentManager({
   useNewEntry(() => setBatchOpen(true));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Payments"
         subtitle={`${payments.length} payment(s)${payments.length !== groups.length ? ` on ${groups.length} line(s)` : ""}${filtered ? " matching" : ""}`}
       >
         {filters}
-        <button type="button" onClick={() => setBatchOpen(true)} className={primaryActionClass}>
-          + Add Payments
+        <button
+          type="button"
+          onClick={() => setBatchOpen(true)}
+          className={primaryIconButtonClass}
+          aria-label="Add payments"
+          title="Add payments — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

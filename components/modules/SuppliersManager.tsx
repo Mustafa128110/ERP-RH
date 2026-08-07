@@ -9,7 +9,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DetailHover } from "@/components/ui/DetailHover";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { iconButtonClass, primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 
 const columns: ColumnDef[] = [
@@ -84,7 +85,7 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Contacts"
         subtitle={selected.length > 0 ? `${selected.length} of ${rows.length} contact(s) selected` : `${rows.length} contact(s)`}
@@ -93,13 +94,23 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
           type="button"
           onClick={() => setModal({ kind: "batchEdit" })}
           disabled={selected.length === 0}
-          title={selected.length === 0 ? "Tick the contacts you want to edit" : undefined}
-          className="h-11 rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory disabled:opacity-40 disabled:hover:bg-transparent"
+          aria-label={selected.length === 0 ? "Edit selected contacts" : `Edit ${selected.length} selected contact(s)`}
+          title={selected.length === 0 ? "Tick the contacts you want to edit" : `Edit ${selected.length} selected`}
+          // Widens to fit the count rather than staying square: the number is
+          // the answer to "did it register my ticks", which the icon can't give.
+          className={`${iconButtonClass} ${selected.length > 0 ? "w-auto gap-1.5 px-3" : ""}`}
         >
-          Edit Selected{selected.length > 0 && ` (${selected.length})`}
+          <Icon name="edit" />
+          {selected.length > 0 && <span className="text-sm font-medium tabular-nums">{selected.length}</span>}
         </button>
-        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryActionClass}>
-          + Add Contacts
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "batch" })}
+          className={primaryIconButtonClass}
+          aria-label="Add contacts"
+          title="Add contacts — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

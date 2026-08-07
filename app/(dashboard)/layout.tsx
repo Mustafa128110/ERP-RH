@@ -4,6 +4,7 @@ import { getAccessibleCompanies } from "@/lib/actions/scope";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { KeyboardShortcuts } from "@/components/layout/KeyboardShortcuts";
+import { BackToTop } from "@/components/layout/BackToTop";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
@@ -25,9 +26,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* Tighter gutters on a phone — 24px each side of a 360px screen is a
             sixth of it. pb picks up the home-indicator inset on iOS, which
             otherwise sits over the last row of a list. */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 lg:p-6 print:overflow-visible print:bg-white print:p-0">
+        {/* Gutters tightened from p-3/4/6: the list underneath is the reason
+            the screen exists, and a 24px frame on a 1080p monitor was costing
+            it two rows. pb picks up the home-indicator inset on iOS, which
+            otherwise sits over the last row of a list. */}
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4 print:overflow-visible print:bg-white print:p-0">
           {children}
         </main>
+        <BackToTop />
       </div>
     </div>
   );

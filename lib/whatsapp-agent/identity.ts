@@ -71,5 +71,10 @@ export async function sessionForWhatsAppNumber(phone: string): Promise<AuthSessi
     permissionsByCompany,
     companyIds: row.company_ids,
     warehouseIds: row.warehouse_ids,
+    // Carried so this stays the identical projection the web session builds —
+    // the agent has no screen to theme, but a session that is missing fields the
+    // other one has is exactly how the two drift apart.
+    uiTheme: row.ui_theme,
+    uiScale: row.ui_scale,
   };
 }

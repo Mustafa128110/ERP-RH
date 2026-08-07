@@ -6,7 +6,8 @@ import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import type { ColumnDef, Row } from "@/lib/table";
 
 // The master-data list screen, written once.
@@ -79,11 +80,20 @@ export function RecordManager<T extends { id: string }>({
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title={title} subtitle={`${records.length} ${records.length === 1 ? noun : many}`}>
         {headerActions}
-        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryActionClass}>
-          + Add {many.replace(/^./, (c) => c.toUpperCase())}
+        {/* The noun moved out of the button and into its label: the plus is the
+            same gesture on every list, and the heading directly above it
+            already says which list you are on. */}
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "batch" })}
+          className={primaryIconButtonClass}
+          aria-label={`Add ${many}`}
+          title={`Add ${many} — Alt+N`}
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

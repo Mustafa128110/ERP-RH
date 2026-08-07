@@ -181,7 +181,7 @@ export function InvoiceManager({
       : `${count} invoice(s)${filtered ? " matching" : ""} · ${money(outstanding)} outstanding`;
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Invoices" subtitle={subtitle}>
         <ListFilters nameParam="customer" namePlaceholder="Customer name">
           <StockFilter

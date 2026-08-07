@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { formatDate, money, qty } from "@/lib/format";
 import { statusColumn, type ColumnDef, type Row } from "@/lib/table";
@@ -65,13 +66,13 @@ export function QuotationManager({ quotations }: { quotations: QuotationListRow[
   useNewEntry(() => router.push("/sales/quotations/new"));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Quotations"
         subtitle={`${quotations.length} quotation(s) · ${open} still open`}
       >
-        <Link href="/sales/quotations/new" className={`flex items-center ${primaryActionClass}`}>
-          + New Quotation
+        <Link href="/sales/quotations/new" className={primaryIconButtonClass} aria-label="New quotation" title="New quotation">
+          <Icon name="plus" />
         </Link>
       </PageHeader>
 

@@ -29,6 +29,21 @@ export const secondaryActionClass =
   "h-11 rounded border border-sand px-5 text-sm font-semibold text-navy-800 hover:bg-ivory disabled:opacity-40";
 export const deleteButtonClass = "text-sm font-medium text-error hover:underline disabled:opacity-40";
 
+// --- Icon buttons ------------------------------------------------------------
+// The page-header actions are icon-only now: a list screen's whole job is to
+// show rows, and four labelled buttons across the top were spending a strip of
+// every screen restating what the icons say. Square, so a row of them reads as
+// a toolbar rather than as ragged pills.
+//
+// Every one of these MUST carry an aria-label and a title — the label is the
+// only thing left for a screen reader, and the title is what a new user hovers
+// to find out what the glyph means. A bare icon button with neither is not a
+// smaller button, it is an unlabelled one.
+export const iconButtonClass =
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded border border-sand text-navy-800 hover:bg-ivory disabled:opacity-40 disabled:hover:bg-transparent";
+export const primaryIconButtonClass =
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded bg-navy-800 text-white hover:bg-navy-700 disabled:opacity-40";
+
 // The "+" that opens a quick-add popup from inside a bigger form. Two sizes
 // because the contexts genuinely differ: `quickAdd` sits beside a full-height
 // field, `quickAddInline` sits inside a line-item table row where 12 units of

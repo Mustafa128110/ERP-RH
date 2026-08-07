@@ -80,7 +80,7 @@ export function WhatsAppManager({
   useNewEntry(() => setComposing(true));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="WhatsApp" subtitle={`${messages.length} message(s) — newest first`}>
         <button type="button" onClick={() => setComposing(true)} className={primaryActionClass}>
           + Send Message

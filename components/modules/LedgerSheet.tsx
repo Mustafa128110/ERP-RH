@@ -103,7 +103,7 @@ export function BalanceSheetDocument({ company, books, rows }: { company: Letter
   const net = totalReceivable - totalPayable;
 
   return (
-    <div className="w-full bg-white p-10 text-ink">
+    <div className="force-light w-full bg-white p-10 text-ink">
       <Header company={company} title="Balance Sheet" subtitle={books} />
 
       <Side title="Receivable — Owes Us" rows={receivable} amountOf={(r) => -r.balance} />
@@ -137,7 +137,7 @@ export function ContactStatementDocument({ company, row }: { company: Letterhead
   const outstanding = Math.abs(row.balance);
 
   return (
-    <div className="w-full bg-white p-10 text-ink">
+    <div className="force-light w-full bg-white p-10 text-ink">
       <Header company={company} title="Statement of Account" subtitle={row.displayName} />
 
       <div className="mt-6">
@@ -233,7 +233,9 @@ export function SheetRenderer({ children, onReady }: { children: ReactNode; onRe
   }, []);
 
   return (
-    <div ref={ref} aria-hidden className="pointer-events-none fixed top-0 left-0 z-[-1000] w-[900px] bg-white">
+    // force-light: this is photographed and then printed or sent on, so it is
+    // held in the light palette whatever theme the app is wearing (globals.css).
+    <div ref={ref} aria-hidden className="force-light pointer-events-none fixed top-0 left-0 z-[-1000] w-[900px] bg-white">
       {children}
     </div>
   );

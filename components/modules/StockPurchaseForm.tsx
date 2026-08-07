@@ -204,6 +204,33 @@ export function StockPurchaseCreateForm({
     if (!isEdit && !pending) nextButtonRef.current?.click();
   }, true);
 
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // The emptying itself, with nothing asked. Clear asks first because it throws
+  // away work; Next Purchase doesn't, because the work is already saved.
+  //
+  // Declared above the effect that calls it, not below with the rest of the form
+  // handlers: hoisting would run either way, but the lint rule won't read a
+  // binding declared later in the component body.
+  function resetForm() {
+    // Cleared on purpose, so the draft goes with it rather than being offered
+    // back on the next visit.
+    clearDraft(PURCHASE_DRAFT_KEY);
+    setLines([emptyLine()]);
+    setContactId("");
+    setSupplierText("");
+    setLocationId(shopLocation?.id ?? "");
+    setLocationText(shopLocation?.name ?? "");
+    setDiscountTotal("0");
+    setTaxTotal("0");
+    setShippingTotal("0");
+    setIsPaid("no");
+    setSettlementType("account");
+    // Resets what isn't controlled state — the date back to today, the settlement
+    // select, and the manual document number. Company is controlled, so it stays.
+    formRef.current?.reset();
+  }
+
   useEffect(() => {
     if (!state?.success) return;
     // Saved — the local copy has nothing left to protect.
@@ -246,40 +273,19 @@ export function StockPurchaseCreateForm({
     setLines((prev) => prev.map((l) => (l.itemId && !itemOpts.some((it) => it.id === l.itemId && it.companyId === next) ? { ...l, itemId: "" } : l)));
   }
 
-  // Empties the form for a fresh purchase — the same idea as the sale form's
-  // Clear. Confirms only when there's something to lose, and is offered on new
-  // purchases only: on an existing one it would wipe what was loaded from the
-  // database and leave the edit form pointing at nothing.
-  const formRef = useRef<HTMLFormElement>(null);
   // Excel-style arrows across the line grid, plus Delete to empty a cell. Ctrl+Enter
   // is not passed here on purpose: this is a real <form>, so the app-wide handler
   // in KeyboardShortcuts already submits it, and handling it twice would submit twice.
   const gridRef = useRef<HTMLTableSectionElement>(null);
+
+  // Empties the form for a fresh purchase — the same idea as the sale form's
+  // Clear. Confirms only when there's something to lose, and is offered on new
+  // purchases only: on an existing one it would wipe what was loaded from the
+  // database and leave the edit form pointing at nothing.
   function clearForm() {
     const started = lines.some((l) => l.itemText.trim() || l.itemId) || supplierText.trim();
     if (started && !confirm("Clear this purchase and start over?")) return;
     resetForm();
-  }
-
-  // The emptying itself, with nothing asked. Clear asks first because it throws
-  // away work; Next Purchase doesn't, because the work is already saved.
-  function resetForm() {
-    // Cleared on purpose, so the draft goes with it rather than being offered
-    // back on the next visit.
-    clearDraft(PURCHASE_DRAFT_KEY);
-    setLines([emptyLine()]);
-    setContactId("");
-    setSupplierText("");
-    setLocationId(shopLocation?.id ?? "");
-    setLocationText(shopLocation?.name ?? "");
-    setDiscountTotal("0");
-    setTaxTotal("0");
-    setShippingTotal("0");
-    setIsPaid("no");
-    setSettlementType("account");
-    // Resets what isn't controlled state — the date back to today, the settlement
-    // select, and the manual document number. Company is controlled, so it stays.
-    formRef.current?.reset();
   }
 
   // Editing the last row grows the grid, so there is always one spare row below

@@ -11,7 +11,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { CsvActions } from "@/components/ui/CsvActions";
 import { exportStockPurchasesCsv, importStockPurchasesCsv } from "@/lib/actions/purchases";
 import { PURCHASE_CSV_COLUMNS } from "@/lib/csv-columns";
-import { primaryActionClass, secondaryActionClass } from "@/components/ui/form-styles";
+import { iconButtonClass, primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { DetailHover } from "@/components/ui/DetailHover";
 import type { ColumnDef, Row } from "@/lib/table";
@@ -188,12 +189,18 @@ export function StockPurchaseManager({
   useNewEntry(() => setOpen(true));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Stock Purchase" subtitle={`${rows.length} purchase(s)`}>
         {/* Same ?company= filter the stock page uses. */}
         <StockFilter param="company" allLabel="All Companies" options={companyOptions} />
-        <button type="button" onClick={() => setMergeOpen(true)} className={secondaryActionClass}>
-          Merge Purchases
+        <button
+          type="button"
+          onClick={() => setMergeOpen(true)}
+          className={iconButtonClass}
+          aria-label="Merge purchases"
+          title="Merge purchases"
+        >
+          <Icon name="merge" />
         </button>
         <CsvActions
           columns={PURCHASE_CSV_COLUMNS}
@@ -202,8 +209,14 @@ export function StockPurchaseManager({
           onExport={() => exportStockPurchasesCsv(companyId)}
           onDone={() => router.refresh()}
         />
-        <button type="button" onClick={() => setOpen(true)} className={primaryActionClass}>
-          + New Purchase
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className={primaryIconButtonClass}
+          aria-label="New purchase"
+          title="New purchase — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

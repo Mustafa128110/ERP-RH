@@ -7,7 +7,8 @@ import { UnitConversionEditForm, DeleteUnitConversionButton, UnitConversionBatch
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 
 interface ConversionListItem {
@@ -67,10 +68,16 @@ export function UnitConversionManager({
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Unit Conversions" subtitle={`${conversions.length} conversion(s)`}>
-        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryActionClass}>
-          + Add Conversions
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "batch" })}
+          className={primaryIconButtonClass}
+          aria-label="Add conversions"
+          title="Add conversions — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

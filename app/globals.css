@@ -2,17 +2,30 @@
 
 /*
  * Royal Hardware brand system (docs/OS/02-brand/colors.json,
- * docs/OS/07-design-system/foundations.md). Light-mode only per that
- * system's own decision log — the `dark` variant is redefined to a
- * selector that's never applied, so any leftover `dark:` utility
- * classes in components are inert rather than fighting this.
+ * docs/OS/07-design-system/foundations.md).
+ *
+ * The `dark` VARIANT stays disabled — pointed at a selector that is never
+ * applied — so the leftover `dark:zinc-*` utility classes scattered through
+ * DataTable, GlobalSearch and others remain inert. Dark mode here is not
+ * those classes waking up; it is the token remap foundations.md §7 called
+ * for ("all values are tokens, so a future dark theme is a remap, not a
+ * rebuild"). Every color below is redefined under :root[data-theme="dark"]
+ * near the bottom of this file, and the whole app follows without a single
+ * component changing class.
+ *
+ * That is also why the colors are NOT in `@theme inline`: inline bakes the
+ * literal hex into each utility, which no runtime override can reach. Only
+ * the fonts stay inline, because they genuinely are pass-throughs to the
+ * next/font variables on <html>.
  */
 @custom-variant dark (&:where(.rh-dark-unused));
 
 @theme inline {
   --font-sans: var(--font-inter);
   --font-display: var(--font-fraunces);
+}
 
+@theme {
   /* Navy — authority: buttons, headers, primary text */
   --color-navy-900: #0a1a2c;
   --color-navy-800: #10263f;
@@ -27,11 +40,22 @@
   --color-brass-400: #c9a85c;
   --color-brass-100: #f5eedd;
 
-  /* Neutrals — the stage */
+  /* Neutrals — the stage.
+     `white` is declared rather than left to Tailwind's default so it is
+     guaranteed to be emitted as a variable, and therefore reachable by the dark
+     remap below. It carries two roles that invert together: the surface a card
+     is drawn on, and the text drawn on top of a navy-800 button. */
+  --color-white: #ffffff;
   --color-ivory: #f7f5f0;
   --color-sand: #e2dfd8;
   --color-steel: #5b6470;
   --color-ink: #1c1e21;
+
+  /* The wash behind a modal or the phone nav drawer. Its own token because it
+     is the one dark thing that must stay dark in both themes: it used to be
+     ink/30, and ink is body text, which inverts. A pale scrim over a dark app
+     lights up the thing it is meant to be pushing back. */
+  --color-scrim: #05090e;
 
   /* Semantic */
   --color-success: #1e7a4d;
@@ -91,8 +115,256 @@
 }
 
 :root {
-  --background: #ffffff;
-  --foreground: #1c1e21;
+  --background: var(--color-white);
+  --foreground: var(--color-ink);
+}
+
+/*
+ * ── Dark theme ──────────────────────────────────────────────────────────────
+ *
+ * Set by app/layout.tsx from users.ui_theme, server-side, so the first paint is
+ * already the right one. Unlayered on purpose: Tailwind emits its own tokens
+ * inside `@layer theme`, and unlayered rules outrank every layer, so these win
+ * without an !important anywhere.
+ *
+ * The remap follows the light system's ROLES rather than its names, which is
+ * what makes it work without touching components:
+ *
+ *   white   card and control surfaces  →  and therefore also the text that sits
+ *                                         ON navy-800, which inverts with it
+ *   ivory   the page behind the cards  →  the deepest tone, so cards lift off it
+ *   navy    authority                  →  the ramp inverts: navy-800 is now the
+ *                                         LIGHT tone, still the primary. It reads
+ *                                         as text on a card and as a filled
+ *                                         button with dark (white-token) text,
+ *                                         exactly the two jobs it does in light.
+ *   brass   the seal, ≤10% of a view   →  brightened, because 600 on a dark
+ *                                         ground is mud
+ *   semantic values lighten; their tints darken — a tint is a background, and a
+ *   background cannot stay pale here.
+ *
+ * Contrast was chosen against the two grounds that actually occur: cards
+ * (#141d28) and the page (#0c141d). ink ~13:1, steel ~7:1, navy-800 ~11:1.
+ */
+:root[data-theme="dark"] {
+  /* Navy — inverted ramp. 900 is now the lightest (pressed/deepest emphasis),
+     200/100 become dark grounds, because that is what they are used for. */
+  --color-navy-900: #eaf1fa;
+  --color-navy-800: #c5d8ef;
+  --color-navy-700: #dbe8f7;
+  --color-navy-500: #7ea3cc;
+  --color-navy-200: #24384f;
+  --color-navy-100: #1b2c3f;
+
+  /* Brass — one step brighter than light mode; brass-100 is a ground, so it
+     inverts into a dark warm tone rather than staying a cream. */
+  --color-brass-700: #b08a3c;
+  --color-brass-600: #c9a85c;
+  --color-brass-400: #dcc07f;
+  --color-brass-100: #2c2517;
+
+  /* Neutrals — the stage, rebuilt. */
+  --color-white: #141d28;
+  --color-ivory: #0c141d;
+  --color-sand: #2b3948;
+  --color-steel: #94a3b4;
+  --color-ink: #e6eaef;
+  /* scrim deliberately absent — it keeps its light-mode value. */
+
+  /* Semantic — value lightens for legibility, tint darkens to stay a ground. */
+  --color-success: #4ade9a;
+  --color-success-tint: #10281d;
+  --color-warning: #e0a353;
+  --color-warning-tint: #2e2411;
+  --color-error: #f0857d;
+  --color-error-tint: #331715;
+  --color-info: #7fb3e0;
+  --color-info-tint: #14273a;
+
+  /* The zinc/rose/emerald/amber aliases follow their brand counterparts, same
+     as they do in light mode — otherwise every component still on a zinc class
+     would stay lit while the one beside it went dark. */
+  --color-zinc-950: #eaf1fa;
+  --color-zinc-900: #c5d8ef;
+  --color-zinc-800: #dbe8f7;
+  --color-zinc-700: #e6eaef;
+  --color-zinc-600: #94a3b4;
+  --color-zinc-500: #94a3b4;
+  --color-zinc-400: #94a3b4;
+  --color-zinc-300: #2b3948;
+  --color-zinc-200: #2b3948;
+  --color-zinc-100: #0c141d;
+  --color-zinc-50: #0c141d;
+
+  --color-rose-950: #ffd9d5;
+  --color-rose-900: #ffc4bf;
+  --color-rose-700: #f0857d;
+  --color-rose-600: #f0857d;
+  --color-rose-400: #f0857d;
+  --color-rose-300: #6b2a26;
+  --color-rose-200: #4a1e1b;
+  --color-rose-50: #331715;
+
+  --color-emerald-600: #4ade9a;
+  --color-emerald-400: #4ade9a;
+  --color-amber-700: #e0a353;
+  --color-amber-600: #e0a353;
+  --color-amber-50: #2e2411;
+
+  /* Elevation on a dark ground can't be a navy haze — it has to be black, and
+     deeper, or a dropdown floats with no edge at all. */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.65);
+
+  /* The browser's own widgets — scrollbars, form controls, the caret — follow
+     this rather than staying light and pinholing the page. */
+  color-scheme: dark;
+}
+
+/*
+ * ── Forced light ────────────────────────────────────────────────────────────
+ *
+ * A document that leaves this app is not part of this app's theme. An invoice
+ * PNG goes into a customer's WhatsApp; a ledger sheet gets printed and filed.
+ * Both are photographed straight off the DOM (lib/node-download.ts), and the
+ * canvas background is already hard-coded white — so under a dark theme the
+ * text stays pale and the file comes out white-on-white, i.e. blank.
+ *
+ * Custom properties inherit, so putting this on the wrapper is enough for
+ * everything drawn inside it, including the child html2canvas actually
+ * photographs.
+ *
+ * Every variable the dark block above overrides has to be restored here, or
+ * that one token stays dark inside an otherwise light document.
+ * lib/theme.check.ts asserts exactly that, so adding a dark override without a
+ * light restore fails the check suite rather than a customer's invoice.
+ */
+.force-light,
+:root[data-theme="dark"] .force-light {
+  --color-navy-900: #0a1a2c;
+  --color-navy-800: #10263f;
+  --color-navy-700: #1e3a5c;
+  --color-navy-500: #3d5a7e;
+  --color-navy-200: #c9d4e2;
+  --color-navy-100: #e8edf4;
+
+  --color-brass-700: #8f6e2c;
+  --color-brass-600: #b08a3c;
+  --color-brass-400: #c9a85c;
+  --color-brass-100: #f5eedd;
+
+  --color-white: #ffffff;
+  --color-ivory: #f7f5f0;
+  --color-sand: #e2dfd8;
+  --color-steel: #5b6470;
+  --color-ink: #1c1e21;
+
+  --color-success: #1e7a4d;
+  --color-success-tint: #e6f2ec;
+  --color-warning: #b4690e;
+  --color-warning-tint: #fbf1e3;
+  --color-error: #b3261e;
+  --color-error-tint: #faeae9;
+  --color-info: #1e4e79;
+  --color-info-tint: #e8edf4;
+
+  --color-zinc-950: #0a1a2c;
+  --color-zinc-900: #10263f;
+  --color-zinc-800: #1e3a5c;
+  --color-zinc-700: #1c1e21;
+  --color-zinc-600: #5b6470;
+  --color-zinc-500: #5b6470;
+  --color-zinc-400: #5b6470;
+  --color-zinc-300: #e2dfd8;
+  --color-zinc-200: #e2dfd8;
+  --color-zinc-100: #f7f5f0;
+  --color-zinc-50: #f7f5f0;
+
+  --color-rose-950: #7a1a15;
+  --color-rose-900: #922019;
+  --color-rose-700: #b3261e;
+  --color-rose-600: #b3261e;
+  --color-rose-400: #b3261e;
+  --color-rose-300: #e8b3af;
+  --color-rose-200: #f0c4c1;
+  --color-rose-50: #faeae9;
+
+  --color-emerald-600: #1e7a4d;
+  --color-emerald-400: #1e7a4d;
+  --color-amber-700: #b4690e;
+  --color-amber-600: #b4690e;
+  --color-amber-50: #fbf1e3;
+
+  --shadow-sm: 0 2px 8px rgba(16, 38, 63, 0.08);
+  --shadow-xl: 0 8px 32px rgba(16, 38, 63, 0.16);
+
+  color-scheme: light;
+}
+
+/*
+ * Print is the same argument as the export: paper has no dark mode, and a dark
+ * theme prints as either a wasted cartridge or (with backgrounds off, the
+ * browser default) pale grey text on white. Applied at the root so it covers
+ * whatever is being printed, not just the two documents above.
+ */
+@media print {
+  :root[data-theme="dark"] {
+    --color-navy-900: #0a1a2c;
+    --color-navy-800: #10263f;
+    --color-navy-700: #1e3a5c;
+    --color-navy-500: #3d5a7e;
+    --color-navy-200: #c9d4e2;
+    --color-navy-100: #e8edf4;
+
+    --color-brass-700: #8f6e2c;
+    --color-brass-600: #b08a3c;
+    --color-brass-400: #c9a85c;
+    --color-brass-100: #f5eedd;
+
+    --color-white: #ffffff;
+    --color-ivory: #f7f5f0;
+    --color-sand: #e2dfd8;
+    --color-steel: #5b6470;
+    --color-ink: #1c1e21;
+
+    --color-success: #1e7a4d;
+    --color-success-tint: #e6f2ec;
+    --color-warning: #b4690e;
+    --color-warning-tint: #fbf1e3;
+    --color-error: #b3261e;
+    --color-error-tint: #faeae9;
+    --color-info: #1e4e79;
+    --color-info-tint: #e8edf4;
+
+    --color-zinc-950: #0a1a2c;
+    --color-zinc-900: #10263f;
+    --color-zinc-800: #1e3a5c;
+    --color-zinc-700: #1c1e21;
+    --color-zinc-600: #5b6470;
+    --color-zinc-500: #5b6470;
+    --color-zinc-400: #5b6470;
+    --color-zinc-300: #e2dfd8;
+    --color-zinc-200: #e2dfd8;
+    --color-zinc-100: #f7f5f0;
+    --color-zinc-50: #f7f5f0;
+
+    --color-rose-950: #7a1a15;
+    --color-rose-900: #922019;
+    --color-rose-700: #b3261e;
+    --color-rose-600: #b3261e;
+    --color-rose-400: #b3261e;
+    --color-rose-300: #e8b3af;
+    --color-rose-200: #f0c4c1;
+    --color-rose-50: #faeae9;
+
+    --color-emerald-600: #1e7a4d;
+    --color-emerald-400: #1e7a4d;
+    --color-amber-700: #b4690e;
+    --color-amber-600: #b4690e;
+    --color-amber-50: #fbf1e3;
+
+    color-scheme: light;
+  }
 }
 
 body {
@@ -179,7 +451,7 @@ tr[data-focused="true"] {
     display: block;
     border: 1px solid var(--color-sand);
     border-radius: var(--radius-md);
-    background: #fff;
+    background: var(--color-white);
     padding: 0.25rem 0.75rem;
   }
   table[data-responsive] td {
@@ -224,6 +496,34 @@ tr[data-focused="true"] {
   table[data-responsive] td:not([data-label]) {
     justify-content: flex-start;
     border-bottom: 1px solid var(--color-ivory);
+  }
+}
+
+/*
+ * Things that unfold sideways out of a button — the CSV trio, the search box.
+ * Written here rather than reached for from a plugin: this project has no
+ * animation plugin, and two keyframes do not justify one.
+ */
+@keyframes reveal-right {
+  from {
+    opacity: 0;
+    transform: translateX(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.reveal-right {
+  animation: reveal-right 150ms ease-out;
+}
+
+/* Someone who has asked the OS to stop moving things gets the end state
+   immediately, not a slower version of the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .reveal-right {
+    animation: none;
   }
 }
 

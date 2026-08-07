@@ -13,6 +13,11 @@ export type SessionRow = {
   perms: { companyId: string | null; key: string }[];
   company_ids: string[];
   warehouse_ids: string[];
+  // Display preferences. They live on this row, and this row is already being
+  // fetched before every render, so carrying them costs nothing — which is what
+  // lets the theme be applied server-side with no flash of the wrong one.
+  ui_theme: "light" | "dark";
+  ui_scale: number;
 };
 
 // The database is ~170ms away (Supabase ap-southeast-2). This used to be a
@@ -51,6 +56,8 @@ function sessionRows(match: ReturnType<typeof sql>) {
       u.name,
       u.email,
       u.status,
+      u.ui_theme,
+      u.ui_scale,
       coalesce((
         SELECT json_agg(DISTINCT r.name)
         FROM user_roles ur

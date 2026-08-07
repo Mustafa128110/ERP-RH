@@ -63,7 +63,7 @@ export function StockMovementsManager({ movements, filters }: { movements: Stock
   const outQty = movements.reduce((sum, m) => sum + Math.min(Number(m.quantity), 0), 0);
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Stock Movements"
         subtitle={`${movements.length} movement(s) · ${qty(inQty)} in, ${qty(Math.abs(outQty))} out`}

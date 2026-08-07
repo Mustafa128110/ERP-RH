@@ -6,7 +6,8 @@ import type { ReportResult } from "@/lib/queries/reports";
 import type { ReportSlug } from "@/lib/report-constants";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { secondaryActionClass } from "@/components/ui/form-styles";
+import { iconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import { money, qty } from "@/lib/format";
 import type { ColumnDef, Row } from "@/lib/table";
 
@@ -83,11 +84,18 @@ export function ReportView({
   }
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title={`${report.title} Report`} subtitle={report.description}>
         {filterBar}
-        <button type="button" onClick={() => void exportCsv()} disabled={busy || report.rows.length === 0} className={secondaryActionClass}>
-          {busy ? "Building…" : "Export CSV"}
+        <button
+          type="button"
+          onClick={() => void exportCsv()}
+          disabled={busy || report.rows.length === 0}
+          className={iconButtonClass}
+          aria-label="Export this report as CSV"
+          title={busy ? "Building…" : "Export CSV"}
+        >
+          <Icon name="export" />
         </button>
       </PageHeader>
 

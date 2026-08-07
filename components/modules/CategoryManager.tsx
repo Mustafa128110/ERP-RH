@@ -9,7 +9,8 @@ import { CategoryTree } from "@/components/modules/CategoryTree";
 import { CategoryEditForm, DeleteCategoryButton, CategoryBatchAddDialog } from "@/components/modules/CategoryForm";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryActionClass, primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 
 type ModalState = { kind: "batch" } | { kind: "edit"; node: CategoryNode } | null;
 
@@ -111,15 +112,15 @@ export function CategoryManager({ roots }: { roots: CategoryNode[] }) {
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Categories" subtitle={`${flat.length} categor${flat.length === 1 ? "y" : "ies"}`}>
         {dirty && (
           <button type="button" onClick={save} disabled={saving} className={primaryActionClass}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         )}
-        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryActionClass}>
-          + Add Categories
+        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryIconButtonClass} aria-label="Add categories" title="Add categories — Alt+N">
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

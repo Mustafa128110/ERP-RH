@@ -8,7 +8,8 @@ import { RoleCreateForm, RoleEditForm, DeleteRoleButton } from "@/components/mod
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 
 const columns: ColumnDef[] = [
@@ -55,10 +56,16 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
   useNewEntry(() => setCreating(true));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Roles" subtitle={`${roles.length} role(s)`}>
-        <button type="button" onClick={() => setCreating(true)} className={primaryActionClass}>
-          + New Role
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className={primaryIconButtonClass}
+          aria-label="New role"
+          title="New role — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 

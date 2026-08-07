@@ -59,7 +59,7 @@ export function AuditLogManager({ entries, filters }: { entries: AuditRow[]; fil
   }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Audit Logs"
         subtitle={`${entries.length} most recent change${entries.length === 1 ? "" : "s"} — newest first`}

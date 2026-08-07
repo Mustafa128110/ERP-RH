@@ -99,7 +99,7 @@ export function Sidebar() {
               no navigation at all. ----------------------------------------- */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
-          <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} role="presentation" />
+          <div className="absolute inset-0 bg-scrim/60 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} role="presentation" />
           {/* max-w-[85vw] so the page behind stays visible — a full-width menu
               reads as a navigation *page* and loses the sense of going back. */}
           <aside className="scroll-thin absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col overflow-y-auto border-r border-sand bg-white pb-[env(safe-area-inset-bottom)]">

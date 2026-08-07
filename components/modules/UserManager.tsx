@@ -9,7 +9,8 @@ import { UserEditForm, UserRoleAssignments, DeleteUserButton } from "@/component
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { primaryActionClass } from "@/components/ui/form-styles";
+import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 
 const columns: ColumnDef[] = [
@@ -64,10 +65,16 @@ export function UserManager({
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       <PageHeader title="Users" subtitle={`${users.length} account(s)`}>
-        <button type="button" onClick={() => setModal({ kind: "batch" })} className={primaryActionClass}>
-          + Add Users
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "batch" })}
+          className={primaryIconButtonClass}
+          aria-label="Add users"
+          title="Add users — Alt+N"
+        >
+          <Icon name="plus" />
         </button>
       </PageHeader>
 
