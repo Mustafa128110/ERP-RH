@@ -163,7 +163,11 @@ export function StockAdjustmentFormPage({
                       options={visibleItems}
                       placeholder="Item"
                       className={cellInput}
-                      inputProps={{ "data-cell": `${r}-0` }}
+                      // data-shortcut="i" marks the first line's item box so
+                      // Ctrl+I can jump to it from anywhere in the form. An
+                      // adjustment has no discount/tax/shipping, so only this
+                      // one jump exists here.
+                      inputProps={{ "data-cell": `${r}-0`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                       onChange={(name) => updateLine(r, { itemText: name, itemId: visibleItems.find((it) => it.name === name)?.id ?? "" })}
                     />
                   </td>

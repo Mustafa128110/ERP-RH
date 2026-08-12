@@ -18,6 +18,7 @@ import {
   ledgerEntries,
   chequeRegister,
   inventoryTransactions,
+  expenses,
 } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -36,7 +37,7 @@ import {
   getUnits,
   invalidateLookups,
 } from "@/lib/queries/lookups";
-import { resolveContactId, resolveItemId, resolveLocationId, resolveUnitId } from "@/lib/actions/resolve-refs";
+import { resolveContactId, resolveExpenseCategoryId, resolveItemId, resolveLocationId, resolveUnitId } from "@/lib/actions/resolve-refs";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { inCompany } from "@/lib/contact-scope";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
@@ -76,6 +77,10 @@ export async function listStockPurchases(companyId?: string) {
         subtotal: documents.subtotal,
         grandTotal: documents.grandTotal,
         isPaid: documents.isPaid,
+        // What's actually been paid, not just the flag: a purchase whose only
+        // payment is its freight shows "Partial Paid" rather than "Paid"
+        // (createStockPurchase records the shipping as a paid expense).
+        paidAmount: documents.paidAmount,
         discountTotal: documents.discountTotal,
         taxTotal: documents.taxTotal,
         shippingTotal: documents.shippingTotal,
@@ -233,6 +238,51 @@ function opt(formData: FormData, key: string) {
   return v === "" ? null : v;
 }
 
+// The cash account a purchase's shipping is paid from: the company's
+// marked-default cash account, or the first active one when none is marked.
+// Null when the company has no cash account at all, which the caller reports
+// as a clear error rather than recording an expense that was never paid.
+async function shippingCashAccountId(companyId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: cashAccounts.id })
+    .from(cashAccounts)
+    .where(and(eq(cashAccounts.companyId, companyId), eq(cashAccounts.isActive, true)))
+    .orderBy(desc(cashAccounts.isDefault))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+// Freight is paid the moment the goods arrive, not added to what's owed to the
+// supplier. This files it under the company's "Shipping" expense category,
+// draws it from the default cash account, and links the expense back to the
+// purchase (expenses.document_id) so an edit or delete of the purchase reverses
+// it in the same transaction — without that link, changing the shipping on a
+// saved purchase would leave two expenses for one delivery.
+type ShippingExpenseArgs = {
+  companyId: string;
+  documentId: string;
+  number: string;
+  documentDate: string;
+  shipping: string;
+  cashAccountId: string;
+  userId: string;
+};
+
+async function recordShippingExpense(tx: PurchaseTx, args: ShippingExpenseArgs) {
+  const categoryId = (await resolveExpenseCategoryId(tx, args.companyId, null, "Shipping"))!;
+  await tx.insert(expenses).values({
+    companyId: args.companyId,
+    expenseCategoryId: categoryId,
+    cashAccountId: args.cashAccountId,
+    amount: args.shipping,
+    expenseDate: args.documentDate,
+    documentId: args.documentId,
+    notes: `Shipping on ${args.number}`,
+    createdBy: args.userId,
+  });
+  await adjustSettlementBalance(tx, "out", args.shipping, null, args.cashAccountId, null, 1);
+}
+
 export async function createStockPurchase(_prevState: ActionResult | undefined, formData: FormData) {
   const session = await getSession();
   requirePermission(session, "purchases", "create");
@@ -331,6 +381,17 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
 
+  // Freight is paid the moment the goods arrive (recordShippingExpense below),
+  // so what the supplier is owed is the total minus the shipping.
+  const shippingAmount = round1(Number(shippingTotal) || 0);
+  const goodsTotal = round1(grandTotal - shippingAmount);
+  // Read before the transaction: shippingCashAccountId uses the connection, not
+  // the tx handle.
+  const shippingCashId = shippingAmount > 0 ? await shippingCashAccountId(companyId) : null;
+  if (shippingAmount > 0 && !shippingCashId) {
+    return { error: "Shipping needs a cash account — add one for this company first." };
+  }
+
   let createdNumber = "";
   let createdId = "";
   try {
@@ -356,10 +417,10 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           shippingTotal,
           grandTotal: String(grandTotal),
           isPaid,
-          // Purchases are still all-or-nothing (part payment is a sales feature so
-          // far), so the amount tracks the flag rather than sitting at 0 and
-          // making a paid purchase look unsettled to anything reading the column.
-          paidAmount: isPaid ? String(grandTotal) : "0",
+          // Shipping is paid on arrival (the expense below), so what the
+          // purchase shows as paid is the shipping amount when it isn't fully
+          // paid — the partial-paid state — and the whole total when it is.
+          paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
           bankAccountId,
           cashAccountId,
           createdBy: session.userId,
@@ -414,15 +475,38 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
       // Paid purchases settle immediately instead: deduct the settling
       // account and skip the payable ledger row. A type that doesn't affect the
       // payable does neither — it moved stock, not money.
+      //
+      // Either way the credit/settlement is the goods portion only: the
+      // shipping has already left the building, as the expense below.
       if (!documentType.affectsPayable) {
         // nothing to book
       } else if (!isPaid) {
-        await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(grandTotal) });
+        if (goodsTotal > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(goodsTotal) });
+        }
       } else {
         if (chequeId) {
           await tx.update(chequeRegister).set({ documentId: doc.id }).where(eq(chequeRegister.id, chequeId));
         }
-        await adjustSettlementBalance(tx, "out", String(grandTotal), bankAccountId, cashAccountId, chequeId, 1);
+        if (goodsTotal > 0) {
+          await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1);
+        }
+      }
+
+      // The freight expense, linked back to this purchase so a later edit or
+      // delete reverses it in the same transaction. Written after the document
+      // exists (it needs the id) but inside the transaction, so a rollback
+      // undoes the expense with the purchase.
+      if (shippingAmount > 0) {
+        await recordShippingExpense(tx, {
+          companyId,
+          documentId: doc.id,
+          number,
+          documentDate,
+          shipping: String(shippingAmount),
+          cashAccountId: shippingCashId!,
+          userId: session.userId,
+        });
       }
     });
   } catch (e) {
@@ -434,11 +518,13 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // and every page reading them are stale, not just the purchase list. Without the
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
   revalidatePath("/ledger");
+  revalidatePath("/expenses");
+  revalidatePath("/dashboard");
   await recordAudit({ action: "create", entity: "purchase", entityId: createdId, summary: createdNumber, companyId, detail: `Total ${grandTotal}` });
   return { success: true };
 }
@@ -484,6 +570,17 @@ export async function updateStockPurchase(
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
 
+  // Freight is paid on arrival (recordShippingExpense below), so the supplier's
+  // payable is the total minus the shipping — the same split as create.
+  const shippingAmount = round1(Number(shippingTotal) || 0);
+  const goodsTotal = round1(grandTotal - shippingAmount);
+  // Read before the transaction: shippingCashAccountId uses the connection, not
+  // the tx handle.
+  const shippingCashId = shippingAmount > 0 ? await shippingCashAccountId(companyId) : null;
+  if (shippingAmount > 0 && !shippingCashId) {
+    return { error: "Shipping needs a cash account — add one for this company first." };
+  }
+
   const [existingDoc] = await db
     .select({
       number: documents.number,
@@ -510,13 +607,28 @@ export async function updateStockPurchase(
   const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
 
   await db.transaction(async (tx) => {
+    // The freight expense from this purchase's last save, if any. A merge can
+    // leave several (the losers' expenses travel to the survivor), so every
+    // linked row is reversed and dropped, and one new expense is written for
+    // the current shipping figure below.
+    const linkedExpenses = await tx
+      .select({ amount: expenses.amount, cashAccountId: expenses.cashAccountId })
+      .from(expenses)
+      .where(eq(expenses.documentId, documentId));
+    const oldShippingPaid = round1(linkedExpenses.reduce((sum, e) => sum + Number(e.amount), 0));
+    // What the old settlement actually covered. Since the shipping-expense
+    // change a paid purchase settles the goods portion (grandTotal − shipping);
+    // one saved before it settled the whole total. The linked expense is the
+    // tell: present → the settlement was goods-only.
+    const oldSettled = round1(Number(existingDoc.grandTotal) - oldShippingPaid);
+
     // Reverse the old settlement (if it was paid) before applying the new
     // one — handles amount changes and paid/unpaid flips in one pass.
     if (existingDoc.isPaid) {
       await adjustSettlementBalance(
         tx,
         "out",
-        existingDoc.grandTotal,
+        String(oldSettled),
         existingDoc.bankAccountId,
         existingDoc.cashAccountId,
         existingCheque?.id ?? null,
@@ -526,6 +638,11 @@ export async function updateStockPurchase(
         await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
       }
     }
+    // And the freight payments themselves, before the new state is written.
+    for (const e of linkedExpenses) {
+      await adjustSettlementBalance(tx, "out", e.amount, null, e.cashAccountId, null, -1);
+    }
+    await tx.delete(expenses).where(eq(expenses.documentId, documentId));
 
     const resolvedContactId = await resolveContactId(tx, companyId, contactId, contactName);
     await tx
@@ -541,7 +658,9 @@ export async function updateStockPurchase(
         shippingTotal,
         grandTotal: String(grandTotal),
         isPaid,
-        paidAmount: isPaid ? String(grandTotal) : "0",
+        // Unpaid with freight: the shipping has already left as the expense, so
+        // that's what the purchase shows as paid — the partial-paid state.
+        paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
         bankAccountId,
         cashAccountId,
         updatedAt: new Date(),
@@ -552,7 +671,8 @@ export async function updateStockPurchase(
       if (chequeId) {
         await tx.update(chequeRegister).set({ documentId }).where(eq(chequeRegister.id, chequeId));
       }
-      await adjustSettlementBalance(tx, "out", String(grandTotal), bankAccountId, cashAccountId, chequeId, 1);
+      // The goods portion only — the shipping is covered by the expense below.
+      await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1);
     }
 
     // inventory_transactions.document_line_id is ON DELETE RESTRICT, so old
@@ -592,10 +712,25 @@ export async function updateStockPurchase(
 
     // Re-sync the payable credit: drop whatever was there and re-add only if
     // still unpaid, so flipping paid/unpaid on edit doesn't leave stale rows. A
-    // type that doesn't affect the payable never has one.
+    // type that doesn't affect the payable never has one. Either way the credit
+    // is the goods portion only — the shipping has left as the expense below.
     await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
     if (!isPaid && documentType?.affectsPayable) {
-      await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(grandTotal) });
+      await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(goodsTotal) });
+    }
+
+    // Re-write the freight expense for the current shipping figure — the old
+    // one was reversed and dropped above. Skipped when shipping is now zero.
+    if (shippingAmount > 0) {
+      await recordShippingExpense(tx, {
+        companyId,
+        documentId,
+        number: existingDoc.number,
+        documentDate,
+        shipping: String(shippingAmount),
+        cashAccountId: shippingCashId!,
+        userId: session.userId,
+      });
     }
   });
 
@@ -604,11 +739,12 @@ export async function updateStockPurchase(
   // and every page reading them are stale, not just the purchase list. Without the
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
   revalidatePath("/ledger");
+  revalidatePath("/expenses");
   await recordAudit({ action: "update", entity: "purchase", entityId: documentId, summary: existingDoc.number, companyId, detail: `Total ${grandTotal}` });
   return { success: true };
 }
@@ -636,17 +772,33 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
 
   try {
     await db.transaction(async (tx) => {
+      // The freight expense was paid from the cash account, so its settlement
+      // has to be reversed before the document goes. The cascade on
+      // expenses.document_id would delete the rows by itself, but a paid expense
+      // silently vanishing is exactly what this reversal is for — the account
+      // balance must move back with it.
+      const linkedExpenses = await tx
+        .select({ amount: expenses.amount, cashAccountId: expenses.cashAccountId })
+        .from(expenses)
+        .where(eq(expenses.documentId, documentId));
+      const oldShippingPaid = round1(linkedExpenses.reduce((sum, e) => sum + Number(e.amount), 0));
+      // Same rule as update: the old settlement covered the goods only when a
+      // freight expense was linked (post-change data), the whole total before.
       if (existingDoc.isPaid) {
         await adjustSettlementBalance(
           tx,
           "out",
-          existingDoc.grandTotal,
+          String(round1(Number(existingDoc.grandTotal) - oldShippingPaid)),
           existingDoc.bankAccountId,
           existingDoc.cashAccountId,
           existingCheque?.id ?? null,
           -1,
         );
       }
+      for (const e of linkedExpenses) {
+        await adjustSettlementBalance(tx, "out", e.amount, null, e.cashAccountId, null, -1);
+      }
+      await tx.delete(expenses).where(eq(expenses.documentId, documentId));
       // Unlinked regardless of the paid flag: cheque_register.document_id is ON
       // DELETE NO ACTION, so a cheque still pointing here fails the delete.
       if (existingCheque) {
@@ -673,11 +825,12 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
   // and every page reading them are stale, not just the purchase list. Without the
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
   revalidatePath("/ledger");
+  revalidatePath("/expenses");
   await recordAudit({
     action: "delete",
     entity: "purchase",
@@ -707,6 +860,12 @@ export interface PurchaseMergeCandidate {
   contactId: string | null;
   supplier: string | null;
   grandTotal: string;
+  shippingTotal: string;
+  // How much of the shipping was actually paid — freight expense rows linked to
+  // this purchase. Before the shipping-expense change, shipping sat inside the
+  // payable with no expense, so this is what the merge dialog trusts over the
+  // shippingTotal header.
+  shippingPaid: number;
   isPaid: boolean;
   paidAmount: string;
   lines: number;
@@ -726,6 +885,8 @@ export async function listPurchaseMergeCandidates(): Promise<PurchaseMergeCandid
       contactId: documents.contactId,
       supplier: contacts.displayName,
       grandTotal: documents.grandTotal,
+      shippingTotal: documents.shippingTotal,
+      shippingPaid: sql<number>`coalesce((select sum(${expenses.amount}) from ${expenses} where ${expenses.documentId} = ${documents.id}), 0)`,
       isPaid: documents.isPaid,
       paidAmount: documents.paidAmount,
       lines: sql<number>`(select count(*) from ${documentLines} dl where dl.document_id = ${documents.id})`,
@@ -737,7 +898,7 @@ export async function listPurchaseMergeCandidates(): Promise<PurchaseMergeCandid
     .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .orderBy(desc(documents.documentDate));
 
-  return rows.map((r) => ({ ...r, lines: Number(r.lines) }));
+  return rows.map((r) => ({ ...r, lines: Number(r.lines), shippingPaid: Number(r.shippingPaid) }));
 }
 
 export async function mergeStockPurchases(
@@ -776,6 +937,18 @@ export async function mergeStockPurchases(
     .where(and(inArray(documents.id, documentIds), await companyInScope(documents.companyId)));
   if (docs.length !== documentIds.length) return { error: "One of these purchases no longer exists, or isn't in your company scope." };
 
+  // How much of each purchase's shipping was actually paid: the freight expense
+  // rows linked to it. A purchase saved before the shipping-expense change has
+  // its shipping folded into the payable with no expense row, so that shipping
+  // is still owed — the paid figure, not the shippingTotal header, is what
+  // decides mergeability and what the survivor reports as paid.
+  const expenseRows = await db
+    .select({ documentId: expenses.documentId, total: sql<string>`coalesce(sum(${expenses.amount}), 0)` })
+    .from(expenses)
+    .where(inArray(expenses.documentId, documentIds))
+    .groupBy(expenses.documentId);
+  const shippingPaidByDoc = new Map(expenseRows.map((r) => [r.documentId, Number(r.total)]));
+
   // Books are per company and so is stock — the same rule mergeProducts follows.
   if (new Set(docs.map((d) => d.companyId)).size > 1) return { error: "These purchases belong to different companies — merge within one company." };
   // An invoice has one supplier, and an unpaid one is a payable against that
@@ -784,11 +957,14 @@ export async function mergeStockPurchases(
   if (new Set(docs.map((d) => d.contactId ?? "")).size > 1) {
     return { error: "These purchases have different suppliers — merge one supplier at a time." };
   }
-  // A settled purchase has already moved money out of an account, or is holding a
-  // cheque. Unpicking that correctly is a different job from gathering lines, so
-  // this refuses rather than guessing at it.
-  if (docs.some((d) => d.isPaid || Number(d.paidAmount) > 0)) {
-    return { error: "One of these is already paid — merge unpaid purchases only, or unsettle them first." };
+  // A settled purchase has already moved money out of an account, or is holding
+  // a cheque. Unpicking that correctly is a different job from gathering lines,
+  // so this refuses rather than guessing at it. Freight is the one exception:
+  // the shipping expense is paid on arrival by design, so a purchase whose only
+  // payment is its shipping can still merge — the expenses travel to the
+  // survivor with the lines.
+  if (docs.some((d) => d.isPaid || Number(d.paidAmount) > (shippingPaidByDoc.get(d.id) ?? 0))) {
+    return { error: "One of these is paid beyond its shipping — merge purchases whose only payment is freight, or unsettle them first." };
   }
 
   const loserIds = documentIds.filter((id) => id !== survivorId);
@@ -840,6 +1016,12 @@ export async function mergeStockPurchases(
       const subtotal = Number(totals?.subtotal ?? 0);
       const grandTotal = round1(subtotal - discountTotal + taxTotal + shippingTotal);
 
+      // The merged purchase stays unpaid, so what it shows as paid is the
+      // freight actually paid — the sum of the expenses about to travel over.
+      // Shipping that was never expensed (a pre-change purchase) stays owed with
+      // the goods.
+      const paidShipping = round1([...shippingPaidByDoc.values()].reduce((sum, v) => sum + v, 0));
+      const goodsTotal = round1(grandTotal - paidShipping);
       await tx
         .update(documents)
         .set({
@@ -848,15 +1030,22 @@ export async function mergeStockPurchases(
           taxTotal: String(taxTotal),
           shippingTotal: String(shippingTotal),
           grandTotal: String(grandTotal),
+          paidAmount: String(paidShipping),
           updatedAt: new Date(),
         })
         .where(eq(documents.id, survivorId));
 
       // ledger_entries.document_id is ON DELETE NO ACTION, so the losers' payable
-      // rows have to go before their documents can. The survivor's is rewritten to
-      // the combined total — one delivery, one amount owed.
+      // rows have to go before their documents can. The survivor's is rewritten
+      // to the combined goods total — one delivery, one amount owed, freight
+      // already paid separately.
       await tx.delete(ledgerEntries).where(inArray(ledgerEntries.documentId, documentIds));
-      await tx.insert(ledgerEntries).values({ companyId, documentId: survivorId, credit: String(grandTotal) });
+      await tx.insert(ledgerEntries).values({ companyId, documentId: survivorId, credit: String(goodsTotal) });
+
+      // The losers' freight expenses were paid the moment their goods arrived;
+      // they now belong to the merged purchase. Done before the delete — the FK
+      // is ON DELETE CASCADE, which would otherwise silently drop paid expenses.
+      await tx.update(expenses).set({ documentId: survivorId }).where(inArray(expenses.documentId, loserIds));
 
       // The dropped numbers are never reissued: document_number_ledger.document_id
       // is ON DELETE SET NULL, so each row stays behind as a tombstone recording
@@ -868,12 +1057,13 @@ export async function mergeStockPurchases(
   }
 
   // Same set of views a create or delete invalidates: the merge moves stock
-  // between documents and rewrites a payable.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  // between documents, rewrites a payable and re-points freight expenses.
+  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
   revalidatePath("/ledger");
+  revalidatePath("/expenses");
   await recordAudit({
     action: "merge",
     entity: "purchase",

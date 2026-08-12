@@ -9,7 +9,6 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
-import { isConfigured } from "@/lib/whatsapp";
 import { SETTING_DEFS } from "@/lib/setting-constants";
 
 // The settings table has existed since the first migration and nothing had ever
@@ -92,15 +91,6 @@ export async function settingsOverview() {
   return {
     companies: companyRows,
     integrations: [
-      {
-        name: "WhatsApp (Meta Cloud API)",
-        connected: isConfigured(),
-        // Names the variables rather than describing them, because the person
-        // reading this is about to go and set them.
-        detail: isConfigured()
-          ? "Connected. Messages send immediately and appear in the WhatsApp log."
-          : "Not connected. Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN in .env.",
-      },
       {
         name: "Database",
         connected: true,

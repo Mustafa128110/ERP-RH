@@ -1,7 +1,7 @@
 import "server-only";
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { todayISO } from "@/lib/format";
+import { formatDateWhenDate, formatMonth, todayISO } from "@/lib/format";
 import { REPORT_TYPES, type ReportSlug } from "@/lib/report-constants";
 
 // The SQL behind every report, and the shapes it comes back in.
@@ -16,7 +16,11 @@ import { REPORT_TYPES, type ReportSlug } from "@/lib/report-constants";
 // real database without a login, which is the only way to find out that a query
 // referencing a column that doesn't exist was ever written.
 
-export type ReportColumn = { key: string; label: string; align?: "right"; money?: boolean; qty?: boolean };
+// `date` marks a column whose values are YYYY-MM-DD (or the occasional word,
+// like "Never" — formatDateWhenDate handles that); `month` marks a YYYY-MM
+// period label. Both are formatted to day-first here in queryReport, once, so
+// the web table and the CSV export show the same string.
+export type ReportColumn = { key: string; label: string; align?: "right"; money?: boolean; qty?: boolean; date?: boolean; month?: boolean };
 export type ReportRow = Record<string, string | number | null>;
 export type ReportResult = {
   title: string;
@@ -52,7 +56,7 @@ const NOTES: Partial<Record<ReportSlug, string>> = {
 
 const COLUMNS: Record<ReportSlug, ReportColumn[]> = {
   sales: [
-    { key: "period", label: "Date" },
+    { key: "period", label: "Date", date: true },
     { key: "company", label: "Company" },
     { key: "saleType", label: "Channel" },
     { key: "invoices", label: "Invoices", align: "right" },
@@ -109,7 +113,7 @@ const COLUMNS: Record<ReportSlug, ReportColumn[]> = {
     { key: "number", label: "Document" },
     { key: "contact", label: "Contact" },
     { key: "company", label: "Company" },
-    { key: "date", label: "Date" },
+    { key: "date", label: "Date", date: true },
     { key: "age", label: "Days", align: "right" },
     { key: "balance", label: "Outstanding", align: "right", money: true },
   ],
@@ -118,18 +122,18 @@ const COLUMNS: Record<ReportSlug, ReportColumn[]> = {
     { key: "item", label: "Item" },
     { key: "company", label: "Company" },
     { key: "onHand", label: "On Hand", align: "right", qty: true },
-    { key: "lastSold", label: "Last Sold" },
+    { key: "lastSold", label: "Last Sold", date: true },
     { key: "value", label: "Value", align: "right", money: true },
   ],
   purchase: [
-    { key: "period", label: "Date" },
+    { key: "period", label: "Date", date: true },
     { key: "supplier", label: "Supplier" },
     { key: "company", label: "Company" },
     { key: "invoices", label: "Invoices", align: "right" },
     { key: "total", label: "Total", align: "right", money: true },
   ],
   gst: [
-    { key: "period", label: "Month" },
+    { key: "period", label: "Month", month: true },
     { key: "company", label: "Company" },
     { key: "salesTax", label: "Tax on Sales", align: "right", money: true },
     { key: "purchaseTax", label: "Tax on Purchases", align: "right", money: true },
@@ -351,8 +355,23 @@ const QUERIES: Record<ReportSlug, Query> = {
 // live in a "use server" module.
 export async function queryReport(slug: ReportSlug, scope: Scope): Promise<ReportResult> {
   const meta = REPORT_TYPES.find((r) => r.slug === slug)!;
-  const rows = await QUERIES[slug](scope);
+  const raw = await QUERIES[slug](scope);
   const columns = COLUMNS[slug];
+  // The SQL hands back ISO (or "Never"), so every consumer sees day-first
+  // without each one knowing which columns are dates.
+  const dateCols = columns.filter((c) => c.date || c.month);
+  const rows =
+    dateCols.length === 0
+      ? raw
+      : raw.map((r) => {
+          const out = { ...r };
+          for (const c of dateCols) {
+            const v = out[c.key];
+            if (v === null || v === undefined) continue;
+            out[c.key] = c.date ? formatDateWhenDate(String(v)) : formatMonth(String(v));
+          }
+          return out;
+        });
   return { title: meta.label, description: meta.desc, columns, rows, totals: totalsFor(columns, rows), note: NOTES[slug] };
 }
 

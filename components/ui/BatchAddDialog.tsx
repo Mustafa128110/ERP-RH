@@ -28,6 +28,7 @@ export function BatchAddDialog<T, C = unknown>({
   onDone,
   initialRows = 5,
   toolbar,
+  autoAppend = false,
 }: {
   title: string;
   onClose: () => void;
@@ -40,10 +41,17 @@ export function BatchAddDialog<T, C = unknown>({
   // master-data pages mean "I'm entering a batch". Same dialog, different start.
   initialRows?: number;
   // Sits above the table — used for the "+ Add Category" / "+ Add Brand" quick
-  // buttons when a row's dropdowns reference records the user may not have yet.
+  // buttons when a row's dropdowns reference records the user may not have yet,
+  // or for a dialog-level field that applies to every row, like a shared date.
   // Kept out of the rows themselves because those options are shared by every
   // row, so one button per entity beats one per cell.
   toolbar?: React.ReactNode;
+  // The dialog grows its own rows: editing the last row appends a fresh blank
+  // one beneath it, so a dialog that starts with a single row (initialRows={1})
+  // never needs the "+ Add rows" button — the expense and payment dialogs enter
+  // one record at a time and run this way. Blank rows are dropped by the server
+  // actions, so a spare at the bottom costs nothing.
+  autoAppend?: boolean;
 }) {
   const [rows, setRows] = useState<T[]>(() => Array.from({ length: initialRows }, emptyRow));
   const [pending, setPending] = useState(false);
@@ -51,7 +59,15 @@ export function BatchAddDialog<T, C = unknown>({
   const bodyRef = useRef<HTMLTableSectionElement>(null);
 
   function update(i: number, patch: Partial<T>) {
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    setRows((prev) => {
+      const next = prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+      // A row that grows itself: once the last row is touched, a fresh blank
+      // row follows it, so there is always somewhere to type next — the same
+      // rule the sale and purchase line grids use. Only when autoAppend asks
+      // for it; the master-data dialogs keep the "+ Add rows" button instead.
+      if (autoAppend && i === prev.length - 1) next.push(emptyRow());
+      return next;
+    });
   }
 
   function removeRow(i: number) {
@@ -76,15 +92,17 @@ export function BatchAddDialog<T, C = unknown>({
       onClose={onClose}
       size="wide"
       footer={
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => setRows((prev) => [...prev, ...Array.from({ length: ADD_ROWS }, emptyRow)])}
-            className="text-sm font-medium text-navy-800 hover:underline"
-          >
-            + Add {ADD_ROWS} rows
-          </button>
-          <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3">
+          {!autoAppend && (
+            <button
+              type="button"
+              onClick={() => setRows((prev) => [...prev, ...Array.from({ length: ADD_ROWS }, emptyRow)])}
+              className="mr-auto text-sm font-medium text-navy-800 hover:underline"
+            >
+              + Add {ADD_ROWS} rows
+            </button>
+          )}
+          <div className="ml-auto flex items-center gap-3">
             {error && <p className="text-sm text-error">{error}</p>}
             <button type="button" onClick={onClose} className="h-10 rounded px-4 text-sm text-steel hover:bg-ivory">
               Cancel
@@ -93,6 +111,10 @@ export function BatchAddDialog<T, C = unknown>({
               type="button"
               onClick={submit}
               disabled={pending}
+              // data-dialog-submit: this dialog has no form (Save calls a
+              // function), so the app-wide Ctrl+Enter handler clicks this
+              // button from anywhere in the dialog body, including the toolbar.
+              data-dialog-submit
               className="h-10 rounded bg-navy-800 px-5 text-sm font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
             >
               {pending ? "Saving…" : "Save"}

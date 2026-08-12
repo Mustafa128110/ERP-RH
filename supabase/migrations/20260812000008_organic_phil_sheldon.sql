@@ -1,0 +1,1 @@
+ALTER TABLE "items" ALTER COLUMN "taxable" SET DEFAULT false;

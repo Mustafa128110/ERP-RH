@@ -1,0 +1,2 @@
+ALTER TABLE "document_types" DROP CONSTRAINT "document_types_series_unique";--> statement-breakpoint
+ALTER TABLE "document_types" ADD CONSTRAINT "document_types_company_id_series_unique" UNIQUE("company_id","series");

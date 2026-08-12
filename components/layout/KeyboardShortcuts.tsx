@@ -4,12 +4,21 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog } from "@/components/ui/Dialog";
 import { GO_TO, SHORTCUT_GROUPS } from "@/lib/shortcuts";
+import { setZoom } from "@/lib/actions/preferences";
+import { DEFAULT_SCALE, fontSizeForScale, zoomIn, zoomOut } from "@/lib/preference-constants";
 
 // Every key the app answers to that isn't owned by one component, registered
 // once here rather than wired into each of the ~30 forms:
 //
-//   Ctrl/Cmd + Enter        submit the form the focus is in
+//   Ctrl/Cmd + Enter        submit the form the focus is in — or the open
+//                           dialog's, when the focus is in its body
+//   Ctrl/Cmd + I            jump to the first line item (every document form)
+//   Ctrl/Cmd + D            jump to the discount field (sale, purchase, quotation)
+//   Ctrl/Cmd + T            jump to the tax field (sale, purchase, quotation)
+//   Ctrl/Cmd + S            jump to the shipping field (sale, purchase, quotation)
+//   Alt + I/D/T/S           the same jumps inside a popup (the purchase popup)
 //   Ctrl/Cmd + Backspace    empty the focused field (Delete does the same)
+//   Ctrl Alt + / Ctrl Alt - zoom in and out (the same ladder as Settings)
 //   g then <key>            go to a page (lib/shortcuts.ts)
 //   ?                       show the shortcut sheet
 //
@@ -42,9 +51,32 @@ function isTyping(target: EventTarget | null): boolean {
 // enough that a `g` typed and abandoned doesn't hijack the next key pressed.
 const SEQUENCE_MS = 1200;
 
+// The field jumps — Ctrl/Cmd+I/D/T/S on a page, Alt+I/D/T/S inside a popup —
+// move focus to whichever field a form marked with the matching data-shortcut
+// attribute. The sale, purchase and quotation forms mark all four; the
+// transfer, inter-company and stock-adjustment forms mark only the first line
+// item, since they have no discount, tax or shipping fields
+// (StockTransferForm.tsx, InterCompanyForm.tsx, StockAdjustmentForm.tsx).
+// Everywhere else the keys stay the browser's own (italic, bookmark, new tab,
+// save page).
+const SHORTCUT_FIELD_KEYS = ["i", "d", "t", "s"];
+
 // Fired by anything that wants to show the sheet without a keypress.
 export const SHORTCUTS_EVENT = "erp:shortcuts";
 export const openShortcuts = () => window.dispatchEvent(new Event(SHORTCUTS_EVENT));
+
+// Fired whenever the zoom changes by keyboard, so the Settings card — which
+// owns the % label and its buttons' disabled states — can follow a size it
+// didn't set itself.
+export const ZOOM_EVENT = "erp:zoom";
+
+// The current zoom, read off the document. The root layout and the Settings
+// page both write the scale into <html>'s inline font size, and 100% is
+// represented by no style at all — so the number is parseable or it's 100.
+function currentScale(): number {
+  const m = /^(\d+(?:\.\d+)?)%$/.exec(document.documentElement.style.fontSize);
+  return m ? Number(m[1]) : DEFAULT_SCALE;
+}
 
 // Alt+N — "one more of whatever this page makes". Ctrl+N is Chrome's own (new
 // window) and never reaches a page, and Alt is what lets it work from inside a
@@ -77,6 +109,16 @@ export function KeyboardShortcuts() {
   const pendingGo = useRef<number | null>(null);
 
   useEffect(() => {
+    // Zoom lands the same way the Settings buttons do it (AppearanceSettings.tsx):
+    // applied to the document first for instant feedback, then saved. No refresh
+    // afterwards — setZoom revalidates the layout, so the next fetch of any route
+    // is rendered at the new size, and the document is already right here.
+    function applyZoom(next: number) {
+      document.documentElement.style.fontSize = fontSizeForScale(next);
+      window.dispatchEvent(new CustomEvent<number>(ZOOM_EVENT, { detail: next }));
+      void setZoom(next);
+    }
+
     function onKeyDown(e: KeyboardEvent) {
       // Up/Down in a number field steps its value. In a grid that means arrowing
       // between rows quietly rewrites a price or a quantity, and nothing here
@@ -94,12 +136,77 @@ export function KeyboardShortcuts() {
         return;
       }
 
-      // --- Modified keys: work everywhere, including inside a field ----------
-      if (e.ctrlKey || e.metaKey) {
-        const el = e.target;
+      // Ctrl/Alt + plus and Ctrl/Alt + minus are the zoom — the same ladder the
+      // Settings page uses, applied to the document and saved to the account.
+      // The plus row needs Shift to produce "+", so its unshifted "=" is
+      // matched too; the numpad's keys already arrive as "+" and "-".
+      if (e.ctrlKey && e.altKey && !e.metaKey) {
+        if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          applyZoom(zoomIn(currentScale()));
+          return;
+        }
+        if (e.key === "-") {
+          e.preventDefault();
+          applyZoom(zoomOut(currentScale()));
+          return;
+        }
+      }
 
-        if (e.key === "Enter") {
+      // --- Modified keys: work everywhere, including inside a field ----------
+      const el = e.target;
+
+      // The field jumps. The browser has its own Ctrl+D/T/S (bookmark, new
+      // tab, save page), so the default is stopped only when the form
+      // actually marked a field for this key. On a page they are
+      // Ctrl/Cmd+I/D/T/S; inside a popup they are Alt+I/D/T/S — the purchase
+      // popup's other shortcut is Alt+N, so its modifier language is Alt and
+      // the browser's Ctrl keys stay untouched there.
+      const fieldKey = e.key.toLowerCase();
+      if (SHORTCUT_FIELD_KEYS.includes(fieldKey)) {
+        const inDialog = el instanceof Element && !!el.closest('[role="dialog"]');
+        if (inDialog ? e.altKey && !e.ctrlKey && !e.metaKey : e.ctrlKey || e.metaKey) {
           const form = el instanceof Element ? el.closest("form") : null;
+          const target = form?.querySelector<HTMLElement>(`[data-shortcut="${fieldKey}"]`);
+          if (target) {
+            e.preventDefault();
+            target.focus();
+            // select() also focuses, and highlights the current value — a jump
+            // to a "5%" discount is ready to be typed over, not appended to.
+            if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) target.select();
+          }
+          return;
+        }
+        // Unarmed, the key keeps its other meanings — the bare-key section below
+        // still consumes `g then i` / `g then s`, and the browser's own
+        // Ctrl+D/T/S (bookmark, new tab, save page) is untouched where no form
+        // marked a field for it.
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "Enter") {
+          const target = el instanceof Element ? el : null;
+          let form = target?.closest("form") ?? null;
+          // A dialog whose submit lives out of reach of the focus — a form
+          // that wraps only the footer (the Convert to Invoice popup), or a
+          // Save/Apply button that calls a function (the batch-edit grids, the
+          // date-range filter) — still gets Ctrl+Enter from anywhere in its
+          // body when it marks that element data-dialog-submit. An unmarked
+          // form (a delete form, a paid sending path) is never submitted from
+          // outside itself.
+          // The target itself excluded: focus already on the marked button
+          // (plain Enter activates it natively) is not re-clicked here.
+          if (!form && target && !target.matches("[data-dialog-submit]")) {
+            const submit = target.closest('[role="dialog"]')?.querySelector<HTMLElement>(
+              "form[data-dialog-submit], button[data-dialog-submit]",
+            );
+            if (submit instanceof HTMLFormElement) form = submit;
+            else if (submit instanceof HTMLButtonElement) {
+              e.preventDefault();
+              submit.click();
+              return;
+            }
+          }
           if (form) {
             e.preventDefault();
             // requestSubmit, not submit(): it runs validation and fires the

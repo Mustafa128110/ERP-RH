@@ -104,7 +104,10 @@ export function DateRangeFilter() {
               <button type="button" onClick={() => push("", "")} className={secondaryActionClass}>
                 Clear dates
               </button>
-              <button type="button" onClick={apply} className={submitClass}>
+              {/* data-dialog-submit: this dialog has no form (Apply is a
+                  function), so the app-wide Ctrl+Enter handler clicks this
+                  button from anywhere in the dialog body. */}
+              <button type="button" onClick={apply} data-dialog-submit className={submitClass}>
                 Apply
               </button>
             </div>

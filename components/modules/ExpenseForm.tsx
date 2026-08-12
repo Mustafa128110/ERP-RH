@@ -56,7 +56,6 @@ type BatchRow = {
   settlementType: SettlementType;
   settlementId: string;
   amount: string;
-  expenseDate: string;
   notes: string;
 };
 
@@ -88,11 +87,12 @@ export function ExpenseBatchAddDialog({
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
   const settlementList = (t: SettlementType) => (t === "account" ? bankAccountOptions : t === "cash" ? cashAccountOptions : chequeOpts);
 
-  // Expenses are almost always entered the day they happen, so every row starts
-  // on today and gets typed over when it isn't. en-CA is the YYYY-MM-DD the date
-  // input wants, in local time — toISOString() would hand back yesterday for
-  // anything entered before 05:00 here.
+  // Expenses are almost always entered the day they happen, so one date at the
+  // top covers the whole batch — there is no per-row date to retype. en-CA is
+  // the YYYY-MM-DD the date input wants, in local time — toISOString() would
+  // hand back yesterday for anything entered before 05:00 here.
   const today = new Date().toLocaleDateString("en-CA");
+  const [batchDate, setBatchDate] = useState(today);
 
   // Expenses come out of the drawer far more often than out of a bank account,
   // so rows start on Cash with the account flagged default (Cash on Hand). Which
@@ -107,7 +107,6 @@ export function ExpenseBatchAddDialog({
     settlementType: "cash",
     settlementId: defaultCashId,
     amount: "",
-    expenseDate: today,
     notes: "",
   });
 
@@ -117,7 +116,17 @@ export function ExpenseBatchAddDialog({
       onClose={onClose}
       onDone={onDone}
       emptyRow={emptyRow}
-      headers={["Company", "Category", "Date", "Amount", "Settle via", "Account", "Note"]}
+      initialRows={1}
+      autoAppend
+      headers={["Company", "Category", "Amount", "Settle via", "Account", "Note"]}
+      toolbar={
+        <label className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-steel">Date</span>
+          <span className="w-44 rounded border border-sand">
+            <DateField value={batchDate} onChange={setBatchDate} className={batchInputClass} />
+          </span>
+        </label>
+      }
       onSubmit={async (rows) => {
         const values: ExpenseBatchRow[] = rows.map((r) => ({
           companyId: r.companyId,
@@ -128,7 +137,8 @@ export function ExpenseBatchAddDialog({
           cashAccountId: r.settlementType === "cash" ? r.settlementId || null : null,
           chequeId: r.settlementType === "cheque" ? r.settlementId || null : null,
           amount: r.amount.trim() || "0",
-          expenseDate: r.expenseDate,
+          // One date at the top of the dialog, saved on every row.
+          expenseDate: batchDate,
           notes: r.notes.trim() || null,
         }));
         return createExpensesBatch(values);
@@ -170,9 +180,6 @@ export function ExpenseBatchAddDialog({
                 })
               }
             />
-          </td>
-          <td className={batchCellClass}>
-            <DateField value={row.expenseDate} onChange={(expenseDate) => update({ expenseDate })} className={batchInputClass} />
           </td>
           <td className={batchCellClass}>
             <input type="number" step="0.1" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />

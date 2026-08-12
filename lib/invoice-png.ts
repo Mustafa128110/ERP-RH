@@ -1,8 +1,8 @@
 import { invoiceFileName, type Invoice } from "@/lib/invoice-pdf";
 import { downloadNodeAsPng } from "@/lib/node-download";
 
-// The invoice as a picture — what gets pasted into a WhatsApp chat, where a PDF
-// arrives as a file someone has to open and an image is simply readable.
+// The invoice as a picture — for sending where a PDF arrives as a file someone
+// has to open and an image is simply readable.
 //
 // This photographs the invoice already on screen rather than drawing a third
 // layout. There are two of those to keep in step already (the page in

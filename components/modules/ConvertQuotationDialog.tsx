@@ -49,7 +49,11 @@ export function ConvertQuotationDialog({
       onClose={onClose}
       size="wide"
       footer={
-        <form action={action} className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+        /* data-dialog-submit: the dialog's only form sits in the footer while
+           the quantity inputs live in the body, so the app-wide Ctrl+Enter
+           handler (KeyboardShortcuts) may submit it from anywhere in this
+           dialog. */
+        <form action={action} data-dialog-submit className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           <input type="hidden" name="quantitiesJson" value={JSON.stringify(Object.fromEntries(chosen))} />
           <input type="hidden" name="documentDate" value={documentDate} />
           <div className="flex items-center gap-3">

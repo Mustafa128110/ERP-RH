@@ -32,7 +32,6 @@ const PERMISSION_CATALOG: Record<string, string[]> = {
   customers: ["view", "create", "edit", "delete"],
   customer_ledger: ["view"],
   expenses: ["view", "create", "edit", "delete"],
-  whatsapp: ["view", "create"],
   reports: ["view", "export"],
   users: ["view", "create", "edit", "delete"],
   roles: ["view", "create", "edit"],

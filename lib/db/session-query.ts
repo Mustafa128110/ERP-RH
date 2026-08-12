@@ -37,16 +37,6 @@ export function sessionQuery(authId: string) {
   return sessionRows(sql`u.supabase_auth_id = ${authId}`);
 }
 
-// Same row, found by the phone the person messages the ERP from. The WhatsApp
-// agent has no cookie to read a session out of, so this is how an inbound
-// message becomes a user with roles and company access
-// (lib/whatsapp-agent/identity.ts). Deliberately the identical projection: the
-// agent must be subject to exactly the permissions the web session is, and two
-// queries that drift apart is how that stops being true.
-export function sessionByWhatsAppNumber(phone: string) {
-  return sessionRows(sql`u.whatsapp_number = ${phone}`);
-}
-
 function sessionRows(match: ReturnType<typeof sql>) {
   return withConnectRetry(() =>
     db.execute<SessionRow>(sql`

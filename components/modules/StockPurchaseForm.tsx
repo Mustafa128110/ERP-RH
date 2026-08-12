@@ -499,6 +499,10 @@ export function StockPurchaseCreateForm({
                       options={visibleItems}
                       placeholder="Item"
                       className={cellInput}
+                      // data-shortcut="i" marks the first line's item box so
+                      // Alt+I can jump to it from anywhere in this popup — the
+                      // purchase popup's jumps are Alt, not Ctrl.
+                      inputProps={i === 0 ? { "data-shortcut": "i" } : undefined}
                       onChange={(name) => updateLine(i, { itemText: name, itemId: visibleItems.find((it) => it.name === name)?.id ?? "" })}
                     />
                   </td>
@@ -570,6 +574,7 @@ export function StockPurchaseCreateForm({
               type="text"
               inputMode="decimal"
               placeholder="0 or 5%"
+              data-shortcut="d"
               value={discountTotal}
               onChange={(e) => setDiscountTotal(e.target.value)}
               className={fieldClass}
@@ -582,6 +587,7 @@ export function StockPurchaseCreateForm({
               type="text"
               inputMode="decimal"
               placeholder="0 or 5%"
+              data-shortcut="t"
               value={taxTotal}
               onChange={(e) => setTaxTotal(e.target.value)}
               className={fieldClass}
@@ -595,10 +601,18 @@ export function StockPurchaseCreateForm({
               type="number"
               min="0"
               step="0.1"
+              data-shortcut="s"
               value={shippingTotal}
               onChange={(e) => setShippingTotal(e.target.value)}
               className={`${fieldClass}`}
             />
+            {/* Freight is money out the moment the goods arrive: it's recorded
+                as a paid expense from the default cash account, not added to
+                what the supplier is owed — so this purchase shows Partial Paid
+                and the payable below it is the total minus this. */}
+            <span className="mt-1 block text-xs leading-snug text-steel">
+              Paid on arrival from the default cash account — it isn&apos;t part of what you owe the supplier.
+            </span>
           </label>
         </div>
         <div className="flex flex-col items-end gap-0.5 border-t border-sand pt-2 text-sm text-ink">

@@ -1,0 +1,36 @@
+# Supabase CLI project configuration.
+#
+# Run `supabase start` / `supabase link --project-ref <ref>` / `supabase db push`
+# from the repository root — the CLI reads this file and the folders beside it
+# (migrations/, functions/).
+#
+# project_id is only the *local* identity; the remote project is chosen with
+# `supabase link --project-ref <project-ref>` (the random string in your
+# project's Supabase dashboard URL), which writes .temp/ and .supabase/ links
+# that stay out of git.
+project_id = "royal-hardware-erp"
+
+# Edge functions. Each function is a folder under functions/ with an
+# index.ts entry point (Deno). Deploy a function with:
+#
+#     supabase functions deploy <function-name>
+#
+# and call it from the frontend with the supabase-js client:
+#
+#     supabase.functions.invoke("<function-name>", { body: {...} })
+[functions]
+enabled = true
+# verify_jwt = true          # default per function; set per-function below when
+#                            # the function must be callable without a session
+#                            # (e.g. a WhatsApp webhook).
+
+# Per-function overrides — uncomment and adjust when functions exist:
+# [functions.whatsapp-webhook]
+# verify_jwt = false
+
+# Migrations live in ./migrations. Applied to a linked remote database with:
+#
+#     supabase db push
+#
+# They mirror the drizzle-generated history in ./drizzle (which remains the
+# source of truth for the dev workflow: `npm run db:generate` / `db:migrate`).

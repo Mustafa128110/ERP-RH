@@ -1,0 +1,1 @@
+ALTER TABLE "contacts" ADD COLUMN "alternate_phone" varchar(30);

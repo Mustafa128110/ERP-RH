@@ -4,7 +4,7 @@ import { useActionState, useEffect, useMemo, useState } from "react";
 import { listPurchaseMergeCandidates, mergeStockPurchases, type PurchaseMergeCandidate } from "@/lib/actions/purchases";
 import { Dialog } from "@/components/ui/Dialog";
 import { inputClass, submitClass, errorTextClass } from "@/components/ui/form-styles";
-import { money } from "@/lib/format";
+import { formatDate, money } from "@/lib/format";
 
 // Gathering several purchases into one. One delivery entered as three notes, or
 // the same note keyed twice, leaves a supplier owed four separate amounts for
@@ -44,7 +44,14 @@ export function MergePurchasesDialog({ onClose, onDone }: { onClose: () => void;
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (candidates ?? []).filter(
-      (c) => !q || c.number.toLowerCase().includes(q) || (c.supplier ?? "").toLowerCase().includes(q) || c.documentDate.includes(q),
+      (c) =>
+        !q ||
+        c.number.toLowerCase().includes(q) ||
+        (c.supplier ?? "").toLowerCase().includes(q) ||
+        // The cell shows DD-MM-YYYY, so that is what a search typed from the
+        // screen has to match — the raw ISO form still matches too.
+        c.documentDate.includes(q) ||
+        formatDate(c.documentDate).includes(q),
     );
   }, [candidates, search]);
 
@@ -62,6 +69,7 @@ export function MergePurchasesDialog({ onClose, onDone }: { onClose: () => void;
   const losers = chosen.filter((c) => c.id !== survivorId);
   const movingLines = losers.reduce((sum, c) => sum + c.lines, 0);
   const mergedTotal = chosen.reduce((sum, c) => sum + Number(c.grandTotal), 0);
+  const mergedShippingPaid = chosen.reduce((sum, c) => sum + c.shippingPaid, 0);
 
   return (
     <Dialog title="Merge Purchases" onClose={onClose} size="wide">
@@ -97,9 +105,11 @@ export function MergePurchasesDialog({ onClose, onDone }: { onClose: () => void;
               <tbody>
                 {visible.map((c) => {
                   const checked = selected.includes(c.id);
-                  // A settled purchase has already moved money out of an account
-                  // or is holding a cheque; unpicking that is a different job.
-                  const settled = c.isPaid || Number(c.paidAmount) > 0;
+                  // A purchase paid beyond its shipping has already moved money
+                  // out of an account or is holding a cheque; unpicking that is a
+                  // different job. Freight alone is fine — the expense was paid on
+                  // arrival by design and travels to the survivor with the lines.
+                  const settled = c.isPaid || Number(c.paidAmount) > c.shippingPaid;
                   const blocked =
                     !checked &&
                     (settled ||
@@ -121,12 +131,12 @@ export function MergePurchasesDialog({ onClose, onDone }: { onClose: () => void;
                       </td>
                       <td className="border-b border-sand px-2 py-1.5 text-steel">{c.supplier ?? "No supplier"}</td>
                       <td className="border-b border-sand px-2 py-1.5 text-steel">{c.company}</td>
-                      <td className="border-b border-sand px-2 py-1.5 text-steel">{c.documentDate}</td>
+                      <td className="border-b border-sand px-2 py-1.5 text-steel">{formatDate(c.documentDate)}</td>
                       <td className="border-b border-sand px-2 py-1.5 text-right tabular-nums text-steel">
                         {c.lines} line{c.lines === 1 ? "" : "s"}
                       </td>
                       <td className="border-b border-sand px-2 py-1.5 text-right tabular-nums text-steel">
-                        {settled ? "Paid" : money(c.grandTotal)}
+                        {settled ? (c.isPaid ? "Paid" : "Part paid") : money(c.grandTotal)}
                       </td>
                       <td className="border-b border-sand px-2 py-1.5 text-right">
                         {/* Radio, not a second checkbox — exactly one number survives. */}
@@ -155,8 +165,12 @@ export function MergePurchasesDialog({ onClose, onDone }: { onClose: () => void;
           <p className="text-sm text-steel">
             {chosen.length} purchases → 1. {movingLines} line{movingLines === 1 ? "" : "s"} move onto{" "}
             <span className="text-ink">{survivor.number}</span>, which becomes{" "}
-            <span className="text-ink">{money(mergedTotal)}</span> owed to{" "}
-            {survivor.supplier ?? "no supplier"}. Stock is unchanged — the movements travel with their lines. The other {losers.length} purchase
+            <span className="text-ink">{money(mergedTotal - mergedShippingPaid)}</span> owed to{" "}
+            {survivor.supplier ?? "no supplier"}
+            {mergedShippingPaid > 0
+              ? ` — ${money(mergedShippingPaid)} of shipping is already paid as expenses and is not part of the payable.`
+              : "."}{" "}
+            Stock is unchanged — the movements travel with their lines. The other {losers.length} purchase
             {losers.length === 1 ? "" : "s"} {losers.length === 1 ? "is" : "are"} deleted and {losers.length === 1 ? "its number" : "their numbers"}{" "}
             dropped for good. This cannot be undone.
           </p>

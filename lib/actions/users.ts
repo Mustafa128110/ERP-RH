@@ -9,7 +9,6 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
-import { normalizePhone } from "@/lib/whatsapp-templates";
 
 export interface UserListItem {
   id: string;
@@ -131,20 +130,7 @@ export async function updateUser(userId: string, _prevState: ActionResult | unde
     const status = String(formData.get("status") ?? "active") as "active" | "inactive" | "locked";
     if (!name) return { error: "Name is required." };
 
-    // The phone this person may drive the ERP from over WhatsApp. Stored in the
-    // exact form WhatsApp reports a sender in — full international, digits only
-    // — so the inbound lookup is a plain equality match
-    // (lib/whatsapp-agent/identity.ts). Blank clears it, which is how access is
-    // revoked; the column is UNIQUE, so a number already on another user is
-    // reported rather than silently moved.
-    const rawWhatsApp = String(formData.get("whatsappNumber") ?? "").trim();
-    let whatsappNumber: string | null = null;
-    if (rawWhatsApp) {
-      whatsappNumber = normalizePhone(rawWhatsApp);
-      if (!whatsappNumber) return { error: `"${rawWhatsApp}" doesn't look like a phone number.` };
-    }
-
-    await db.update(users).set({ name, status, whatsappNumber }).where(eq(users.id, userId));
+    await db.update(users).set({ name, status }).where(eq(users.id, userId));
     // Status is what getSession() gates on, so a deactivation has to drop the
     // cached session rather than wait out its TTL.
     invalidateSessions();

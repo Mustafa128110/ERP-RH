@@ -18,13 +18,11 @@ export function UserEditForm({
   name,
   email,
   status,
-  whatsappNumber,
 }: {
   userId: string;
   name: string;
   email: string;
   status: string;
-  whatsappNumber: string | null;
 }) {
   const [state, action, pending] = useActionState(updateUser.bind(null, userId), undefined);
   const router = useRouter();
@@ -53,14 +51,6 @@ export function UserEditForm({
           <option value="inactive">Inactive</option>
           <option value="locked">Locked</option>
         </select>
-      </label>
-
-      <label className={labelClass}>
-        <span className={labelTextClass}>WhatsApp number</span>
-        <input name="whatsappNumber" type="tel" defaultValue={whatsappNumber ?? ""} placeholder="0300-1234567" inputMode="tel" className={inputClass} />
-        <span className="text-xs text-steel">
-          Messages from this number are answered by the assistant, acting with this user&apos;s permissions. Leave blank to switch it off.
-        </span>
       </label>
 
       {state?.error && <p className={errorTextClass}>{state.error}</p>}

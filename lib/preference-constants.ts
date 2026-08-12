@@ -28,6 +28,15 @@ export const DEFAULT_SCALE = 100;
 export const MIN_SCALE = ZOOM_STEPS[0];
 export const MAX_SCALE = ZOOM_STEPS[ZOOM_STEPS.length - 1];
 
+// The inline font-size that represents a scale on <html>. 100% is the size
+// everything was designed at, so it means "no style at all" rather than a
+// redundant rule — the document is left exactly as a default render would leave
+// it. Shared by the Settings buttons and the zoom shortcuts so the two can't
+// drift apart.
+export function fontSizeForScale(scale: number): string {
+  return scale === DEFAULT_SCALE ? "" : `${scale}%`;
+}
+
 // Snaps to the nearest step rather than rejecting: a value that predates a
 // change to this list (or arrives from a stale form) should land on the closest
 // size that exists now, not throw the person back to 100%.

@@ -166,7 +166,7 @@ export function AccountsManager({
     .map((c) => ({
       id: c.id,
       chequeNumber: c.chequeNumber,
-      date: c.chequeDate,
+      date: formatDate(c.chequeDate),
       amount: c.amount,
       type: c.chequeType.replace(/_/g, " "),
       status: c.status.replace(/_/g, " "),

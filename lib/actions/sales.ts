@@ -236,10 +236,6 @@ export async function getInvoice(documentId: string) {
       .select({
         id: documents.id,
         number: documents.number,
-        // Carried so the invoice screen can send itself on WhatsApp — the
-        // message needs the company it is from and the contact it goes to.
-        companyId: documents.companyId,
-        contactId: documents.contactId,
         documentDate: documents.documentDate,
         status: documents.status,
         subtotal: documents.subtotal,

@@ -100,7 +100,6 @@ export function UserManager({
                 name={detail.user.name}
                 email={detail.user.email}
                 status={detail.user.status}
-                whatsappNumber={detail.user.whatsappNumber}
               />
               <UserRoleAssignments
                 userId={modal.id}

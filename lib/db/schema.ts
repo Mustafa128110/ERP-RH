@@ -137,18 +137,10 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 150 }).notNull().unique(),
   status: userStatusEnum("status").notNull().default("active"),
-  // The phone this person messages the ERP from, in full international form with
-  // no punctuation (923001234567) — the exact shape WhatsApp reports a sender in,
-  // so the lookup is an equality match with nothing to normalise at read time.
-  //
-  // This column is the whole authorisation model for the WhatsApp agent: an
-  // inbound number resolves to a real user, and the agent then runs under that
-  // person's roles and company access like any other session. A number with no
-  // row here gets no reply at all — this is a business number that strangers
-  // message, and "you are not authorised" would tell them something exists.
-  //
-  // UNIQUE because two people cannot share a handset without the agent being
-  // unable to say whose permissions to apply.
+  // Retained from the removed WhatsApp assistant: the phone this person used to
+  // message the ERP from, full international form with no punctuation
+  // (923001234567). No application code reads or writes it any more, but the
+  // column stays — the database is untouched, and existing rows are history.
   whatsappNumber: varchar("whatsapp_number", { length: 20 }).unique(),
   // --- Display preferences -------------------------------------------------
   // These two ride along on the users row rather than living in a preferences
@@ -352,6 +344,13 @@ export const expenses = pgTable(
     chequeId: uuid("cheque_id").references(() => chequeRegister.id),
     amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
     expenseDate: date("expense_date").notNull(),
+    // The purchase this expense was created from, when it was a stock purchase's
+    // shipping charge (paid from the default cash account and recorded here).
+    // Null for expenses entered directly. Links the expense to the purchase so
+    // editing or deleting the purchase reverses and re-writes it in the same
+    // transaction — without it, an edited shipping charge would leave two
+    // expenses for one delivery.
+    documentId: uuid("document_id").references(() => documents.id, { onDelete: "cascade" }),
     notes: text("notes"),
     attachmentUrl: text("attachment_url"),
     createdBy: uuid("created_by"),
@@ -713,20 +712,12 @@ export const settings = pgTable(
 
 // --- WhatsApp ---
 
-// Delivery state, as the WhatsApp Cloud API reports it. `queued` is our own: the
-// row exists and the send hasn't happened yet — either it's in flight, or no
-// provider is configured and it's waiting for one.
-// "handoff" is the free path: the ERP composed the message and opened it in the
-// user's own WhatsApp, which then sent it from their phone. No provider is
-// involved, so no delivery callback ever arrives and the status can never
-// legitimately advance past this — which is exactly why it is its own value
-// rather than a "sent" the log can't back up or a "queued" that looks stuck.
+// Retained from the removed WhatsApp feature (the app no longer sends or
+// receives messages — the tab in the sidebar is a placeholder). The table and
+// its enum stay exactly as the database has them: rows here are history, and no
+// application code reads or writes them any more.
 export const whatsappStatusEnum = pgEnum("whatsapp_status", ["queued", "sent", "delivered", "read", "failed", "handoff"]);
 
-// Every message the shop sends a contact, and what became of it. A log, not a
-// queue: the send is attempted when the row is written, and the status column is
-// how it reports back (lib/whatsapp.ts). Kept even when it fails, because "we
-// definitely sent them the invoice" is the question this table answers.
 export const whatsappMessages = pgTable(
   "whatsapp_messages",
   {
@@ -737,15 +728,14 @@ export const whatsappMessages = pgTable(
     contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
     recipientName: varchar("recipient_name", { length: 200 }).notNull(),
     phone: varchar("phone", { length: 30 }).notNull(),
-    // Which of lib/whatsapp-templates.ts produced the text.
+    // Which of the former lib/whatsapp-templates.ts produced the text.
     template: varchar("template", { length: 50 }).notNull(),
     // The document it was about, when it was about one (an invoice, a quotation).
     documentId: uuid("document_id").references(() => documents.id, { onDelete: "set null" }),
-    // The message as sent. Stored rather than re-rendered from the template,
-    // because the template will change and the log must not.
+    // The message as sent.
     body: text("body").notNull(),
     status: whatsappStatusEnum("status").notNull().default("queued"),
-    // The provider's own id, which is what a delivery webhook arrives keyed by.
+    // The provider's own id, which is what a delivery webhook arrived keyed by.
     providerMessageId: varchar("provider_message_id", { length: 120 }),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

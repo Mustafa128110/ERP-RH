@@ -262,7 +262,9 @@ export function QuotationForm({
                     onChange={(name) => pickItem(r, name)}
                     options={companyItems}
                     className={cellInput}
-                    inputProps={{ "data-cell": `${r}-0`, disabled: locked }}
+                    // data-shortcut="i" marks the first line's item box so
+                    // Ctrl+I can jump to it from anywhere in the form.
+                    inputProps={{ "data-cell": `${r}-0`, disabled: locked, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                   />
                 </td>
                 <td className={tdClass}>
@@ -316,15 +318,15 @@ export function QuotationForm({
         <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-end sm:gap-3">
           <label className={labelClass}>
             <span className={labelTextClass}>Discount</span>
-            <input value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0 or 5%" disabled={locked} className={`${fieldClass} sm:w-28`} />
+            <input value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0 or 5%" data-shortcut="d" disabled={locked} className={`${fieldClass} sm:w-28`} />
           </label>
           <label className={labelClass}>
             <span className={labelTextClass}>Tax</span>
-            <input value={tax} onChange={(e) => setTax(e.target.value)} placeholder="0 or 17%" disabled={locked} className={`${fieldClass} sm:w-28`} />
+            <input value={tax} onChange={(e) => setTax(e.target.value)} placeholder="0 or 17%" data-shortcut="t" disabled={locked} className={`${fieldClass} sm:w-28`} />
           </label>
           <label className={labelClass}>
             <span className={labelTextClass}>Shipping</span>
-            <input value={shipping} onChange={(e) => setShipping(e.target.value)} placeholder="0" disabled={locked} className={`${fieldClass} sm:w-28`} />
+            <input value={shipping} onChange={(e) => setShipping(e.target.value)} placeholder="0" data-shortcut="s" disabled={locked} className={`${fieldClass} sm:w-28`} />
           </label>
         </div>
 

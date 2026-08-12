@@ -327,6 +327,10 @@ export function ProductsBatchEditDialog({
               type="button"
               onClick={submit}
               disabled={pending || rows.length === 0}
+              // data-dialog-submit: this dialog has no form (Save calls a
+              // function), so the app-wide Ctrl+Enter handler clicks this
+              // button from anywhere in the dialog body.
+              data-dialog-submit
               className="h-10 rounded bg-navy-800 px-5 text-sm font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
             >
               {pending ? "Saving…" : "Save"}

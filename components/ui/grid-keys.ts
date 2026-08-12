@@ -7,9 +7,9 @@ import type { ClipboardEvent, KeyboardEvent, MouseEvent, RefObject } from "react
 //   ↑ ↓ (and Enter)    same column, neighbouring row
 //   ← →                across columns, from the edge of the text
 //   Shift + arrows     grow a block of cells from where the selection started
-//   Ctrl + arrows      move on, adding each cell passed to the selection
 //   Ctrl / Shift + click   the same two rules with the mouse
-//   Ctrl + C / Ctrl + V    copy the block, paste it into another one
+//   Ctrl + C / Ctrl + V    copy/paste a cell, or a whole block — the cell goes
+//                          even when nothing is selected, like Excel
 //   Ctrl + Enter       save
 //   Delete             empty the cell (Ctrl+Backspace does the same)
 //
@@ -49,6 +49,22 @@ function cellValue(el: HTMLElement): string {
   if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) return String(el.checked);
   if (el instanceof HTMLSelectElement) return el.options[el.selectedIndex]?.text ?? el.value;
   return (el as HTMLInputElement).value ?? "";
+}
+
+// Copies a cell's value without touching the caret. Text inputs (and
+// textareas) can select in place and take the synchronous execCommand path;
+// number/date inputs can't hold a selection — select() would throw on them —
+// so they go through the async clipboard API instead.
+function copyCellValue(el: HTMLInputElement | HTMLTextAreaElement) {
+  if (el instanceof HTMLInputElement && el.selectionStart === null) {
+    // type=number / type=date: no selection exists to copy.
+    if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(el.value);
+    return;
+  }
+  const { selectionStart, selectionEnd } = el;
+  el.select();
+  document.execCommand("copy");
+  el.setSelectionRange(selectionStart ?? 0, selectionEnd ?? 0);
 }
 
 // --- Cell selection ---------------------------------------------------------
@@ -159,9 +175,18 @@ export const gridSelectionProps = {
       for (const cell of cells) setCellValue(cell.el, grid[0][0]);
       return;
     }
-    // A single value into a single cell is an ordinary paste — leave it to the
-    // browser so the caret and any partial text selection behave normally.
-    if (single) return;
+    // One value into one cell replaces the whole cell — the Excel rule, so a
+    // paste lands in the cell, not at the caret, and nothing has to be
+    // selected first. Read off the focused cell (or the single selected one),
+    // whichever the paste gesture started in.
+    if (single) {
+      const start = cells[0] ?? posOf(e.target as HTMLElement);
+      if (!start) return;
+      e.preventDefault();
+      const target = cellAt(body, start.r, start.c);
+      if (target) setCellValue(target, grid[0][0]);
+      return;
+    }
 
     const start = cells[0] ?? posOf(e.target as HTMLElement);
     if (!start) return;
@@ -188,17 +213,39 @@ export function gridKeyDown(
 
   // Ctrl+Enter saves. Only handled here when the caller asked for it — a grid
   // inside a real <form> leaves it to the app-wide handler in KeyboardShortcuts,
-  // and doing both would submit twice.
+  // and doing both would submit twice. The event is stopped once the grid takes
+  // the save so the app-wide handler can't also click the dialog's
+  // data-dialog-submit button and save a second time.
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     if (!onSubmit) return;
     e.preventDefault();
+    e.stopPropagation();
     onSubmit();
     return;
   }
 
-  // Ctrl+C / Ctrl+V are left to the browser — it turns them into the copy/paste
-  // events gridSelectionProps handles, which is where the block logic lives.
-  if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "v" || e.key === "x")) return;
+  // Ctrl+C copies like Excel: the whole cell, with nothing selected. With text
+  // selected inside the cell, that selection is what the browser's own copy
+  // takes — the copy/paste events gridSelectionProps handles then turn a
+  // selected block into one clipboard payload either way. Checkboxes are left
+  // alone, same as Delete above: Space toggles them, and "copy its value"
+  // isn't a question anyone is asking.
+  if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+    if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) return;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      // selectionStart is null on number/date inputs, so null === null reads
+      // as "nothing selected" and copies the whole cell there too.
+      if (el.selectionStart === el.selectionEnd) {
+        e.preventDefault();
+        copyCellValue(el);
+      }
+    }
+    return;
+  }
+
+  // Ctrl+V / Ctrl+X stay the browser's: V becomes the paste event below (which
+  // owns the single-cell and block fills), X is a plain cut.
+  if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "x")) return;
 
   // Clearing a cell. Checkboxes are left alone — Space already toggles them, and
   // "empty" isn't a state they have. A block clears together.
@@ -231,7 +278,7 @@ export function gridKeyDown(
   const pos = posOf(el);
   if (!pos || !bodyRef.current) return;
   const { body, r, c } = pos;
-  const extending = e.shiftKey || e.ctrlKey || e.metaKey;
+  const extending = e.shiftKey;
   const dir = e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 1;
 
   // Inside text the arrow belongs to the caret — only jump cells from the edge.
@@ -268,12 +315,6 @@ export function gridKeyDown(
   if (e.shiftKey) {
     if (!anchor || anchor.body !== body) anchor = { body, r, c };
     selectBlock(body, anchor, to);
-  } else if (e.ctrlKey || e.metaKey) {
-    // Additive: each cell stepped over joins what's already picked, which is how
-    // a scattered set of fields gets selected without the mouse.
-    el.setAttribute(SELECTED, "true");
-    target.setAttribute(SELECTED, "true");
-    anchor = { body, ...to };
   } else {
     clearSelection(body);
     anchor = { body, ...to };

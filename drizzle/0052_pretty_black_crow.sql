@@ -1,0 +1,2 @@
+ALTER TABLE "expenses" ADD COLUMN "document_id" uuid;--> statement-breakpoint
+ALTER TABLE "expenses" ADD CONSTRAINT "expenses_document_id_documents_id_fk" FOREIGN KEY ("document_id") REFERENCES "public"."documents"("id") ON DELETE cascade ON UPDATE no action;

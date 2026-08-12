@@ -45,6 +45,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "Ctrl K", label: "Search products, contacts and invoices" },
       { keys: "Alt N", label: "Add a new record on this page — in the purchase popup, save and start the next one" },
+      { keys: "Ctrl Alt +", label: "Zoom in — the same size control as Settings" },
+      { keys: "Ctrl Alt -", label: "Zoom out" },
       { keys: "?", label: "Show this list" },
       { keys: "Esc", label: "Close a popup, or clear a search box" },
       ...Object.entries(GO_TO).map(([key, { href, label }]) => ({ keys: `g then ${key}`, label: `Go to ${label}`, go: href })),
@@ -59,9 +61,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Home End", label: "First row / last row" },
       { keys: "Enter", label: "Open the row — or tick it, on a list with tick boxes" },
       { keys: "Shift ↑ ↓", label: "Extend the ticked range" },
-      { keys: "Ctrl ↑ ↓", label: "Move without disturbing what's ticked" },
       { keys: "Ctrl Enter", label: "Edit everything ticked, together" },
-      { keys: "Ctrl / Shift click", label: "The same two rules with the mouse" },
     ],
   },
   {
@@ -73,12 +73,20 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "In a sale, purchase or quotation",
+    shortcuts: [
+      { keys: "Ctrl I", label: "Jump to the first line item (Alt I in the purchase popup)" },
+      { keys: "Ctrl D", label: "Jump to the discount field (Alt D in the purchase popup)" },
+      { keys: "Ctrl T", label: "Jump to the tax field (Alt T in the purchase popup)" },
+      { keys: "Ctrl S", label: "Jump to the shipping field (Alt S in the purchase popup)" },
+    ],
+  },
+  {
     title: "In a grid (batch add, sale and purchase lines)",
     shortcuts: [
       { keys: "↑ ↓ Enter", label: "Same column, next row" },
       { keys: "← →", label: "Across columns, from the edge of the text" },
       { keys: "Shift arrows", label: "Grow a block of cells" },
-      { keys: "Ctrl arrows", label: "Add each cell passed to the selection" },
       { keys: "Ctrl C / Ctrl V", label: "Copy a block, paste it into another" },
       { keys: "Delete", label: "Empty the cell, or the whole selected block" },
       { keys: "Ctrl Enter", label: "Save the grid" },

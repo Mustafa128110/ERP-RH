@@ -577,7 +577,9 @@ export function SaleFormPage({
                         options={visibleItems}
                         placeholder="Item"
                         className={cellInput}
-                        inputProps={{ "data-cell": `${r}-0` }}
+                        // data-shortcut="i" marks the first line's item box so
+                        // Ctrl+I can jump to it from anywhere in the form.
+                        inputProps={{ "data-cell": `${r}-0`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                         onChange={(name) => pickItem(r, name)}
                       />
                     </td>
@@ -664,6 +666,7 @@ export function SaleFormPage({
                 type="text"
                 inputMode="decimal"
                 placeholder="0 or 5%"
+                data-shortcut="d"
                 value={discountTotal}
                 onChange={(e) => setDiscountTotal(e.target.value)}
                 className={fieldClass}
@@ -676,6 +679,7 @@ export function SaleFormPage({
                 type="text"
                 inputMode="decimal"
                 placeholder="0 or 5%"
+                data-shortcut="t"
                 value={taxTotal}
                 onChange={(e) => setTaxTotal(e.target.value)}
                 className={fieldClass}
@@ -689,6 +693,7 @@ export function SaleFormPage({
                 type="number"
                 min="0"
                 step="0.1"
+                data-shortcut="s"
                 value={shippingTotal}
                 onChange={(e) => setShippingTotal(e.target.value)}
                 className={`${fieldClass}`}

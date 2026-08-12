@@ -74,7 +74,6 @@ type PaymentBatchRowLocal = {
   settlementType: SettlementType;
   settlementId: string;
   amount: string;
-  paymentDate: string;
 };
 
 export function PaymentBatchAddDialog({
@@ -133,10 +132,12 @@ export function PaymentBatchAddDialog({
 
   // Payments are nearly always made out of the drawer, on the day they happen, so
   // that's where a fresh row starts. Which cash account is "the drawer" comes from
-  // cash_accounts.is_default, not a name match. en-CA is the YYYY-MM-DD the date
-  // input wants, in local time — toISOString() would hand back yesterday for
-  // anything entered before 05:00 here.
+  // cash_accounts.is_default, not a name match. One date at the top of the dialog
+  // covers the whole batch — there is no per-row date to retype. en-CA is the
+  // YYYY-MM-DD the date input wants, in local time — toISOString() would hand
+  // back yesterday for anything entered before 05:00 here.
   const today = new Date().toLocaleDateString("en-CA");
+  const [batchDate, setBatchDate] = useState(today);
   // The drawer of the company the row starts in — the default account of another
   // company isn't offered by the picker, so it can't be what a row starts on.
   const drawerFor = (companyId: string) => {
@@ -153,7 +154,6 @@ export function PaymentBatchAddDialog({
     settlementType: "cash",
     settlementId: defaultCashId,
     amount: "",
-    paymentDate: today,
   });
 
   return (
@@ -162,7 +162,17 @@ export function PaymentBatchAddDialog({
       onClose={onClose}
       onDone={onDone}
       emptyRow={emptyRow}
-      headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount", "Date"]}
+      initialRows={1}
+      autoAppend
+      headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount"]}
+      toolbar={
+        <label className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-steel">Date</span>
+          <span className="w-44 rounded border border-sand">
+            <DateField value={batchDate} onChange={setBatchDate} className={batchInputClass} />
+          </span>
+        </label>
+      }
       onSubmit={async (rows) => {
         const values: PaymentBatchRow[] = rows.map((r) => ({
           direction: r.direction,
@@ -176,7 +186,8 @@ export function PaymentBatchAddDialog({
           // Left blank rather than defaulted to "0" — that's how the server tells
           // an untouched spare row from one someone actually typed a number into.
           amount: r.amount.trim(),
-          paymentDate: r.paymentDate,
+          // One date at the top of the dialog, saved on every row.
+          paymentDate: batchDate,
         }));
         return createPaymentsBatch(values);
       }}
@@ -283,9 +294,6 @@ export function PaymentBatchAddDialog({
               onChange={(e) => update({ amount: e.target.value })}
               className={`${batchInputClass} disabled:bg-ivory disabled:text-steel`}
             />
-          </td>
-          <td className={batchCellClass}>
-            <DateField value={row.paymentDate} onChange={(paymentDate) => update({ paymentDate })} className={batchInputClass} />
           </td>
         </>
       )}

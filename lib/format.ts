@@ -22,6 +22,20 @@ export function formatDate(value: string | Date): string {
   return `${String(day).padStart(2, "0")}-${String(month).padStart(2, "0")}-${year}`;
 }
 
+// A column that mixes dates with words (a report's "Last Sold" can be the word
+// "Never") gets this: format only what is actually a date, pass everything else
+// through untouched.
+export function formatDateWhenDate(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatDate(value) : value;
+}
+
+// "2026-08" — a report's Month column — reads as "08-2026", the same day-first
+// ordering as formatDate.
+export function formatMonth(value: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(value);
+  return m ? `${m[2]}-${m[1]}` : value;
+}
+
 // "25-12-2026" -> "2026-12-25". Returns "" for anything that isn't a complete
 // date, which is what a half-typed field holds.
 //

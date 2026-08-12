@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { sessionQuery } from "@/lib/db/session-query";
 import { createClient } from "@/lib/supabase/server";
 import { cached, invalidate, MINUTE } from "@/lib/cache";
-import { agentSession } from "@/lib/whatsapp-agent/identity";
 
 export interface AuthSession {
   userId: string;
@@ -50,12 +49,7 @@ export function invalidateSessions() {
 // per-login — so a permission change takes effect on the user's next request,
 // not their next login (docs/phase-8-authentication.md §3).
 export async function getSession(): Promise<AuthSession | null> {
-  // The WhatsApp agent has no cookie to read; it carries its session in an
-  // AsyncLocalStorage instead (lib/whatsapp-agent/identity.ts). Checked outside
-  // the memo below, because one webhook POST can carry messages from two
-  // senders and a memoised answer would give the second one the first's
-  // permissions.
-  return agentSession() ?? getCookieSession();
+  return getCookieSession();
 }
 
 const getCookieSession = cache(async (): Promise<AuthSession | null> => {

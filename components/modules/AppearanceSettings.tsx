@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setTheme, setZoom } from "@/lib/actions/preferences";
-import { DEFAULT_SCALE, MAX_SCALE, MIN_SCALE, zoomIn, zoomOut, type ThemePreference } from "@/lib/preference-constants";
+import { ZOOM_EVENT } from "@/components/layout/KeyboardShortcuts";
+import { fontSizeForScale, MAX_SCALE, MIN_SCALE, zoomIn, zoomOut, type ThemePreference } from "@/lib/preference-constants";
 
 // The one card on the Settings page that is about the person rather than the
 // company. It writes to users.ui_theme / users.ui_scale, so it follows the
@@ -65,6 +66,18 @@ export function AppearanceSettings({ theme: initialTheme, scale: initialScale }:
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
+  // A keyboard zoom (Ctrl+Alt+plus/minus, handled app-wide in KeyboardShortcuts)
+  // lands here while this card is open: it owns the % label and the disabled
+  // states of its own buttons, so it has to hear about a size it didn't set.
+  useEffect(() => {
+    function onZoom(e: Event) {
+      setScaleState((e as CustomEvent<number>).detail);
+      setError(null);
+    }
+    window.addEventListener(ZOOM_EVENT, onZoom);
+    return () => window.removeEventListener(ZOOM_EVENT, onZoom);
+  }, []);
+
   function applyTheme(next: ThemePreference) {
     setThemeState(next);
     document.documentElement.dataset.theme = next;
@@ -81,9 +94,9 @@ export function AppearanceSettings({ theme: initialTheme, scale: initialScale }:
   function applyScale(next: number) {
     if (next === scale) return;
     setScaleState(next);
-    // Matches app/layout.tsx: 100% clears the attribute rather than setting it,
-    // so the document is left exactly as a default render would leave it.
-    document.documentElement.style.fontSize = next === DEFAULT_SCALE ? "" : `${next}%`;
+    // Shared with the app-wide zoom shortcuts (KeyboardShortcuts.tsx) and the
+    // root layout: 100% clears the attribute rather than setting it.
+    document.documentElement.style.fontSize = fontSizeForScale(next);
     setError(null);
     startTransition(async () => {
       const result = await setZoom(next);

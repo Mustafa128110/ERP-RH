@@ -15,7 +15,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
     supplier: p.supplier ?? "—",
     total: money(p.grandTotal),
     date: formatDate(p.documentDate),
-    paid: p.isPaid ? "Paid" : "Unpaid",
+    paid: p.isPaid ? "Paid" : Number(p.paidAmount) > 0 ? "Partial Paid" : "Unpaid",
     breakdown: {
       subtotal: money(p.subtotal),
       discount: Number(p.discountTotal) > 0 ? money(p.discountTotal) : null,

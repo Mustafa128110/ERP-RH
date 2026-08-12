@@ -23,6 +23,7 @@ const TONE_MAP: Record<string, string> = {
   pending: WARNING,
   "pending approval": WARNING,
   partial: WARNING,
+  "partial paid": WARNING,
   "in transit": WARNING,
   sent: WARNING,
   low: WARNING,
