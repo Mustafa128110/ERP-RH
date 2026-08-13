@@ -18,6 +18,8 @@ import {
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
+import { cached, MINUTE } from "@/lib/cache";
+import { scopeSuffix } from "@/lib/queries/lookups";
 
 // Every number on the dashboard is derived here, in SQL, from the same rows the
 // list pages read. Nothing is stored as a running total, so a figure can't drift
@@ -32,6 +34,14 @@ const BUSINESS_TIMEZONE = "Asia/Karachi";
 function businessToday() {
   return new Date().toLocaleDateString("en-CA", { timeZone: BUSINESS_TIMEZONE });
 }
+
+// The dashboard is live figures, not reference data, so the cache TTL is a
+// backstop rather than the freshness mechanism — the write-invalidation in
+// invalidateLookups() (lib/queries/lookups.ts) is what keeps a sale showing
+// the moment it's made. 60s bounds the worst case for anything that writes
+// outside the action layer (a psql session, a future action nobody wired up)
+// and for the per-instance copies behind a load balancer.
+const AGGREGATE_TTL = MINUTE;
 
 export interface DashboardData {
   today: string;
@@ -54,7 +64,15 @@ export async function getDashboardData(): Promise<DashboardData> {
   // company-scoped, so it never shows books the user can't otherwise open.
   requirePermission(session, "sales", "view");
 
+  // The business day is part of the key, so the cache flips at midnight exactly
+  // rather than waiting out a TTL to stop showing yesterday as today. The scope
+  // keeps two views — Royal Hardware vs M52 — from sharing a figure. The auth
+  // check above runs on every request; only the query is cached.
   const today = businessToday();
+  return cached(`dashboard:${today}:${await scopeSuffix()}`, AGGREGATE_TTL, () => loadDashboard(today));
+}
+
+async function loadDashboard(today: string): Promise<DashboardData> {
   const documentScope = await companyInScope(documents.companyId);
 
   // One pass over documents for the four money figures — four separate scans of
@@ -175,9 +193,13 @@ export async function getDashboardData(): Promise<DashboardData> {
 }
 
 // Named separately from the numbers above because it's the one thing on the page
-// that isn't an aggregate — used for the header line.
+// that isn't an aggregate — used for the header line. Cached under the
+// dashboard: prefix, so the same invalidate("dashboard") that clears the
+// figures clears this too.
 export async function getDashboardCompanies() {
   const session = await getSession();
   requirePermission(session, "sales", "view");
-  return db.select({ name: companies.name }).from(companies).where(await companyInScope(companies.id));
+  return cached(`dashboard:companies:${await scopeSuffix()}`, AGGREGATE_TTL, async () =>
+    db.select({ name: companies.name }).from(companies).where(await companyInScope(companies.id)),
+  );
 }

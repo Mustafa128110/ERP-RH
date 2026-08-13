@@ -18,6 +18,14 @@ export default function DashboardError({ error, reset }: { error: Error & { dige
 
   useEffect(() => {
     console.error(error);
+    // If the service worker cached this page's last response — a 200 error
+    // page looks like a success — tell it to drop the poisoned copy, so the
+    // next load goes back to the network instead of serving the error forever.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistration().then((registration) => {
+        registration?.active?.postMessage({ type: "erp:clear-page", url: window.location.href });
+      });
+    }
   }, [error]);
 
   // A name for the two failures worth telling apart. Everything else is "it

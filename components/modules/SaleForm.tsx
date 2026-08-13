@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/actions/sales";
@@ -12,7 +12,8 @@ import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { DEFAULT_SALE_TYPE, SALE_TYPES, type SaleType } from "@/lib/sale-constants";
 import { inCompany } from "@/lib/contact-scope";
-import { clearDraft, draftSnapshot, noDraft, saveDraft, subscribeDraft } from "@/lib/draft";
+import { clearDraft } from "@/lib/draft";
+import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -213,44 +214,37 @@ export function SaleFormPage({
   // (a database blip while the page reloads after a save), because the error
   // boundary replaces the whole form.
   //
+  // components/ui/useDraft.tsx owns the store read, the offer/restore/discard
+  // logic and the save-on-change effect; this form only names its draft and how
+  // a restored one is written back into the setters above.
+  //
   // New sales only: an edit has a saved record behind it, and quietly restoring
   // a stale copy over one is how someone else's changes disappear.
   const draftState = { lines, companyId, contactId, customerText, discountTotal, taxTotal, shippingTotal, isPaid, paidAmount, settlementType };
   type SaleDraft = typeof draftState;
 
-  // The draft as it stood when this form opened — see lib/draft.ts for why it's
-  // read through a store rather than in an effect or an initialiser.
-  const savedDraft = useSyncExternalStore(subscribeDraft, () => draftSnapshot<SaleDraft>(SALE_DRAFT_KEY), noDraft);
-  const [dismissed, setDismissed] = useState(false);
-  // A draft of a form nobody typed into is noise; only an unfinished sale is
-  // worth offering back.
-  const offerDraft = !isEdit && !dismissed && !!savedDraft?.lines?.some((l) => l.itemText?.trim() || l.quantity?.trim());
-
-  // Restoring is a click, not something that happens on its own. Silently
-  // repopulating a form is worse than losing it: the shop would post a sale it
-  // believed it had typed fresh.
-  function restoreDraft() {
-    if (!savedDraft) return;
-    setLines(savedDraft.lines);
-    setCompanyId(savedDraft.companyId);
-    setContactId(savedDraft.contactId);
-    setCustomerText(savedDraft.customerText);
-    setDiscountTotal(savedDraft.discountTotal);
-    setTaxTotal(savedDraft.taxTotal);
-    setShippingTotal(savedDraft.shippingTotal);
-    setIsPaid(savedDraft.isPaid);
-    setPaidAmount(savedDraft.paidAmount);
-    setSettlementType(savedDraft.settlementType);
-    setDismissed(true);
-  }
-
-  useEffect(() => {
-    if (isEdit) return;
-    saveDraft(SALE_DRAFT_KEY, draftState);
-    // Cheap enough to write on every keystroke: one JSON stringify of a handful
-    // of rows. Debouncing it would be code that exists to save microseconds.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, companyId, contactId, customerText, discountTotal, taxTotal, shippingTotal, isPaid, paidAmount, settlementType, isEdit]);
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(SALE_DRAFT_KEY, {
+    state: draftState,
+    enabled: !isEdit,
+    // A draft of a form nobody typed into is noise; only an unfinished sale is
+    // worth offering back.
+    hasContent: (d) => d.lines.some((l) => l.itemText?.trim() || l.quantity?.trim()),
+    // Restoring is a click, not something that happens on its own. Silently
+    // repopulating a form is worse than losing it: the shop would post a sale
+    // it believed it had typed fresh.
+    apply: (d) => {
+      setLines(d.lines);
+      setCompanyId(d.companyId);
+      setContactId(d.contactId);
+      setCustomerText(d.customerText);
+      setDiscountTotal(d.discountTotal);
+      setTaxTotal(d.taxTotal);
+      setShippingTotal(d.shippingTotal);
+      setIsPaid(d.isPaid);
+      setPaidAmount(d.paidAmount);
+      setSettlementType(d.settlementType);
+    },
+  });
 
   // Cash accounts belong to a company, so only the selected company's drawers are
   // offered — otherwise a Royal Hardware sale could be settled into M52's cash.
@@ -467,26 +461,7 @@ export function SaleFormPage({
 
         {/* An unfinished sale from before — a crash, a closed tab, a reload.
             Offered, never applied on its own. */}
-        {offerDraft && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-brass-600 bg-brass-100 px-3 py-2 text-sm text-ink">
-            <span>You have an unsaved sale from earlier.</span>
-            <span className="flex items-center gap-3">
-              <button type="button" onClick={restoreDraft} className="font-semibold text-navy-800 hover:underline">
-                Restore it
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  clearDraft(SALE_DRAFT_KEY);
-                  setDismissed(true);
-                }}
-                className="text-steel hover:underline"
-              >
-                Discard
-              </button>
-            </span>
-          </div>
-        )}
+        {offerDraft && <DraftBanner noun="sale" onRestore={restoreDraft} onDiscard={discardDraft} />}
 
         {/* --- documents header --- */}
         <div className="flex flex-col gap-3">

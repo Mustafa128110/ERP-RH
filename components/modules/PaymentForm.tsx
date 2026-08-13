@@ -157,6 +157,9 @@ export function PaymentBatchAddDialog({
   });
 
   return (
+    // A batch of payments is exactly the work a crash must not cost — the rows
+    // are drafted as they're typed and offered back on reopen. (The date at the
+    // top isn't drafted; it restarts on today.)
     <BatchAddDialog<PaymentBatchRowLocal>
       title="Add Payments"
       onClose={onClose}
@@ -164,6 +167,7 @@ export function PaymentBatchAddDialog({
       emptyRow={emptyRow}
       initialRows={1}
       autoAppend
+      draftKey="payment-batch"
       headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount"]}
       toolbar={
         <label className="flex items-center gap-2">

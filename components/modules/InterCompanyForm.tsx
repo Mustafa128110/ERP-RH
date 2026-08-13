@@ -9,6 +9,8 @@ import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { DateField } from "@/components/ui/DateField";
 import { money, todayISO } from "@/lib/format";
+import { clearDraft } from "@/lib/draft";
+import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 const cellInput = "h-9 w-full min-w-0 bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";
@@ -18,6 +20,9 @@ const tdClass = "border border-sand p-0";
 type Option = { id: string; name: string };
 type ItemOption = Option & { companyId: string; rate: string | null; salesRate: string | null };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string; rate: string };
+
+// One draft per form: only one inter-company sale is ever being typed.
+const INTERCOMPANY_DRAFT_KEY = "intercompany";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", rate: "" });
 
@@ -80,9 +85,40 @@ export function InterCompanyFormPage({
     () => defaults?.sellerCompanyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
   const [buyerCompanyId, setBuyerCompanyId] = useState(() => defaults?.buyerCompanyId ?? "");
+  // The date and the two locations are controlled (not defaultValue) so a draft
+  // captures them too — a transfer typed half-way is only worth offering back
+  // if the whole transfer comes back.
+  const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
+  const [fromLocationId, setFromLocationId] = useState(() => defaults?.fromLocationId ?? "");
+  const [toLocationId, setToLocationId] = useState(() => defaults?.toLocationId ?? "");
+
+  // --- Draft ----------------------------------------------------------------
+  // New sales are entered back to back, so a created one clears the form; a
+  // crash, a closed tab or an offline blip before then costs nothing — the
+  // draft keeps the whole inter-company sale. Edits are excluded: restoring a
+  // stale copy over a saved document would overwrite someone else's changes.
+  const draftState = { lines, sellerCompanyId, buyerCompanyId, documentDate, fromLocationId, toLocationId };
+  type InterCompanyDraft = typeof draftState;
+
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<InterCompanyDraft>(INTERCOMPANY_DRAFT_KEY, {
+    state: draftState,
+    enabled: !isEdit,
+    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    apply: (d) => {
+      setLines(d.lines);
+      setSellerCompanyId(d.sellerCompanyId);
+      setBuyerCompanyId(d.buyerCompanyId);
+      setDocumentDate(d.documentDate);
+      setFromLocationId(d.fromLocationId);
+      setToLocationId(d.toLocationId);
+    },
+  });
 
   function resetForm() {
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
+    setDocumentDate(todayISO());
+    setFromLocationId("");
+    setToLocationId("");
     formRef.current?.reset();
     focusCell(0, 0);
   }
@@ -92,7 +128,11 @@ export function InterCompanyFormPage({
   // you're looking at.
   const [state, action, pending] = useActionState(async (prev: InterCompanyResult | undefined, formData: FormData) => {
     const result = isEdit ? await updateInterCompanySale(saleId!, prev, formData) : await createInterCompanySale(prev, formData);
-    if (!isEdit && result?.success) resetForm();
+    if (!isEdit && result?.success) {
+      // Saved — the local copy has nothing left to protect.
+      clearDraft(INTERCOMPANY_DRAFT_KEY);
+      resetForm();
+    }
     return result;
   }, undefined);
 
@@ -135,6 +175,10 @@ export function InterCompanyFormPage({
         name="linesJson"
         value={JSON.stringify(lines.map((l) => ({ ...l, itemName: l.itemText, unitName: l.unitText })))}
       />
+
+      {/* An unfinished inter-company sale from before — a crash, a closed tab, a
+          reload. Offered, never applied on its own. */}
+      {offerDraft && <DraftBanner noun="inter-company sale" onRestore={restoreDraft} onDiscard={discardDraft} />}
 
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Companies</span>
@@ -188,13 +232,13 @@ export function InterCompanyFormPage({
           )}
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Date</span>
-            <DateField name="documentDate" required defaultValue={defaults?.documentDate ?? todayISO()} className={fieldClass} />
+            <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
           </label>
         </div>
         <div className="flex flex-wrap gap-3">
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Ships from</span>
-            <select name="fromLocationId" required defaultValue={defaults?.fromLocationId ?? ""} className={fieldClass}>
+            <select name="fromLocationId" required value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} className={fieldClass}>
               <option value="" disabled>
                 Select a location
               </option>
@@ -207,7 +251,7 @@ export function InterCompanyFormPage({
           </label>
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Lands in</span>
-            <select name="toLocationId" required defaultValue={defaults?.toLocationId ?? ""} className={fieldClass}>
+            <select name="toLocationId" required value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} className={fieldClass}>
               <option value="" disabled>
                 Select a location
               </option>

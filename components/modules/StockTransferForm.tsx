@@ -10,6 +10,8 @@ import { todayISO } from "@/lib/format";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
+import { clearDraft } from "@/lib/draft";
+import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 const cellInput = "h-9 w-full min-w-0 bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";
@@ -19,6 +21,9 @@ const tdClass = "border border-sand p-0";
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string };
+
+// One draft per form: only one transfer is ever being typed.
+const TRANSFER_DRAFT_KEY = "transfer";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "" });
 
@@ -82,9 +87,34 @@ export function StockTransferFormPage({
   );
   const [fromLocationId, setFromLocationId] = useState(() => defaults?.fromLocationId ?? "");
   const [toLocationId, setToLocationId] = useState(() => defaults?.toLocationId ?? "");
+  // Controlled (not defaultValue) so a draft captures the date too — a transfer
+  // typed half-way is only worth offering back if the whole transfer returns.
+  const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
+
+  // --- Draft ----------------------------------------------------------------
+  // New transfers are entered back to back, so a created one clears the form; a
+  // crash, a closed tab or an offline blip before then costs nothing. Edits are
+  // excluded: restoring a stale copy over a saved document would overwrite
+  // someone else's changes.
+  const draftState = { lines, companyId, fromLocationId, toLocationId, documentDate };
+  type TransferDraft = typeof draftState;
+
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<TransferDraft>(TRANSFER_DRAFT_KEY, {
+    state: draftState,
+    enabled: !isEdit,
+    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    apply: (d) => {
+      setLines(d.lines);
+      setCompanyId(d.companyId);
+      setFromLocationId(d.fromLocationId);
+      setToLocationId(d.toLocationId);
+      setDocumentDate(d.documentDate);
+    },
+  });
 
   function resetForm() {
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
+    setDocumentDate(todayISO());
     formRef.current?.reset();
     focusCell(0, 0);
   }
@@ -94,7 +124,11 @@ export function StockTransferFormPage({
   // edit keeps what's on screen — it's still the transfer you're looking at.
   const [state, action, pending] = useActionState(async (prev: TransferActionState, formData: FormData) => {
     const result: TransferActionState = isEdit ? await updateStockTransfer(transferId!, prev, formData) : await createStockTransfer(prev, formData);
-    if (!isEdit && result?.success) resetForm();
+    if (!isEdit && result?.success) {
+      // Saved — the local copy has nothing left to protect.
+      clearDraft(TRANSFER_DRAFT_KEY);
+      resetForm();
+    }
     return result;
   }, undefined);
 
@@ -124,6 +158,10 @@ export function StockTransferFormPage({
         value={JSON.stringify(lines.map((l) => ({ ...l, itemName: l.itemText, unitName: l.unitText })))}
       />
 
+      {/* An unfinished transfer from before — a crash, a closed tab, a reload.
+          Offered, never applied on its own. */}
+      {offerDraft && <DraftBanner noun="transfer" onRestore={restoreDraft} onDiscard={discardDraft} />}
+
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Transfer</span>
         <div className="flex flex-wrap gap-3">
@@ -142,7 +180,7 @@ export function StockTransferFormPage({
           </label>
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Date</span>
-            <DateField name="documentDate" required defaultValue={defaults?.documentDate ?? todayISO()} className={fieldClass} />
+            <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
           </label>
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>From</span>

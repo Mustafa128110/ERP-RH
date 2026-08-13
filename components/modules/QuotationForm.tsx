@@ -9,6 +9,8 @@ import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { inCompany } from "@/lib/contact-scope";
+import { clearDraft } from "@/lib/draft";
+import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 // Deliberately not SaleForm with the money parts hidden. A quotation has no
 // payment, no settlement account, no previous-balance line and no stock — a
@@ -39,6 +41,9 @@ type Line = {
   // changed by converting, never by typing.
   convertedQuantity: string;
 };
+
+// One draft per form: only one quotation is ever being typed.
+const QUOTATION_DRAFT_KEY = "quotation";
 
 const BLANK_ROWS = 8;
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", unitPrice: "", convertedQuantity: "0" });
@@ -102,13 +107,44 @@ export function QuotationForm({
 
   const gridRef = useRef<HTMLTableSectionElement>(null);
 
+  // --- Draft ----------------------------------------------------------------
+  // The same protection the sale form has: a quotation is a lot of typing, and
+  // the thing that loses it is a render that throws after the save, not the
+  // save itself. New quotations only — an edit has a saved record behind it, and
+  // restoring a stale copy over one is how someone else's changes disappear.
+  // The hook (components/ui/useDraft.tsx) owns the store read, the
+  // offer/restore/discard logic and the save-on-change effect.
+  const draftState = { companyId, contactId, contactText, documentDate, validUntil, discount, tax, shipping, lines };
+  type QuotationDraft = typeof draftState;
+
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(QUOTATION_DRAFT_KEY, {
+    state: draftState,
+    enabled: !isEdit,
+    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    apply: (d) => {
+      setCompanyId(d.companyId);
+      setContactId(d.contactId);
+      setContactText(d.contactText);
+      setDocumentDate(d.documentDate);
+      setValidUntil(d.validUntil);
+      setDiscount(d.discount);
+      setTax(d.tax);
+      setShipping(d.shipping);
+      setLines(d.lines);
+    },
+  });
+
   const [state, action, pending] = useActionState(
     isEdit ? updateQuotation.bind(null, quotationId) : createQuotation,
     undefined,
   );
 
   useEffect(() => {
-    if (state?.success) router.push("/sales/quotations");
+    if (state?.success) {
+      // Saved — the local copy has nothing left to protect.
+      clearDraft(QUOTATION_DRAFT_KEY);
+      router.push("/sales/quotations");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.success]);
 
@@ -175,6 +211,10 @@ export function QuotationForm({
           })),
         )}
       />
+
+      {/* An unfinished quotation from before — a crash, a closed tab, a reload.
+          Offered, never applied on its own. */}
+      {offerDraft && <DraftBanner noun="quotation" onRestore={restoreDraft} onDiscard={discardDraft} />}
 
       {locked && (
         <p className="shrink-0 rounded border border-warning/40 bg-warning-tint p-3 text-sm text-ink">

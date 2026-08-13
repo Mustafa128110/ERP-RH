@@ -1,8 +1,6 @@
 import {
   pgTable,
   pgEnum,
-  pgRole,
-  pgPolicy,
   uuid,
   varchar,
   text,
@@ -19,19 +17,6 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-
-// Non-bypass DB role used by lib/db/context.ts's withUserContext() — the
-// connecting role (Supabase's `postgres`) has BYPASSRLS, so RLS policies only
-// take effect once a transaction does `SET LOCAL ROLE app_user` (docs/phase-8-authentication.md §4).
-export const appUser = pgRole("app_user", { inherit: true });
-
-const companyScopeUsing = sql`company_id IN (SELECT company_id FROM user_company_access WHERE user_id = current_setting('app.user_id', true)::uuid)`;
-
-// For tables where company_id is nullable and NULL means "global, every company
-// can see it" (currencies, categories, brands, unit_conversions — same as
-// contacts/locations/bank_accounts). A global row passes for everyone; a scoped
-// row passes only for users with access to its company.
-const companyOrGlobalUsing = sql`company_id IS NULL OR ${companyScopeUsing}`;
 
 // --- Enums (docs/db/Royal_Hardware_ERP_SQL.md) ---
 
@@ -206,8 +191,8 @@ export const userRoles = pgTable(
   (table) => [unique().on(table.userId, table.roleId, table.companyId)],
 );
 
-// Backs both requirePermission()'s companyId scope check and the RLS policies
-// below (docs/phase-8-authentication.md §3-4).
+// Backs requirePermission()'s companyId scope check — the database-side
+// boundary is `company_id` scoping enforced in lib/auth/scope.ts, not RLS.
 export const userCompanyAccess = pgTable(
   "user_company_access",
   {
@@ -261,15 +246,7 @@ export const contacts = pgTable(
     isActive: boolean("is_active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [
-    pgPolicy("company_or_global_scope", {
-      for: "all",
-      to: appUser,
-      using: sql`${table.companyId} IS NULL OR ${companyScopeUsing}`,
-      withCheck: sql`${table.companyId} IS NULL OR ${companyScopeUsing}`,
-    }),
-  ],
-).enableRLS();
+);
 
 // Global — categories are shared across companies. slug unique on its own.
 export const categories = pgTable("categories", {
@@ -321,14 +298,7 @@ export const expenseCategories = pgTable(
   },
   (table) => [
     unique().on(table.companyId, table.name),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 export const expenses = pgTable(
   "expenses",
@@ -359,14 +329,7 @@ export const expenses = pgTable(
   (table) => [
     check("expenses_amount_check", sql`${table.amount} > 0`),
     unique().on(table.chequeId),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // --- Items & Locations ---
 
@@ -395,14 +358,7 @@ export const items = pgTable(
     index("idx_items_sku").on(table.sku),
     index("idx_items_category").on(table.categoryId),
     index("idx_items_brand").on(table.brandId),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // item_id FK added via ALTER TABLE in the source SQL (items didn't exist yet
 // when unit_conversions was first declared) — expressed directly here since
@@ -420,14 +376,8 @@ export const unitConversions = pgTable(
   (table) => [
     unique().on(table.itemId, table.fromUnitId, table.toUnitId),
     check("unit_conversions_multiplier_check", sql`${table.multiplier} > 0`),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyOrGlobalUsing,
-      withCheck: companyOrGlobalUsing,
-    }),
   ],
-).enableRLS();
+);
 
 export const itemImages = pgTable(
   "item_images",
@@ -441,14 +391,7 @@ export const itemImages = pgTable(
   },
   (table) => [
     index("idx_item_images_item").on(table.itemId),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // --- Documents — the Universal Transaction Model ---
 
@@ -478,14 +421,7 @@ export const documentTypes = pgTable(
     // second company (M52) failed on that constraint. Each company gets its own
     // SI-0001 series now, matching the company+code rule above.
     unique().on(table.companyId, table.series),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 export const documents = pgTable(
   "documents",
@@ -545,14 +481,7 @@ export const documents = pgTable(
     index("idx_documents_contact").on(table.contactId),
     index("idx_documents_status").on(table.status),
     index("idx_documents_type").on(table.documentTypeId),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // Issues every sequential number in the app — item SKUs (RH-00042) and document
 // numbers (SI-0007) alike — one row per counter, keyed by an opaque scope
@@ -588,14 +517,7 @@ export const documentNumberLedger = pgTable(
   },
   (table) => [
     unique().on(table.companyId, table.documentTypeId, table.number),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 export const documentLines = pgTable(
   "document_lines",
@@ -624,14 +546,7 @@ export const documentLines = pgTable(
     index("idx_document_lines_document").on(table.documentId),
     index("idx_document_lines_item").on(table.itemId),
     index("idx_document_lines_location").on(table.locationId),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // --- Inventory Ledger ---
 
@@ -653,14 +568,7 @@ export const inventoryTransactions = pgTable(
     check("inventory_transactions_movement_check", sql`${table.movement} IN (-1, 1)`),
     check("inventory_transactions_quantity_check", sql`${table.quantity} >= 0`),
     check("inventory_transactions_base_quantity_check", sql`${table.baseQuantity} >= 0`),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // --- Accounting ---
 
@@ -679,14 +587,7 @@ export const ledgerEntries = pgTable(
       "ledger_entries_debit_credit_check",
       sql`(${table.debit} = 0 AND ${table.credit} > 0) OR (${table.credit} = 0 AND ${table.debit} > 0)`,
     ),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // --- Settings ---
 
@@ -700,14 +601,7 @@ export const settings = pgTable(
   },
   (table) => [
     unique().on(table.companyId, table.key),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 
 // --- WhatsApp ---
@@ -744,14 +638,7 @@ export const whatsappMessages = pgTable(
   (table) => [
     index("idx_whatsapp_created").on(table.createdAt),
     index("idx_whatsapp_provider_id").on(table.providerMessageId),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 // --- Audit trail ---
 
@@ -796,14 +683,8 @@ export const auditLogs = pgTable(
     // touched one record.
     index("idx_audit_created").on(table.createdAt),
     index("idx_audit_entity").on(table.entity, table.entityId),
-    pgPolicy("company_or_global_scope", {
-      for: "all",
-      to: appUser,
-      using: companyOrGlobalUsing,
-      withCheck: companyOrGlobalUsing,
-    }),
   ],
-).enableRLS();
+);
 
 // --- Banking ---
 
@@ -827,14 +708,8 @@ export const bankAccounts = pgTable(
   },
   (table) => [
     unique().on(table.companyId, table.accountNumber),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: sql`${table.companyId} IS NULL OR ${companyScopeUsing}`,
-      withCheck: sql`${table.companyId} IS NULL OR ${companyScopeUsing}`,
-    }),
   ],
-).enableRLS();
+);
 
 export const cashAccounts = pgTable(
   "cash_accounts",
@@ -850,14 +725,7 @@ export const cashAccounts = pgTable(
   },
   (table) => [
     unique().on(table.companyId, table.name),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );
 
 export const chequeRegister = pgTable(
   "cheque_register",
@@ -879,11 +747,4 @@ export const chequeRegister = pgTable(
   (table) => [
     unique().on(table.bankAccountId, table.chequeNumber),
     check("cheque_register_amount_check", sql`${table.amount} > 0`),
-    pgPolicy("company_scope", {
-      for: "all",
-      to: appUser,
-      using: companyScopeUsing,
-      withCheck: companyScopeUsing,
-    }),
-  ],
-).enableRLS();
+  ],  );

@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/ui/Dialog";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
+import { clearDraft, readDraft, saveDraft } from "@/lib/draft";
 
 const ADD_ROWS = 2;
 
@@ -29,6 +30,7 @@ export function BatchAddDialog<T, C = unknown>({
   initialRows = 5,
   toolbar,
   autoAppend = false,
+  draftKey,
 }: {
   title: string;
   onClose: () => void;
@@ -40,6 +42,12 @@ export function BatchAddDialog<T, C = unknown>({
   // Quick-add from inside another form usually means "I need one thing"; the
   // master-data pages mean "I'm entering a batch". Same dialog, different start.
   initialRows?: number;
+  // When set, the rows are kept in localStorage as they're typed and offered
+  // back the next time the dialog opens — a crash, a closed tab or an offline
+  // blip costs nothing. Used by the dialogs people paste many rows into
+  // (expenses, payments); the master-data dialogs don't pass it. Clearing on a
+  // successful save is handled here, inside submit().
+  draftKey?: string;
   // Sits above the table — used for the "+ Add Category" / "+ Add Brand" quick
   // buttons when a row's dropdowns reference records the user may not have yet,
   // or for a dialog-level field that applies to every row, like a shared date.
@@ -53,12 +61,33 @@ export function BatchAddDialog<T, C = unknown>({
   // actions, so a spare at the bottom costs nothing.
   autoAppend?: boolean;
 }) {
-  const [rows, setRows] = useState<T[]>(() => Array.from({ length: initialRows }, emptyRow));
+  // A draft key means the rows survive a crash mid-entry: they open with the
+  // last unsaved batch in place and save back as they're typed. The initial
+  // state is read once, when the dialog mounts — the draft is the rows, so
+  // restoring is opening, and a "restored N unsaved rows" note tells the user
+  // they aren't looking at a fresh grid.
+  const [initial] = useState<T[] | null>(() => {
+    if (!draftKey) return null;
+    const saved = readDraft<T[]>(draftKey);
+    return Array.isArray(saved) && saved.length > 0 ? saved : null;
+  });
+  const [rows, setRows] = useState<T[]>(initial ?? Array.from({ length: initialRows }, emptyRow));
+  const [restoredFromDraft, setRestoredFromDraft] = useState(initial !== null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
 
+  // The draft only starts once the user has actually touched a row — an
+  // untouched dialog must not write an "empty batch" draft that then reads as
+  // a restore. Touch happens in update, removeRow and the +Add rows button.
+  const [touched, setTouched] = useState(initial !== null);
+  useEffect(() => {
+    if (!draftKey || !touched) return;
+    saveDraft(draftKey, rows);
+  }, [draftKey, rows, touched]);
+
   function update(i: number, patch: Partial<T>) {
+    setTouched(true);
     setRows((prev) => {
       const next = prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
       // A row that grows itself: once the last row is touched, a fresh blank
@@ -71,6 +100,7 @@ export function BatchAddDialog<T, C = unknown>({
   }
 
   function removeRow(i: number) {
+    setTouched(true);
     setRows((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
   }
 
@@ -83,6 +113,8 @@ export function BatchAddDialog<T, C = unknown>({
       setError(result.error);
       return;
     }
+    // Saved — the local copy has nothing left to protect.
+    if (draftKey) clearDraft(draftKey);
     onDone(result.created);
   }
 
@@ -96,7 +128,10 @@ export function BatchAddDialog<T, C = unknown>({
           {!autoAppend && (
             <button
               type="button"
-              onClick={() => setRows((prev) => [...prev, ...Array.from({ length: ADD_ROWS }, emptyRow)])}
+              onClick={() => {
+                setTouched(true);
+                setRows((prev) => [...prev, ...Array.from({ length: ADD_ROWS }, emptyRow)]);
+              }}
               className="mr-auto text-sm font-medium text-navy-800 hover:underline"
             >
               + Add {ADD_ROWS} rows
@@ -123,6 +158,25 @@ export function BatchAddDialog<T, C = unknown>({
         </div>
       }
     >
+      {restoredFromDraft && draftKey && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-brass-600 bg-brass-100 px-3 py-2 text-sm text-ink">
+          <span>
+            Restored {rows.length} unsaved {rows.length === 1 ? "row" : "rows"} from earlier.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              clearDraft(draftKey);
+              setRows(Array.from({ length: initialRows }, emptyRow));
+              setRestoredFromDraft(false);
+            }}
+            className="font-medium text-steel hover:underline"
+          >
+            Discard
+          </button>
+        </div>
+      )}
+
       {toolbar && <div className="mb-3 flex flex-wrap items-center gap-2">{toolbar}</div>}
 
       {/* Blank rows are ignored by the server actions, so leaving spares at the

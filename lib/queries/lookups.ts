@@ -66,10 +66,24 @@ export const CACHE = {
   bankAccounts: "bank_accounts",
   cashAccounts: "cash_accounts",
   cheques: "cheques",
+  // Not lookup tables, but they belong in the same namespace: the dashboard
+  // figures and every report are aggregates of the tables above, cached per
+  // company scope exactly like the lookups, and invalidateLookups() clears
+  // them on every write (see below).
+  dashboard: "dashboard",
+  reports: "reports",
 } as const;
 
 export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][]) {
-  invalidate(...keys);
+  // Every dashboard figure and every report row is derived from tables the
+  // keys above guard, so any write that busts a lookup busts the aggregates
+  // too — a sale that changes "Today's Sales" must show the moment the page is
+  // next opened. The coverage rule in lib/cache.check.ts holds every mutating
+  // action to calling this, which is what makes the two extra invalidations
+  // here safe to rely on. The one writer this misses is settlement.ts (it
+  // takes a transaction handle, not a request); its callers all invalidate
+  // after commit, which lands here.
+  invalidate(...keys, CACHE.dashboard, CACHE.reports);
 }
 
 async function requireAuth() {
@@ -82,7 +96,11 @@ async function requireAuth() {
 // Royal-Hardware view and an M52 view must not share a cache entry, so the
 // scope is baked into every scoped lookup's key. invalidateLookups still clears
 // them all — invalidate() drops a key and every "<key>:…" variant.
-async function scopeSuffix(): Promise<string> {
+//
+// The dashboard and report caches (lib/actions/dashboard.ts,
+// lib/actions/reports.ts) key themselves on this same fragment, so one scope
+// means one entry per aggregate, cleared by the same invalidate().
+export async function scopeSuffix(): Promise<string> {
   const ids = await getScopeCompanyIds();
   return ids.length ? [...ids].sort().join(",") : "none";
 }

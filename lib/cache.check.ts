@@ -13,6 +13,11 @@ import { cached, invalidate, invalidateAll } from "./cache";
 // not appearing in a dropdown for five minutes. This asserts coverage so that
 // failure mode can't be introduced quietly.
 //
+// The dashboard and report caches are covered by the same rule transitively:
+// invalidateLookups() clears them on every call, and this check holds every
+// mutating action to calling invalidateLookups, so any write that could change
+// an aggregate busts its cache entry in the same commit.
+//
 //   npx tsx --conditions=react-server lib/cache.check.ts
 
 async function checkPrimitive() {

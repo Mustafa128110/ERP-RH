@@ -21,9 +21,14 @@ The server actions already talk to Supabase Postgres directly
 
 ```bash
 npm install
-cp .env.example .env        # fill in your Supabase keys and DATABASE_URL
+cp .env.example .env        # fill in the four Supabase variables (.env.example lists them all)
 npm run dev
 ```
+
+The app is also a PWA: `public/sw.js` + `public/manifest.json` give an offline
+app shell (pages render from cache when the network drops), and the document
+and batch-entry forms keep drafts (`lib/draft.ts`) so typed work is never lost
+across reloads or offline sessions.
 
 Database changes use drizzle (the source of truth):
 
@@ -47,9 +52,11 @@ npm run check:db            # checks that need a live database (.env)
 
 1. Import the repo into Vercel.
 2. Set every variable from `.env.example` in Environment Variables (Production
-   + Preview) — especially `DATABASE_URL_DIRECT`, `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-3. Deploy. No build step beyond `next build`.
+   + Preview) — exactly four: `DATABASE_URL_DIRECT`, `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`. These are the
+   only variables the codebase reads (no WhatsApp, Google Drive, or cron keys).
+3. Deploy. No build step beyond `next build`. The auth middleware (`proxy.ts`)
+   exempts `manifest.json`/`sw.js`, so the PWA metadata is reachable pre-login.
 
 ### Supabase (database + auth + edge functions)
 

@@ -11,6 +11,8 @@ import { todayISO } from "@/lib/format";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
+import { clearDraft } from "@/lib/draft";
+import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 const cellInput = "h-9 w-full min-w-0 bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";
@@ -20,6 +22,9 @@ const tdClass = "border border-sand p-0";
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string };
+
+// One draft per form: only one adjustment is ever being typed.
+const ADJUSTMENT_DRAFT_KEY = "adjustment";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "" });
 
@@ -45,9 +50,38 @@ export function StockAdjustmentFormPage({
 
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
   const [companyId, setCompanyId] = useState(() => companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "");
+  // The date, location and reason are controlled (not defaultValue) so a draft
+  // captures the whole adjustment, not just the grid.
+  const [documentDate, setDocumentDate] = useState(todayISO());
+  const [locationId, setLocationId] = useState("");
+  const [reason, setReason] = useState("");
+
+  // --- Draft ----------------------------------------------------------------
+  // An adjustment is a shelf-count typed against live stock levels — the worst
+  // possible thing to lose — so the whole form (grid, date, location, reason)
+  // is drafted while it's being typed. There is no edit path for an adjustment,
+  // so there is no "new only" rule to apply here.
+  const draftState = { lines, companyId, documentDate, locationId, reason };
+  type AdjustmentDraft = typeof draftState;
+
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<AdjustmentDraft>(ADJUSTMENT_DRAFT_KEY, {
+    state: draftState,
+    enabled: true,
+    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    apply: (d) => {
+      setLines(d.lines);
+      setCompanyId(d.companyId);
+      setDocumentDate(d.documentDate);
+      setLocationId(d.locationId);
+      setReason(d.reason);
+    },
+  });
 
   function resetForm() {
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
+    setDocumentDate(todayISO());
+    setLocationId("");
+    setReason("");
     formRef.current?.reset();
     focusCell(0, 0);
   }
@@ -55,7 +89,11 @@ export function StockAdjustmentFormPage({
   const [state, action, pending] = useActionState(
     async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
       const result = await createStockAdjustment(prev, formData);
-      if (result?.success) resetForm();
+      if (result?.success) {
+        // Saved — the local copy has nothing left to protect.
+        clearDraft(ADJUSTMENT_DRAFT_KEY);
+        resetForm();
+      }
       return result;
     },
     undefined,
@@ -86,6 +124,10 @@ export function StockAdjustmentFormPage({
         value={JSON.stringify(lines.map((l) => ({ ...l, itemName: l.itemText, unitName: l.unitText })))}
       />
 
+      {/* An unfinished adjustment from before — a crash, a closed tab, a reload.
+          Offered, never applied on its own. */}
+      {offerDraft && <DraftBanner noun="stock adjustment" onRestore={restoreDraft} onDiscard={discardDraft} />}
+
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Adjustment</span>
         <div className="flex flex-wrap gap-3">
@@ -104,11 +146,11 @@ export function StockAdjustmentFormPage({
           </label>
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Date</span>
-            <DateField name="documentDate" required defaultValue={todayISO()} className={fieldClass} />
+            <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
           </label>
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Location</span>
-            <select name="locationId" required defaultValue="" className={fieldClass}>
+            <select name="locationId" required value={locationId} onChange={(e) => setLocationId(e.target.value)} className={fieldClass}>
               <option value="" disabled>
                 Select a location
               </option>
@@ -124,7 +166,7 @@ export function StockAdjustmentFormPage({
           </label>
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Reason</span>
-            <select name="reason" required defaultValue="" className={fieldClass}>
+            <select name="reason" required value={reason} onChange={(e) => setReason(e.target.value)} className={fieldClass}>
               <option value="" disabled>
                 Select a reason
               </option>

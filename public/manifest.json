@@ -1,0 +1,19 @@
+{
+  "name": "Royal Hardware ERP",
+  "short_name": "RH ERP",
+  "description": "Inventory, sales, purchases and ledgers for Royal Hardware and M52.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#10263f",
+  "theme_color": "#10263f",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

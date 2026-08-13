@@ -14,10 +14,13 @@ import * as schema from "./schema";
 // with prepared statements. Queries taking no parameters were always 1 trip,
 // which is why some pages looked twice as fast as others for no obvious reason.
 //
-// Session mode holds a backend per connection, so it is the wrong choice for
-// serverless — and the right one here, where a single long-lived Node server
-// keeps a small warm pool. That is also Supabase's own guidance. `max` below
-// bounds it well under the direct-connection budget.
+// Session mode holds a backend per connection, which serverless pools multiply
+// per instance — the reason `max` below is so small. The alternative (the
+// transaction pooler at :6543) multiplexes connections but rules out prepared
+// statements, and the prepared statement is the whole point of session mode:
+// it halves the round trips a page costs. `max: 2` keeps that speed while
+// staying under the session-pooler's 15-backend cap across the parallel lambda
+// instances Vercel runs.
 const connectionString = process.env.DATABASE_URL_DIRECT ?? process.env.DATABASE_URL!;
 
 // Dev-mode hot-reload re-evaluates this module on most file saves; without
@@ -31,9 +34,15 @@ const globalForDb = globalThis as unknown as { dbClient?: postgres.Sql };
 // Session mode holds a real backend per connection and this project is capped at
 // 15 of them ("max clients are limited to pool_size: 15"), so `max` has to stay
 // well under that — migrations, drizzle-studio, psql and (in dev) every
-// hot-reloaded module instance draw from the same 15. 6 leaves headroom. It's
-// enough because the option lists that used to make a page fire a dozen queries
-// at once are now served from lib/cache.ts, so a request needs one or two.
+// hot-reloaded module instance draw from the same 15.
+//
+// On Vercel the pool is per lambda instance and several run in parallel, so the
+// budget multiplies: three instances at `max: 6` exhausted the cap and every
+// new request failed with EMAXCONNSESSION until the idle backends returned.
+// `max: 2` keeps ~7 warm instances under the cap while still allowing the
+// parallel option-list lookups of a cold page to run two at a time — the lists
+// themselves are cached (lib/cache.ts), so a warm request needs one or two
+// connections at most.
 //
 // idle_timeout closes a connection left unused for 20s. On Singapore a reconnect
 // is ~80ms, cheap enough that keeping idle backends forever isn't worth it — and
@@ -44,7 +53,7 @@ const globalForDb = globalThis as unknown as { dbClient?: postgres.Sql };
 const client =
   globalForDb.dbClient ??
   postgres(connectionString, {
-    max: 6,
+    max: 2,
     idle_timeout: 20,
     connect_timeout: 10,
     // DB_DEBUG=1 logs every statement with its connection id. The whole

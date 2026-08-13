@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import { getSession } from "@/lib/auth/session";
 import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
+import { ServiceWorkerRegister } from "@/components/layout/ServiceWorkerRegister";
 import "./globals.css";
 
 // Brand pairing (docs/OS/02-brand/typography.md): Fraunces 600 for
@@ -21,6 +22,10 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Royal Hardware ERP",
   description: "Inventory, sales, purchases and ledgers for Royal Hardware and M52.",
+  // The PWA shell (public/manifest.json + public/sw.js): repeat visits load from
+  // cache, and the app keeps working offline for pages already visited.
+  manifest: "/manifest.json",
+  icons: { icon: "/icon.svg" },
 };
 
 // Spelled out rather than left to the framework default, for the two settings
@@ -82,6 +87,7 @@ export default async function RootLayout({
       */}
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         {children}
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

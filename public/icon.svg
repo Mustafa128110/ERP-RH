@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- App icon: a hex nut — the hardware-store mark — in the brand brass on the
+       brand navy. The mark sits inside the central 80% so it survives the
+       maskable safe-zone crop on every launcher. -->
+  <rect width="512" height="512" rx="96" fill="#10263f"/>
+  <polygon
+    points="256,96 389,166 389,306 256,376 123,306 123,166"
+    fill="none"
+    stroke="#b08a3c"
+    stroke-width="36"
+    stroke-linejoin="round"
+  />
+  <circle cx="256" cy="236" r="58" fill="none" stroke="#b08a3c" stroke-width="30"/>
+</svg>

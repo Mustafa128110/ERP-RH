@@ -372,6 +372,13 @@
       "when": 1786467609244,
       "tag": "0052_pretty_black_crow",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786569886653,
+      "tag": "0053_ambitious_exodus",
+      "breakpoints": true
     }
   ]
 }

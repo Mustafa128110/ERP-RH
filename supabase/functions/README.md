@@ -70,5 +70,7 @@ the drizzle client in `lib/`. They talk to the database over PostgREST (the
 auto-generated REST API on `NEXT_PUBLIC_SUPABASE_URL/rest/v1`) or a direct
 `postgres` connection using `SUPABASE_DB_URL` (auto-injected, see
 `supabase secrets set` for others). Keep business rules that must be shared
-between Vercel and edge functions in SQL (views, functions, RLS policies) in
-`supabase/migrations/` so both sides run the same logic.
+between Vercel and edge functions in SQL (views, functions) in
+`supabase/migrations/` so both sides run the same logic. Note the database has
+no row-level security (the app scopes per company in code) — a function that
+reads company data must scope its own queries.

@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
     // so a restart doesn't recompile all 54 routes from cold.
     turbopackFileSystemCacheForDev: true,
   },
+  // No value in advertising the framework to every response.
+  poweredByHeader: false,
 };
 
 export default nextConfig;

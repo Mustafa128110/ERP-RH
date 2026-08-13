@@ -25,11 +25,26 @@ type Entry = { expires: number; value: Promise<unknown> };
 const globalForCache = globalThis as unknown as { appCache?: Map<string, Entry> };
 const store = (globalForCache.appCache ??= new Map<string, Entry>());
 
+// Expired entries are never visited again, so without a bound an instance that
+// serves a lot of distinct keys would keep them all in memory forever — the
+// report cache is keyed per filter combination, so a month of report views is
+// a month of entries. A sweep on insert drops everything already past its TTL
+// whenever the store grows past the cap, which keeps the cost amortised O(1)
+// and only ever removes data that is already dead.
+const MAX_ENTRIES = 1000;
+
 export const MINUTE = 60_000;
 
 export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const hit = store.get(key);
   if (hit && hit.expires > Date.now()) return hit.value as Promise<T>;
+
+  if (store.size > MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [k, entry] of store) {
+      if (entry.expires <= now) store.delete(k);
+    }
+  }
 
   const value = load().catch((err) => {
     store.delete(key);

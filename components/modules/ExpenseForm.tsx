@@ -111,6 +111,10 @@ export function ExpenseBatchAddDialog({
   });
 
   return (
+    // A pasted batch of expenses is exactly the work a crash must not cost —
+    // the rows are drafted as they're typed and offered back on reopen. (The
+    // date at the top isn't drafted; it restarts on today, which is where
+    // expenses are nearly always entered anyway.)
     <BatchAddDialog<BatchRow>
       title="Add Expenses"
       onClose={onClose}
@@ -118,6 +122,7 @@ export function ExpenseBatchAddDialog({
       emptyRow={emptyRow}
       initialRows={1}
       autoAppend
+      draftKey="expense-batch"
       headers={["Company", "Category", "Amount", "Settle via", "Account", "Note"]}
       toolbar={
         <label className="flex items-center gap-2">

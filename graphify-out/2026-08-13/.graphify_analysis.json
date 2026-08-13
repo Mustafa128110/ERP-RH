@@ -1,0 +1,4043 @@
+{
+  "communities": {
+    "0": [
+      "lib_account_label",
+      "lib_account_label_account_separator",
+      "lib_account_label_bank_account_label_sql",
+      "lib_actions_audit",
+      "lib_actions_audit_auditentry",
+      "lib_actions_audit_auditfilters",
+      "lib_actions_backups",
+      "lib_actions_backups_documentheaders",
+      "lib_actions_backups_documentlinerows",
+      "lib_actions_backups_queries",
+      "lib_actions_dashboard",
+      "lib_actions_dashboard_dashboarddata",
+      "lib_actions_document_numbering",
+      "lib_actions_document_numbering_ensuredocumenttype",
+      "lib_actions_expenses",
+      "lib_actions_expenses_expensefilters",
+      "lib_actions_ledger",
+      "lib_actions_locations",
+      "lib_actions_locations_readlocationform",
+      "lib_actions_payments",
+      "lib_actions_payments_direction_code",
+      "lib_actions_payments_direction_name",
+      "lib_actions_payments_direction_series",
+      "lib_actions_payments_paymentfilters",
+      "lib_actions_payments_settle_direction",
+      "lib_actions_quotations",
+      "lib_actions_quotations_lineinput",
+      "lib_actions_quotations_quotationsfordocuments",
+      "lib_actions_quotations_quotationtype",
+      "lib_actions_quotations_tx",
+      "lib_actions_resolve_refs",
+      "lib_actions_resolve_refs_tx",
+      "lib_actions_scope",
+      "lib_actions_scope_clearscopeifcompany",
+      "lib_actions_settlement",
+      "lib_actions_settlement_tx",
+      "lib_actions_stock",
+      "lib_actions_stock_adjustments",
+      "lib_actions_stock_adjustments_adjustmentitemrow",
+      "lib_actions_stock_adjustments_adjustmentlineinput",
+      "lib_actions_stock_adjustments_getorcreateadjustmentdocumenttype",
+      "lib_actions_stock_movements",
+      "lib_actions_stock_movements_movementfilters",
+      "lib_actions_stock_stockitemrow",
+      "lib_actions_stock_stocklocationbreakdown",
+      "lib_actions_stock_stockunittotal",
+      "lib_actions_stock_transfers",
+      "lib_actions_stock_transfers_getorcreatetransferdocumenttype",
+      "lib_actions_stock_transfers_transferitemrow",
+      "lib_actions_stock_transfers_transferlineinput",
+      "lib_actions_stock_transfers_transfertx",
+      "lib_actions_transfers",
+      "lib_auth_permissions",
+      "lib_auth_permissions_haspermission",
+      "lib_auth_permissions_scope",
+      "lib_auth_scope",
+      "lib_auth_scope_scope_cookie",
+      "lib_auth_session",
+      "lib_auth_session_authsession",
+      "lib_cache_minute",
+      "lib_db_index",
+      "lib_db_index_db",
+      "lib_db_index_globalfordb",
+      "lib_db_index_preparing",
+      "lib_db_schema",
+      "lib_db_schema_auditaction",
+      "lib_db_schema_auditlogs",
+      "lib_db_schema_bankaccounts",
+      "lib_db_schema_brands",
+      "lib_db_schema_cashaccounts",
+      "lib_db_schema_categories",
+      "lib_db_schema_chequeregister",
+      "lib_db_schema_chequestatusenum",
+      "lib_db_schema_chequetypeenum",
+      "lib_db_schema_companies",
+      "lib_db_schema_contacts",
+      "lib_db_schema_documentlines",
+      "lib_db_schema_documentnumberledger",
+      "lib_db_schema_documents",
+      "lib_db_schema_documentseriesenum",
+      "lib_db_schema_documentstatusenum",
+      "lib_db_schema_documenttypecodeenum",
+      "lib_db_schema_documenttypes",
+      "lib_db_schema_expensecategories",
+      "lib_db_schema_expenses",
+      "lib_db_schema_inventorytransactions",
+      "lib_db_schema_items",
+      "lib_db_schema_ledgerentries",
+      "lib_db_schema_locations",
+      "lib_db_schema_locationtypeenum",
+      "lib_db_schema_saletypeenum",
+      "lib_db_schema_taxes",
+      "lib_db_schema_themepreferenceenum",
+      "lib_db_schema_unitconversions",
+      "lib_db_schema_units",
+      "lib_db_schema_users",
+      "lib_db_schema_userstatusenum",
+      "lib_db_schema_whatsappmessages",
+      "lib_db_schema_whatsappstatusenum",
+      "lib_queries_lookups",
+      "lib_queries_lookups_cache",
+      "lib_queries_lookups_getdocumenttypes",
+      "lib_queries_lookups_labelled",
+      "lib_queries_stock_cost",
+      "lib_queries_stock_cost_tx"
+    ],
+    "1": [
+      "lib_actions_accounts",
+      "lib_actions_accounts_createbankaccountsbatch",
+      "lib_actions_accounts_createcashaccountsbatch",
+      "lib_actions_accounts_createcheque",
+      "lib_actions_accounts_createchequesbatch",
+      "lib_actions_accounts_deletebankaccount",
+      "lib_actions_accounts_deletecashaccount",
+      "lib_actions_accounts_deletecheque",
+      "lib_actions_accounts_invalidateaccounts",
+      "lib_actions_accounts_readbankaccountform",
+      "lib_actions_accounts_readcashaccountform",
+      "lib_actions_accounts_readchequeform",
+      "lib_actions_accounts_updatebankaccount",
+      "lib_actions_accounts_updatecashaccount",
+      "lib_actions_accounts_updatecheque",
+      "lib_actions_audit_historyfor",
+      "lib_actions_audit_recordaudit",
+      "lib_actions_backups_exportsnapshot",
+      "lib_actions_brands",
+      "lib_actions_brands_createbrandsbatch",
+      "lib_actions_brands_deletebrand",
+      "lib_actions_brands_readbrandform",
+      "lib_actions_brands_updatebrand",
+      "lib_actions_categories",
+      "lib_actions_categories_createcategoriesbatch",
+      "lib_actions_categories_deletecategory",
+      "lib_actions_categories_getcategory",
+      "lib_actions_categories_hascycle",
+      "lib_actions_categories_readcategoryform",
+      "lib_actions_categories_savecategorytree",
+      "lib_actions_categories_updatecategory",
+      "lib_actions_companies",
+      "lib_actions_companies_createcompaniesbatch",
+      "lib_actions_companies_deletecompany",
+      "lib_actions_companies_getcompany",
+      "lib_actions_companies_readcompanyform",
+      "lib_actions_companies_updatecompany",
+      "lib_actions_contacts_createcontactsbatch",
+      "lib_actions_contacts_updatecontactsbatch",
+      "lib_actions_expenses_createexpense",
+      "lib_actions_expenses_createexpensesbatch",
+      "lib_actions_expenses_deleteexpense",
+      "lib_actions_expenses_readexpenseform",
+      "lib_actions_expenses_updateexpense",
+      "lib_actions_guard_createresult",
+      "lib_actions_guard_guard",
+      "lib_actions_ledger_createledgerentry",
+      "lib_actions_ledger_readentryform",
+      "lib_actions_ledger_setcontactbalance",
+      "lib_actions_locations_createlocationsbatch",
+      "lib_actions_locations_deletelocation",
+      "lib_actions_locations_updatelocation",
+      "lib_actions_payments_deletepayment",
+      "lib_actions_products_mergeproducts",
+      "lib_actions_purchases_mergestockpurchases",
+      "lib_actions_quotations_convertquotation",
+      "lib_actions_quotations_createquotation",
+      "lib_actions_quotations_deletequotation",
+      "lib_actions_quotations_getquotation",
+      "lib_actions_quotations_updatequotation",
+      "lib_actions_roles_deleterole",
+      "lib_actions_roles_getrolepermissionkeys",
+      "lib_actions_sales_deletesale",
+      "lib_actions_settings_savesettings",
+      "lib_actions_stock_adjustments_deletestockadjustment",
+      "lib_actions_taxes",
+      "lib_actions_taxes_createtaxesbatch",
+      "lib_actions_taxes_deletetax",
+      "lib_actions_taxes_gettax",
+      "lib_actions_taxes_readtaxform",
+      "lib_actions_taxes_updatetax",
+      "lib_actions_transfers_deletecashtransfer",
+      "lib_actions_unit_conversions",
+      "lib_actions_unit_conversions_createunitconversion",
+      "lib_actions_unit_conversions_createunitconversionsbatch",
+      "lib_actions_unit_conversions_deleteunitconversion",
+      "lib_actions_unit_conversions_getunitconversion",
+      "lib_actions_unit_conversions_listunitconversions",
+      "lib_actions_unit_conversions_readform",
+      "lib_actions_unit_conversions_updateunitconversion",
+      "lib_actions_units",
+      "lib_actions_units_createunitsbatch",
+      "lib_actions_units_deleteunit",
+      "lib_actions_units_getunit",
+      "lib_actions_units_readunitform",
+      "lib_actions_units_updateunit",
+      "lib_actions_users_adduserrole",
+      "lib_actions_users_removeuserrole",
+      "lib_actions_users_updateuser",
+      "lib_auth_permissions_requirepermission",
+      "lib_auth_session_getsession",
+      "lib_format_slugify",
+      "lib_queries_lookups_invalidatelookups"
+    ],
+    "2": [
+      "lib_account_label_bankaccountlabel",
+      "lib_actions_ledger_writejournalentry",
+      "lib_actions_payments_createpayment",
+      "lib_actions_payments_createpaymentsbatch",
+      "lib_actions_payments_getorcreatepaymentdocumenttype",
+      "lib_actions_payments_readpaymentform",
+      "lib_actions_payments_resolvesettlementamount",
+      "lib_actions_payments_updatepayment",
+      "lib_actions_purchases",
+      "lib_actions_purchases_createstockpurchase",
+      "lib_actions_purchases_deletestockpurchase",
+      "lib_actions_purchases_exportstockpurchasescsv",
+      "lib_actions_purchases_num",
+      "lib_actions_purchases_opt",
+      "lib_actions_purchases_purchaselineinput",
+      "lib_actions_purchases_purchasetx",
+      "lib_actions_purchases_recordshippingexpense",
+      "lib_actions_purchases_resolvepurchaselinerows",
+      "lib_actions_purchases_shippingcashaccountid",
+      "lib_actions_purchases_shippingexpenseargs",
+      "lib_actions_purchases_stockpurchaseitemrow",
+      "lib_actions_purchases_updatestockpurchase",
+      "lib_actions_resolve_refs_resolvecontactid",
+      "lib_actions_resolve_refs_resolveexpensecategoryid",
+      "lib_actions_resolve_refs_resolvelocationid",
+      "lib_actions_settlement_adjustsettlementbalance",
+      "lib_actions_transfers_createcashtransfer",
+      "lib_actions_transfers_inreason",
+      "lib_actions_transfers_outreason",
+      "lib_actions_transfers_parseaccount",
+      "lib_cheque_constants_chequestatusaftersettling"
+    ],
+    "3": [
+      "drizzle_0000_magical_captain_america",
+      "drizzle_0000_magical_captain_america_attachments",
+      "drizzle_0000_magical_captain_america_audit_log",
+      "drizzle_0000_magical_captain_america_brands",
+      "drizzle_0000_magical_captain_america_categories",
+      "drizzle_0000_magical_captain_america_chart_of_accounts",
+      "drizzle_0000_magical_captain_america_companies",
+      "drizzle_0000_magical_captain_america_contacts",
+      "drizzle_0000_magical_captain_america_currencies",
+      "drizzle_0000_magical_captain_america_document_lines",
+      "drizzle_0000_magical_captain_america_document_types",
+      "drizzle_0000_magical_captain_america_documents",
+      "drizzle_0000_magical_captain_america_expense_categories",
+      "drizzle_0000_magical_captain_america_inventory_transactions",
+      "drizzle_0000_magical_captain_america_item_images",
+      "drizzle_0000_magical_captain_america_items",
+      "drizzle_0000_magical_captain_america_ledger_entries",
+      "drizzle_0000_magical_captain_america_locations",
+      "drizzle_0000_magical_captain_america_payment_methods",
+      "drizzle_0000_magical_captain_america_price_lists",
+      "drizzle_0000_magical_captain_america_settings",
+      "drizzle_0000_magical_captain_america_sql_public_brands",
+      "drizzle_0000_magical_captain_america_sql_public_categories",
+      "drizzle_0000_magical_captain_america_sql_public_chart_of_accounts",
+      "drizzle_0000_magical_captain_america_sql_public_companies",
+      "drizzle_0000_magical_captain_america_sql_public_contacts",
+      "drizzle_0000_magical_captain_america_sql_public_currencies",
+      "drizzle_0000_magical_captain_america_sql_public_document_lines",
+      "drizzle_0000_magical_captain_america_sql_public_document_types",
+      "drizzle_0000_magical_captain_america_sql_public_documents",
+      "drizzle_0000_magical_captain_america_sql_public_items",
+      "drizzle_0000_magical_captain_america_sql_public_locations",
+      "drizzle_0000_magical_captain_america_sql_public_taxes",
+      "drizzle_0000_magical_captain_america_sql_public_units",
+      "drizzle_0000_magical_captain_america_taxes",
+      "drizzle_0000_magical_captain_america_unit_conversions",
+      "drizzle_0000_magical_captain_america_units",
+      "drizzle_0000_magical_captain_america_users"
+    ],
+    "4": [
+      "app_dashboard_whatsapp_page",
+      "app_dashboard_whatsapp_page_page",
+      "components_layout_keyboardshortcuts_usenewentry",
+      "components_modules_productsmanager",
+      "components_modules_productsmanager_columns",
+      "components_modules_productsmanager_option",
+      "components_modules_quotationmanager",
+      "components_modules_quotationmanager_columns",
+      "components_modules_quotationmanager_quotationmanager",
+      "components_modules_reportview",
+      "components_modules_rolemanager",
+      "components_modules_rolemanager_columns",
+      "components_modules_rolemanager_editstate",
+      "components_modules_rolemanager_rolemanager",
+      "components_modules_suppliersmanager",
+      "components_modules_suppliersmanager_columns",
+      "components_modules_suppliersmanager_contactdetail",
+      "components_modules_suppliersmanager_modalstate",
+      "components_modules_suppliersmanager_option",
+      "components_modules_suppliersmanager_suppliersmanager",
+      "components_modules_unitconversionmanager",
+      "components_modules_unitconversionmanager_columns",
+      "components_modules_unitconversionmanager_conversionlistitem",
+      "components_modules_unitconversionmanager_formoptions",
+      "components_modules_unitconversionmanager_modalstate",
+      "components_modules_unitconversionmanager_unitconversionmanager",
+      "components_modules_usermanager",
+      "components_modules_usermanager_columns",
+      "components_modules_usermanager_detail",
+      "components_modules_usermanager_modalstate",
+      "components_modules_usermanager_usermanager",
+      "components_ui_csvactions",
+      "components_ui_datatable",
+      "components_ui_datatable_datatable",
+      "components_ui_datatable_haystack",
+      "components_ui_datatable_hidden_keys",
+      "components_ui_datatable_snocolumn",
+      "components_ui_form_styles",
+      "components_ui_form_styles_iconbuttonclass",
+      "components_ui_form_styles_primaryiconbuttonclass",
+      "components_ui_form_styles_quickaddinlineclass",
+      "components_ui_icon",
+      "components_ui_icon_icon",
+      "components_ui_icon_iconname",
+      "components_ui_icon_paths",
+      "components_ui_pageheader",
+      "components_ui_pageheader_pageheader",
+      "lib_actions_contacts_getcontact",
+      "lib_actions_quotations_quotationlistrow",
+      "lib_actions_roles_rolelistitem",
+      "lib_actions_users_getuserdetail",
+      "lib_actions_users_userlistitem",
+      "lib_table_row"
+    ],
+    "5": [
+      "app_dashboard_roles_page",
+      "app_dashboard_roles_page_rolespage",
+      "lib_actions_guard",
+      "lib_actions_guard_actionresult",
+      "lib_actions_guard_check",
+      "lib_actions_guard_check_asyncchecks",
+      "lib_actions_guard_check_cyclic",
+      "lib_actions_guard_connect_codes",
+      "lib_actions_guard_duplicate",
+      "lib_actions_guard_errormessages",
+      "lib_actions_guard_fieldfromconstraint",
+      "lib_actions_guard_find",
+      "lib_actions_guard_pgerror",
+      "lib_actions_guard_sqlstate",
+      "lib_actions_preferences",
+      "lib_actions_preferences_writeprefs",
+      "lib_actions_roles",
+      "lib_actions_roles_action_order",
+      "lib_actions_roles_createrole",
+      "lib_actions_roles_getpermissioncatalog",
+      "lib_actions_roles_idsforkeys",
+      "lib_actions_roles_listroles",
+      "lib_actions_roles_readpermissionkeys",
+      "lib_actions_roles_updaterole",
+      "lib_actions_settings",
+      "lib_actions_settings_by_key",
+      "lib_actions_settings_settingvalue",
+      "lib_actions_users",
+      "lib_actions_users_createusersbatch",
+      "lib_actions_users_deleteuser",
+      "lib_auth_permissions_permissionerror",
+      "lib_auth_permissions_permissionerror_constructor",
+      "lib_auth_session_invalidatesessions",
+      "lib_cache_invalidate",
+      "lib_db_schema_roles",
+      "lib_db_schema_settings",
+      "lib_db_schema_usercompanyaccess",
+      "lib_db_schema_userroles",
+      "lib_db_seed_admin",
+      "lib_db_seed_admin_main",
+      "lib_supabase_admin",
+      "lib_supabase_admin_createadminclient"
+    ],
+    "6": [
+      "components_layout_keyboardshortcuts",
+      "components_layout_keyboardshortcuts_new_entry_event",
+      "components_layout_keyboardshortcuts_shortcut_field_keys",
+      "components_layout_keyboardshortcuts_shortcuts_event",
+      "components_modules_expensemanager",
+      "components_modules_expensemanager_buildcolumns",
+      "components_modules_expensemanager_expense",
+      "components_modules_expensemanager_expensemanager",
+      "components_modules_expensemanager_modalstate",
+      "components_modules_expensemanager_option",
+      "components_modules_expensemanager_scopedoption",
+      "components_modules_paymentmanager",
+      "components_modules_paymentmanager_buildcolumns",
+      "components_modules_paymentmanager_option",
+      "components_modules_paymentmanager_paymentdetail",
+      "components_modules_paymentmanager_paymentmanager",
+      "components_modules_paymentmanager_paymentrow",
+      "components_modules_paymentmanager_scopedoption",
+      "components_ui_dialog",
+      "components_ui_dialog_dialog",
+      "components_ui_dialog_dialogstack",
+      "components_ui_dialog_pushdialog",
+      "components_ui_dialog_size",
+      "lib_actions_expenses_listchequesforexpenses",
+      "lib_actions_payments_getpayment",
+      "lib_actions_payments_listchequesforpayments",
+      "lib_day_groups",
+      "lib_day_groups_check",
+      "lib_day_groups_check_expense",
+      "lib_day_groups_check_grouppayments",
+      "lib_day_groups_check_p",
+      "lib_day_groups_check_payment",
+      "lib_day_groups_check_paymentkey",
+      "lib_day_groups_daygroup",
+      "lib_day_groups_groupsameday",
+      "lib_shortcuts",
+      "lib_shortcuts_go_to",
+      "lib_shortcuts_shortcut",
+      "lib_shortcuts_shortcut_groups",
+      "lib_shortcuts_shortcutgroup"
+    ],
+    "7": [
+      "package_scripts",
+      "package_scripts_build",
+      "package_scripts_check",
+      "package_scripts_check_db",
+      "package_scripts_check_offline",
+      "package_scripts_db_generate",
+      "package_scripts_db_migrate",
+      "package_scripts_db_push",
+      "package_scripts_db_seed_admin",
+      "package_scripts_db_seed_rbac",
+      "package_scripts_db_studio",
+      "package_scripts_dev",
+      "package_scripts_lint",
+      "package_scripts_start",
+      "package_scripts_typecheck"
+    ],
+    "8": [
+      "components_layout_navicon",
+      "components_layout_navicon_navicon",
+      "components_layout_navicon_shapes",
+      "components_layout_sidebar",
+      "components_layout_sidebar_nav_event",
+      "components_layout_sidebar_sidebar",
+      "components_ui_hovercard",
+      "components_ui_hovercard_hovercard",
+      "lib_nav_config",
+      "lib_nav_config_navitem",
+      "lib_nav_config_navsection",
+      "lib_nav_config_navsections"
+    ],
+    "9": [
+      "app_dashboard_settings_backups_page",
+      "app_dashboard_settings_backups_page_dynamic",
+      "app_dashboard_settings_backups_page_page",
+      "components_modules_snapshotexport",
+      "components_modules_snapshotexport_download",
+      "components_modules_snapshotexport_snapshotexport",
+      "components_modules_snapshotexport_stamp",
+      "components_modules_snapshotexport_tocsv",
+      "lib_actions_backups_snapshotsizes",
+      "lib_backup_constants",
+      "lib_backup_constants_snapshot_tables",
+      "lib_backup_constants_snapshottable"
+    ],
+    "10": [
+      "app_dashboard_sales_invoices_id_page",
+      "app_dashboard_sales_invoices_id_page_page",
+      "components_modules_invoicedocument",
+      "components_modules_invoicedocument_downloadinvoicebutton",
+      "components_modules_invoicedocument_downloadinvoiceimage",
+      "components_modules_invoicedocument_downloadinvoiceimagebutton",
+      "components_modules_invoicedocument_invoicedocument",
+      "components_modules_invoicedocument_invoiceimagerenderer",
+      "components_modules_invoicemanager",
+      "components_modules_invoicemanager_columns",
+      "components_modules_invoicemanager_invoicemanager",
+      "components_modules_invoicemanager_itemoption",
+      "components_modules_invoicemanager_option",
+      "components_modules_invoicemanager_saledetail",
+      "components_modules_invoicemanager_saleformoptions",
+      "components_modules_invoicemanager_scopedoption",
+      "lib_actions_sales_getinvoice",
+      "lib_invoice_pdf",
+      "lib_invoice_pdf_buildinvoicepdf",
+      "lib_invoice_pdf_check",
+      "lib_invoice_pdf_check_base",
+      "lib_invoice_pdf_check_branded",
+      "lib_invoice_pdf_check_bytes",
+      "lib_invoice_pdf_check_doc",
+      "lib_invoice_pdf_check_many",
+      "lib_invoice_pdf_check_out",
+      "lib_invoice_pdf_check_text",
+      "lib_invoice_pdf_downloadinvoicepdf",
+      "lib_invoice_pdf_ink",
+      "lib_invoice_pdf_invoice",
+      "lib_invoice_pdf_invoice_company_name",
+      "lib_invoice_pdf_invoicefilename",
+      "lib_invoice_pdf_invoiceline",
+      "lib_invoice_pdf_navy",
+      "lib_invoice_pdf_sand",
+      "lib_invoice_pdf_steel",
+      "lib_invoice_png_downloadinvoicepng"
+    ],
+    "11": [
+      "components_modules_accountforms_chequebatchadddialog",
+      "components_modules_accountforms_chequefields",
+      "components_modules_intercompanyform",
+      "components_modules_intercompanyform_emptyline",
+      "components_modules_intercompanyform_intercompanydefaults",
+      "components_modules_intercompanyform_intercompanyformpage",
+      "components_modules_intercompanyform_itemoption",
+      "components_modules_intercompanyform_line",
+      "components_modules_intercompanyform_option",
+      "components_modules_ledgermanager_ledgerentryform",
+      "components_modules_quotationform",
+      "components_modules_quotationform_deletequotationbutton",
+      "components_modules_quotationform_emptyline",
+      "components_modules_quotationform_itemoption",
+      "components_modules_quotationform_line",
+      "components_modules_quotationform_option",
+      "components_modules_quotationform_quotationform",
+      "components_modules_quotationform_scopedoption",
+      "components_modules_saleform_saleformpage",
+      "components_modules_stockadjustmentform_stockadjustmentformpage",
+      "components_modules_stockpurchaseform",
+      "components_modules_stockpurchaseform_deletestockpurchasebutton",
+      "components_modules_stockpurchaseform_documenttypeoption",
+      "components_modules_stockpurchaseform_emptyline",
+      "components_modules_stockpurchaseform_line",
+      "components_modules_stockpurchaseform_option",
+      "components_modules_stockpurchaseform_purchasedefaults",
+      "components_modules_stockpurchaseform_scopedoption",
+      "components_modules_stockpurchaseform_settlement_types",
+      "components_modules_stockpurchaseform_stockpurchasecreateform",
+      "components_modules_stocktransferform_stocktransferformpage",
+      "components_ui_form_styles_fieldclass",
+      "components_ui_usedraft",
+      "components_ui_usedraft_usedraft",
+      "lib_actions_inter_company_intercompanyresult",
+      "lib_contact_scope",
+      "lib_contact_scope_check",
+      "lib_contact_scope_check_options",
+      "lib_contact_scope_check_pick",
+      "lib_contact_scope_incompany",
+      "lib_draft",
+      "lib_draft_cleardraft",
+      "lib_draft_draftsnapshot",
+      "lib_draft_envelope",
+      "lib_draft_nodraft",
+      "lib_draft_readdraft",
+      "lib_draft_savedraft",
+      "lib_draft_snapshots",
+      "lib_draft_subscribedraft",
+      "lib_format_check",
+      "lib_format_landedunitcost",
+      "lib_format_perunitshare",
+      "lib_format_resolveadjustment",
+      "lib_format_todayiso"
+    ],
+    "12": [
+      "components_modules_cashtransferform",
+      "components_modules_cashtransferform_cashtransferdialog",
+      "components_modules_cashtransferform_deletecashtransferbutton",
+      "components_modules_cashtransferform_ischeque",
+      "components_modules_cashtransferform_option",
+      "components_modules_cashtransferform_transferaccount",
+      "components_modules_stockadjustmentform",
+      "components_modules_stockadjustmentform_emptyline",
+      "components_modules_stockadjustmentform_line",
+      "components_modules_stockadjustmentform_option",
+      "components_modules_stockadjustmentform_scopedoption",
+      "components_modules_stocktransferform",
+      "components_modules_stocktransferform_emptyline",
+      "components_modules_stocktransferform_line",
+      "components_modules_stocktransferform_option",
+      "components_modules_stocktransferform_scopedoption",
+      "components_modules_stocktransferform_transferactionstate",
+      "components_modules_stocktransferform_transferdefaults",
+      "components_ui_datefield",
+      "components_ui_datefield_datefield",
+      "components_ui_usedraft_draftbanner",
+      "lib_actions_purchases_csvdate",
+      "lib_format_toisodate",
+      "lib_location_constants",
+      "lib_location_constants_unassigned_label",
+      "lib_location_constants_unassigned_location"
+    ],
+    "13": [
+      "components_modules_supplierform",
+      "components_modules_supplierform_batchrow",
+      "components_modules_supplierform_contactbatchadddialog",
+      "components_modules_supplierform_contactdefaults",
+      "components_modules_supplierform_contacteditform",
+      "components_modules_supplierform_contactsbatcheditdialog",
+      "components_modules_supplierform_createdcontact",
+      "components_modules_supplierform_edit_headers",
+      "components_modules_supplierform_emptybatchrow",
+      "components_modules_supplierform_missingcell",
+      "components_modules_supplierform_option",
+      "components_ui_grid_keys",
+      "components_ui_grid_keys_cellat",
+      "components_ui_grid_keys_cellvalue",
+      "components_ui_grid_keys_clearselection",
+      "components_ui_grid_keys_copycellvalue",
+      "components_ui_grid_keys_focusablein",
+      "components_ui_grid_keys_gridkeydown",
+      "components_ui_grid_keys_gridselectionprops",
+      "components_ui_grid_keys_posof",
+      "components_ui_grid_keys_selectblock",
+      "components_ui_grid_keys_selectedcells",
+      "components_ui_grid_keys_setcellvalue",
+      "lib_actions_contacts_contactbatchrow",
+      "lib_actions_contacts_contacteditrow"
+    ],
+    "14": [
+      "app_dashboard_inventory_categories_page",
+      "app_dashboard_inventory_categories_page_categoriespage",
+      "components_modules_categorymanager",
+      "components_modules_categorymanager_attach",
+      "components_modules_categorymanager_categorymanager",
+      "components_modules_categorymanager_detach",
+      "components_modules_categorymanager_flatten",
+      "components_modules_categorymanager_forsave",
+      "components_modules_categorymanager_modalstate",
+      "components_modules_categorymanager_movenode",
+      "components_modules_categorymanager_subtreehas",
+      "components_modules_categorytree",
+      "components_modules_categorytree_categorytree",
+      "components_modules_categorytree_handlers",
+      "components_modules_categorytree_treenode",
+      "lib_actions_categories_categorynode",
+      "lib_actions_categories_listcategorytree"
+    ],
+    "15": [
+      "app_dashboard_dashboard_page",
+      "app_dashboard_dashboard_page_dashboardpage",
+      "app_dashboard_dashboard_page_dynamic",
+      "app_dashboard_dashboard_page_money",
+      "app_dashboard_reports_page",
+      "app_dashboard_reports_page_page",
+      "app_dashboard_reports_reporttype_page",
+      "app_dashboard_reports_reporttype_page_dynamic",
+      "app_dashboard_reports_reporttype_page_location_aware",
+      "app_dashboard_reports_reporttype_page_page",
+      "components_modules_reportview_download",
+      "components_modules_reportview_reportview",
+      "components_modules_reportview_tocsv",
+      "components_ui_statcard",
+      "components_ui_statcard_statcard",
+      "lib_actions_dashboard_businesstoday",
+      "lib_actions_dashboard_getdashboardcompanies",
+      "lib_actions_dashboard_getdashboarddata",
+      "lib_actions_reports",
+      "lib_actions_reports_exportreportcsv",
+      "lib_actions_reports_runreport",
+      "lib_cache",
+      "lib_cache_cached",
+      "lib_cache_check",
+      "lib_cache_check_checkinvalidationcoverage",
+      "lib_cache_check_checkprimitive",
+      "lib_cache_check_exempt",
+      "lib_cache_check_main",
+      "lib_cache_check_table_to_key",
+      "lib_cache_entry",
+      "lib_cache_globalforcache",
+      "lib_cache_invalidateall",
+      "lib_format_formatdatewhendate",
+      "lib_format_formatmonth",
+      "lib_queries_lookups_lookup",
+      "lib_queries_lookups_requireauth",
+      "lib_queries_lookups_scopedlookup",
+      "lib_queries_lookups_scopesuffix",
+      "lib_queries_reports",
+      "lib_queries_reports_check",
+      "lib_queries_reports_check_filters",
+      "lib_queries_reports_check_main",
+      "lib_queries_reports_columns",
+      "lib_queries_reports_notes",
+      "lib_queries_reports_queries",
+      "lib_queries_reports_query",
+      "lib_queries_reports_queryreport",
+      "lib_queries_reports_reportcolumn",
+      "lib_queries_reports_reportfilters",
+      "lib_queries_reports_reportresult",
+      "lib_queries_reports_reportrow",
+      "lib_queries_reports_reportscope",
+      "lib_queries_reports_scope",
+      "lib_queries_reports_totalsfor",
+      "lib_report_constants",
+      "lib_report_constants_isreportslug",
+      "lib_report_constants_report_types",
+      "lib_report_constants_reportslug"
+    ],
+    "16": [
+      "app_dashboard_inventory_stock_adjustments_id_page",
+      "app_dashboard_inventory_stock_adjustments_id_page_page",
+      "app_dashboard_inventory_stock_adjustments_id_page_qty",
+      "app_dashboard_inventory_stock_adjustments_page",
+      "app_dashboard_inventory_stock_adjustments_page_columns",
+      "app_dashboard_inventory_stock_adjustments_page_page",
+      "app_dashboard_inventory_stock_page",
+      "app_dashboard_inventory_stock_page_flatcolumns",
+      "app_dashboard_inventory_stock_page_page",
+      "components_modules_stockadjustmentform_deletestockadjustmentbutton",
+      "components_modules_stockfilters",
+      "components_modules_stockfilters_stockfilter",
+      "components_modules_stocklevels",
+      "components_modules_stocklevels_stockbreakdownrow",
+      "components_modules_stocklevels_stockitem",
+      "components_modules_stocklevels_stocklevels",
+      "components_modules_stocklevels_stockunittotal",
+      "lib_actions_stock_adjustments_getstockadjustment",
+      "lib_format_qty"
+    ],
+    "17": [
+      "components_modules_accountforms",
+      "components_modules_accountforms_bankaccountbatchadddialog",
+      "components_modules_accountforms_bankaccounteditform",
+      "components_modules_accountforms_bankaccountfields",
+      "components_modules_accountforms_bankaccountvalues",
+      "components_modules_accountforms_bankbatchrow",
+      "components_modules_accountforms_cashaccountbatchadddialog",
+      "components_modules_accountforms_cashaccounteditform",
+      "components_modules_accountforms_cashaccountfields",
+      "components_modules_accountforms_cashaccountvalues",
+      "components_modules_accountforms_cashbatchrow",
+      "components_modules_accountforms_chequebatchrowlocal",
+      "components_modules_accountforms_chequeeditform",
+      "components_modules_accountforms_chequevalues",
+      "components_modules_accountforms_companyoption",
+      "components_modules_accountforms_createdbankaccount",
+      "components_modules_accountforms_createdcheque",
+      "components_modules_accountforms_deletebankaccountbutton",
+      "components_modules_accountforms_deletecashaccountbutton",
+      "components_modules_accountforms_deletechequebutton",
+      "components_modules_accountforms_emptybankbatchrow",
+      "components_modules_accountforms_emptycashbatchrow",
+      "components_modules_accountsmanager",
+      "components_modules_accountsmanager_accountsmanager",
+      "components_modules_accountsmanager_bankaccount",
+      "components_modules_accountsmanager_bankcolumns",
+      "components_modules_accountsmanager_cashaccount",
+      "components_modules_accountsmanager_cashcolumns",
+      "components_modules_accountsmanager_cheque",
+      "components_modules_accountsmanager_chequecolumns",
+      "components_modules_accountsmanager_modalstate",
+      "components_modules_accountsmanager_tab",
+      "components_modules_accountsmanager_tabs",
+      "components_modules_accountsmanager_transfercolumns",
+      "components_modules_cashtransferform_transferaccounts",
+      "components_ui_form_styles_quickaddbuttonclass",
+      "components_ui_quickaddselect",
+      "components_ui_quickaddselect_quickaddbutton",
+      "components_ui_quickaddselect_quickaddselect",
+      "components_ui_quickaddselect_selectoption",
+      "lib_actions_accounts_bankaccountbatchrow",
+      "lib_actions_accounts_cashaccountbatchrow",
+      "lib_actions_accounts_chequebatchrow",
+      "lib_actions_transfers_cashtransferrow",
+      "lib_cheque_constants",
+      "lib_cheque_constants_cheque_statuses",
+      "lib_cheque_constants_cheque_types",
+      "lib_cheque_constants_chequestatus",
+      "lib_cheque_constants_ischequespent",
+      "lib_cheque_constants_spent_cheque_statuses",
+      "lib_cheque_constants_unspent_cheque_status"
+    ],
+    "18": [
+      "app_dashboard_sales_quotations_id_page",
+      "app_dashboard_sales_quotations_id_page_dynamic",
+      "app_dashboard_sales_quotations_id_page_page",
+      "components_modules_quotationdetail_quotationdetail",
+      "components_modules_stockpurchasemanager",
+      "components_modules_stockpurchasemanager_documenttypeoption",
+      "components_modules_stockpurchasemanager_option",
+      "components_modules_stockpurchasemanager_purchasebreakdown",
+      "components_modules_stockpurchasemanager_purchasedetail",
+      "components_modules_stockpurchasemanager_purchaseitemrow",
+      "components_modules_stockpurchasemanager_purchaserow",
+      "components_modules_stockpurchasemanager_scopedoption",
+      "components_modules_stockpurchasemanager_stockpurchasemanager",
+      "components_ui_statuspill",
+      "components_ui_statuspill_statuspill",
+      "components_ui_statuspill_tone_map",
+      "lib_actions_purchases_getstockpurchase",
+      "lib_actions_purchases_listchequesforpurchases",
+      "lib_actions_quotations_conversionsof"
+    ],
+    "19": [
+      "components_ui_csvactions_csvactions",
+      "components_ui_csvactions_download",
+      "components_ui_csvactions_stamp",
+      "lib_csv",
+      "lib_csv_cell",
+      "lib_csv_check",
+      "lib_csv_check_cols",
+      "lib_csv_check_loose",
+      "lib_csv_check_missing",
+      "lib_csv_check_ok",
+      "lib_csv_columns",
+      "lib_csv_columns_product_csv_columns",
+      "lib_csv_columns_purchase_csv_columns",
+      "lib_csv_csvcolumn",
+      "lib_csv_csvheader",
+      "lib_csv_csvtoobjects",
+      "lib_csv_headerkey",
+      "lib_csv_objectstocsv",
+      "lib_csv_parsecsv",
+      "lib_csv_templatecsv",
+      "lib_csv_tocsv"
+    ],
+    "20": [
+      "supabase_migrations_20260812000000_magical_captain_america",
+      "supabase_migrations_20260812000000_magical_captain_america_attachments",
+      "supabase_migrations_20260812000000_magical_captain_america_audit_log",
+      "supabase_migrations_20260812000000_magical_captain_america_brands",
+      "supabase_migrations_20260812000000_magical_captain_america_categories",
+      "supabase_migrations_20260812000000_magical_captain_america_chart_of_accounts",
+      "supabase_migrations_20260812000000_magical_captain_america_companies",
+      "supabase_migrations_20260812000000_magical_captain_america_contacts",
+      "supabase_migrations_20260812000000_magical_captain_america_currencies",
+      "supabase_migrations_20260812000000_magical_captain_america_document_lines",
+      "supabase_migrations_20260812000000_magical_captain_america_document_types",
+      "supabase_migrations_20260812000000_magical_captain_america_documents",
+      "supabase_migrations_20260812000000_magical_captain_america_expense_categories",
+      "supabase_migrations_20260812000000_magical_captain_america_inventory_transactions",
+      "supabase_migrations_20260812000000_magical_captain_america_item_images",
+      "supabase_migrations_20260812000000_magical_captain_america_items",
+      "supabase_migrations_20260812000000_magical_captain_america_ledger_entries",
+      "supabase_migrations_20260812000000_magical_captain_america_locations",
+      "supabase_migrations_20260812000000_magical_captain_america_payment_methods",
+      "supabase_migrations_20260812000000_magical_captain_america_price_lists",
+      "supabase_migrations_20260812000000_magical_captain_america_settings",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_brands",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_categories",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_chart_of_accounts",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_companies",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_contacts",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_currencies",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_document_lines",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_document_types",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_documents",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_items",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_locations",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_taxes",
+      "supabase_migrations_20260812000000_magical_captain_america_sql_public_units",
+      "supabase_migrations_20260812000000_magical_captain_america_taxes",
+      "supabase_migrations_20260812000000_magical_captain_america_unit_conversions",
+      "supabase_migrations_20260812000000_magical_captain_america_units",
+      "supabase_migrations_20260812000000_magical_captain_america_users"
+    ],
+    "21": [
+      "drizzle_kit",
+      "eslint",
+      "eslint_config_next",
+      "package_devdependencies",
+      "package_devdependencies_drizzle_kit",
+      "package_devdependencies_eslint",
+      "package_devdependencies_eslint_config_next",
+      "package_devdependencies_tailwindcss",
+      "package_devdependencies_tailwindcss_postcss",
+      "package_devdependencies_ttsc",
+      "package_devdependencies_ttsc_graph",
+      "package_devdependencies_types_node",
+      "package_devdependencies_types_react",
+      "package_devdependencies_types_react_dom",
+      "package_devdependencies_typescript",
+      "tailwindcss",
+      "tailwindcss_postcss",
+      "ttsc",
+      "ttsc_graph",
+      "types_node",
+      "types_react",
+      "types_react_dom",
+      "typescript"
+    ],
+    "22": [
+      "components_modules_productform",
+      "components_modules_productform_batchrow",
+      "components_modules_productform_blankcombo",
+      "components_modules_productform_combocell",
+      "components_modules_productform_combovalue",
+      "components_modules_productform_createdproduct",
+      "components_modules_productform_editrow",
+      "components_modules_productform_emptybatchrow",
+      "components_modules_productform_neweditrow",
+      "components_modules_productform_option",
+      "components_modules_productform_productbatchadddialog",
+      "components_modules_productform_productsbatcheditdialog",
+      "components_modules_productform_toeditrow",
+      "lib_actions_products",
+      "lib_actions_products_createproductsbatch",
+      "lib_actions_products_exportproductscsv",
+      "lib_actions_products_invoicekey",
+      "lib_actions_products_listproductswithrates",
+      "lib_actions_products_peeknextsku",
+      "lib_actions_products_productbatcheditshared",
+      "lib_actions_products_productbatchrow",
+      "lib_actions_products_producteditdata",
+      "lib_actions_products_producteditinput",
+      "lib_actions_products_producteditrow",
+      "lib_actions_products_recordadjustments",
+      "lib_actions_products_recordpurchases",
+      "lib_actions_products_rowerror",
+      "lib_actions_products_rowlabel",
+      "lib_actions_products_savedproductrow",
+      "lib_actions_products_saveproductrow",
+      "lib_actions_products_tx",
+      "lib_actions_products_updateproductsbatch",
+      "lib_actions_resolve_refs_resolvebrandid",
+      "lib_actions_resolve_refs_resolvecategoryid",
+      "lib_actions_stock_transfers_readheader",
+      "lib_actions_stock_transfers_readlines",
+      "lib_adjustment_constants",
+      "lib_adjustment_constants_adjustment_reasons",
+      "lib_adjustment_constants_adjustmentreason",
+      "lib_db_schema_itemimages",
+      "lib_db_schema_numbersequences",
+      "lib_db_sequences",
+      "lib_db_sequences_check",
+      "lib_db_sequences_check_main",
+      "lib_db_sequences_check_scope",
+      "lib_db_sequences_check_scopes",
+      "lib_db_sequences_db",
+      "lib_db_sequences_documentscope",
+      "lib_db_sequences_formatsku",
+      "lib_db_sequences_nextsequencevalue",
+      "lib_db_sequences_peeksequencevalue",
+      "lib_db_sequences_sku_pad",
+      "lib_db_sequences_sku_prefix",
+      "lib_db_sequences_sku_scope",
+      "lib_db_sequences_tx",
+      "lib_location_constants_locationformvalue",
+      "lib_location_constants_locationidornull",
+      "lib_product_edit_rules",
+      "lib_product_edit_rules_check",
+      "lib_product_edit_rules_check_err",
+      "lib_product_edit_rules_check_row",
+      "lib_product_edit_rules_isblankpurchaserow",
+      "lib_product_edit_rules_num",
+      "lib_product_edit_rules_purchaserowerror",
+      "lib_product_edit_rules_purchaserowfields",
+      "lib_product_edit_rules_recordsqty",
+      "lib_product_edit_rules_recordsrate",
+      "lib_product_edit_rules_writesdocument",
+      "lib_queries_products",
+      "lib_queries_products_check",
+      "lib_queries_products_check_main",
+      "lib_queries_products_productraterow",
+      "lib_queries_products_queryproductrates"
+    ],
+    "23": [
+      "drizzle_orm",
+      "jspdf",
+      "jspdf_autotable",
+      "next",
+      "package_dependencies",
+      "package_dependencies_drizzle_orm",
+      "package_dependencies_html2canvas",
+      "package_dependencies_jspdf",
+      "package_dependencies_jspdf_autotable",
+      "package_dependencies_next",
+      "package_dependencies_postgres",
+      "package_dependencies_react",
+      "package_dependencies_react_dom",
+      "package_dependencies_server_only",
+      "package_dependencies_supabase_ssr",
+      "package_dependencies_supabase_supabase_js",
+      "package_json_html2canvas",
+      "postgres",
+      "react",
+      "react_dom",
+      "server_only",
+      "supabase_ssr",
+      "supabase_supabase_js"
+    ],
+    "24": [
+      "components_modules_paymentform",
+      "components_modules_paymentform_bankoption",
+      "components_modules_paymentform_cashoption",
+      "components_modules_paymentform_deletepaymentbutton",
+      "components_modules_paymentform_fields",
+      "components_modules_paymentform_forchequedialog",
+      "components_modules_paymentform_option",
+      "components_modules_paymentform_payment_types",
+      "components_modules_paymentform_paymentbatchadddialog",
+      "components_modules_paymentform_paymentbatchrowlocal",
+      "components_modules_paymentform_paymenteditform",
+      "components_modules_paymentform_paymentvalues",
+      "components_modules_paymentform_scopedoption",
+      "lib_actions_payments_paymentdirection",
+      "lib_actions_payments_paymenttype",
+      "lib_payment_constants",
+      "lib_payment_constants_check",
+      "lib_payment_constants_check_abbas",
+      "lib_payment_constants_check_balance",
+      "lib_payment_constants_check_bothsides",
+      "lib_payment_constants_contactbalancehint",
+      "lib_payment_constants_paymentledgerside",
+      "lib_payment_constants_settlingcompanyid"
+    ],
+    "25": [
+      "lib_actions_document_numbering_nextdocumentnumber",
+      "lib_actions_guard_describedberror",
+      "lib_actions_inter_company",
+      "lib_actions_inter_company_clearlines",
+      "lib_actions_inter_company_createintercompanysale",
+      "lib_actions_inter_company_deleteintercompanysale",
+      "lib_actions_inter_company_intercompanytx",
+      "lib_actions_inter_company_invalidateintercompanyviews",
+      "lib_actions_inter_company_linestotal",
+      "lib_actions_inter_company_listintercompanysales",
+      "lib_actions_inter_company_mirroritemtobuyer",
+      "lib_actions_inter_company_readheader",
+      "lib_actions_inter_company_readlines",
+      "lib_actions_inter_company_side",
+      "lib_actions_inter_company_transferlineinput",
+      "lib_actions_inter_company_updateintercompanysale",
+      "lib_actions_inter_company_writeintercompanylines",
+      "lib_actions_quotations_writelines",
+      "lib_actions_resolve_refs_resolveitemid",
+      "lib_actions_resolve_refs_resolveunitid",
+      "lib_actions_stock_adjustments_createstockadjustment",
+      "lib_actions_stock_adjustments_readlines",
+      "lib_actions_stock_transfers_createstocktransfer",
+      "lib_actions_stock_transfers_deletestocktransfer",
+      "lib_actions_stock_transfers_invalidatetransferviews",
+      "lib_actions_stock_transfers_updatestocktransfer",
+      "lib_actions_stock_transfers_writetransferlines",
+      "lib_auth_scope_getscopecompanyids",
+      "lib_queries_stock_cost_averagecost"
+    ],
+    "26": [
+      "app_dashboard_inventory_inter_company_page",
+      "app_dashboard_inventory_inter_company_page_columns",
+      "app_dashboard_inventory_inter_company_page_dynamic",
+      "app_dashboard_inventory_inter_company_page_page",
+      "app_dashboard_inventory_products_page",
+      "app_dashboard_inventory_products_page_formatrate",
+      "app_dashboard_inventory_stock_transfers_page",
+      "app_dashboard_inventory_stock_transfers_page_columns",
+      "app_dashboard_inventory_stock_transfers_page_page",
+      "app_dashboard_purchases_stock_page",
+      "app_dashboard_purchases_stock_page_page",
+      "app_dashboard_purchases_suppliers_page",
+      "app_dashboard_purchases_suppliers_page_page",
+      "app_dashboard_sales_invoices_page",
+      "app_dashboard_sales_invoices_page_daysold",
+      "app_dashboard_sales_invoices_page_dynamic",
+      "app_dashboard_sales_invoices_page_page",
+      "components_modules_contactpaymentshover",
+      "components_modules_contactpaymentshover_contactpaymentshover",
+      "components_modules_ledgersheet",
+      "components_modules_ledgersheet_balancesheetdocument",
+      "components_modules_ledgersheet_contactstatementdocument",
+      "components_modules_ledgersheet_header",
+      "components_modules_ledgersheet_side",
+      "components_modules_mergepurchasesdialog",
+      "components_modules_mergepurchasesdialog_mergepurchasesdialog",
+      "components_modules_productsmanager_productsmanager",
+      "components_modules_stockmovementsmanager",
+      "components_modules_stockmovementsmanager_columns",
+      "components_modules_stockmovementsmanager_stockmovementsmanager",
+      "components_ui_daterangefilter",
+      "components_ui_daterangefilter_daterangefilter",
+      "lib_actions_ledger_contactpayment",
+      "lib_actions_purchases_purchasemergecandidate",
+      "lib_actions_stock_movements_stockmovementrow",
+      "lib_format",
+      "lib_format_formatdate",
+      "lib_format_money",
+      "lib_format_moneyformat",
+      "lib_format_qtyformat",
+      "lib_sale_constants_saletypelabel"
+    ],
+    "27": [
+      "ref_dom",
+      "ref_dom_iterable",
+      "ref_esnext",
+      "ref_mts",
+      "ref_next_dev_types_ts",
+      "ref_next_env_d_ts",
+      "ref_next_types_ts",
+      "ref_node_modules",
+      "ref_ts",
+      "ref_tsx",
+      "tsconfig",
+      "tsconfig_compileroptions",
+      "tsconfig_compileroptions_allowjs",
+      "tsconfig_compileroptions_esmoduleinterop",
+      "tsconfig_compileroptions_incremental",
+      "tsconfig_compileroptions_isolatedmodules",
+      "tsconfig_compileroptions_jsx",
+      "tsconfig_compileroptions_lib",
+      "tsconfig_compileroptions_module",
+      "tsconfig_compileroptions_moduleresolution",
+      "tsconfig_compileroptions_noemit",
+      "tsconfig_compileroptions_paths",
+      "tsconfig_compileroptions_plugins",
+      "tsconfig_compileroptions_resolvejsonmodule",
+      "tsconfig_compileroptions_skiplibcheck",
+      "tsconfig_compileroptions_strict",
+      "tsconfig_compileroptions_target",
+      "tsconfig_exclude",
+      "tsconfig_include"
+    ],
+    "28": [
+      "app_dashboard_audit_logs_page",
+      "app_dashboard_audit_logs_page_actions",
+      "app_dashboard_audit_logs_page_dynamic",
+      "app_dashboard_audit_logs_page_page",
+      "app_dashboard_expenses_page",
+      "app_dashboard_expenses_page_page",
+      "app_dashboard_inventory_inter_company_id_page",
+      "app_dashboard_inventory_inter_company_id_page_page",
+      "app_dashboard_inventory_inter_company_new_page",
+      "app_dashboard_inventory_inter_company_new_page_dynamic",
+      "app_dashboard_inventory_inter_company_new_page_page",
+      "app_dashboard_inventory_products_page_page",
+      "app_dashboard_inventory_stock_adjustments_new_page",
+      "app_dashboard_inventory_stock_adjustments_new_page_dynamic",
+      "app_dashboard_inventory_stock_adjustments_new_page_page",
+      "app_dashboard_inventory_stock_movements_page",
+      "app_dashboard_inventory_stock_movements_page_dynamic",
+      "app_dashboard_inventory_stock_movements_page_page",
+      "app_dashboard_inventory_stock_transfers_id_page",
+      "app_dashboard_inventory_stock_transfers_id_page_page",
+      "app_dashboard_inventory_stock_transfers_new_page",
+      "app_dashboard_inventory_stock_transfers_new_page_dynamic",
+      "app_dashboard_inventory_stock_transfers_new_page_page",
+      "app_dashboard_inventory_unit_conversions_page",
+      "app_dashboard_inventory_unit_conversions_page_unitconversionspage",
+      "app_dashboard_ledger_page",
+      "app_dashboard_ledger_page_page",
+      "app_dashboard_payments_page",
+      "app_dashboard_payments_page_page",
+      "app_dashboard_sales_id_page",
+      "app_dashboard_sales_id_page_page",
+      "app_dashboard_sales_page",
+      "app_dashboard_sales_page_dynamic",
+      "app_dashboard_sales_page_page",
+      "app_dashboard_sales_quotations_new_page",
+      "app_dashboard_sales_quotations_new_page_dynamic",
+      "app_dashboard_sales_quotations_new_page_page",
+      "app_dashboard_users_page",
+      "app_dashboard_users_page_userspage",
+      "components_modules_deleteintercompanysalebutton",
+      "components_modules_deleteintercompanysalebutton_deleteintercompanysalebutton",
+      "components_ui_listfilters",
+      "components_ui_listfilters_listfilters",
+      "lib_actions_audit_getauditfacets",
+      "lib_actions_audit_listauditlogs",
+      "lib_actions_inter_company_getintercompanysale",
+      "lib_actions_ledger_listledgerbalances",
+      "lib_actions_products_getproductsforedit",
+      "lib_actions_products_importproductscsv",
+      "lib_actions_purchases_importstockpurchasescsv",
+      "lib_actions_sales_getsale",
+      "lib_actions_sales_listchequesforsales",
+      "lib_actions_stock_transfers_getstocktransfer",
+      "lib_actions_users_listusers",
+      "lib_csv_csvbool",
+      "lib_csv_csverrortext",
+      "lib_queries_lookups_chequesource",
+      "lib_queries_lookups_getavailablecheques",
+      "lib_queries_lookups_getbankaccountoptions",
+      "lib_queries_lookups_getbrands",
+      "lib_queries_lookups_getcashaccountoptions",
+      "lib_queries_lookups_getcategories",
+      "lib_queries_lookups_getcompanies",
+      "lib_queries_lookups_getcontactoptions",
+      "lib_queries_lookups_getcustomers",
+      "lib_queries_lookups_getexpensecategories",
+      "lib_queries_lookups_getitemoptions",
+      "lib_queries_lookups_getlocations",
+      "lib_queries_lookups_getpurchaseformoptions",
+      "lib_queries_lookups_getroles",
+      "lib_queries_lookups_getsaleformoptions",
+      "lib_queries_lookups_getsuppliers",
+      "lib_queries_lookups_getunits"
+    ],
+    "29": [
+      "components_modules_categoryform",
+      "components_modules_categoryform_batchrow",
+      "components_modules_categoryform_categorybatchadddialog",
+      "components_modules_categoryform_categoryeditform",
+      "components_modules_categoryform_categoryvalues",
+      "components_modules_categoryform_createdcategory",
+      "components_modules_categoryform_deletecategorybutton",
+      "components_modules_categoryform_emptybatchrow",
+      "components_modules_categoryform_fields",
+      "components_modules_companyform",
+      "components_modules_companyform_batchrow",
+      "components_modules_companyform_companybatchadddialog",
+      "components_modules_companyform_companyeditform",
+      "components_modules_companyform_companyvalues",
+      "components_modules_companyform_deletecompanybutton",
+      "components_modules_companyform_emptybatchrow",
+      "components_modules_companyform_fields",
+      "components_modules_deletestocktransferbutton",
+      "components_modules_deletestocktransferbutton_deletestocktransferbutton",
+      "components_modules_mergeproductsdialog",
+      "components_modules_mergeproductsdialog_mergeproductsdialog",
+      "components_modules_roleform",
+      "components_modules_roleform_deleterolebutton",
+      "components_modules_roleform_permissiongrid",
+      "components_modules_roleform_rolecreateform",
+      "components_modules_roleform_roleeditform",
+      "components_modules_roleform_usegranted",
+      "components_modules_settingsform",
+      "components_modules_taxform",
+      "components_modules_taxform_batchrow",
+      "components_modules_taxform_deletetaxbutton",
+      "components_modules_taxform_emptybatchrow",
+      "components_modules_taxform_fields",
+      "components_modules_taxform_taxbatchadddialog",
+      "components_modules_taxform_taxeditform",
+      "components_modules_taxform_taxvalues",
+      "components_modules_userdetail",
+      "components_modules_userdetail_assignment",
+      "components_modules_userdetail_deleteuserbutton",
+      "components_modules_userdetail_usereditform",
+      "components_modules_userdetail_userroleassignments",
+      "components_ui_form_styles_deletebuttonclass",
+      "components_ui_form_styles_errortextclass",
+      "components_ui_form_styles_inputclass",
+      "components_ui_form_styles_labelclass",
+      "components_ui_form_styles_labeltextclass",
+      "components_ui_form_styles_submitclass",
+      "components_ui_form_styles_successtextclass",
+      "lib_actions_categories_categorybatchrow",
+      "lib_actions_companies_companybatchrow",
+      "lib_actions_products_listmergecandidates",
+      "lib_actions_products_mergecandidate",
+      "lib_actions_roles_permissioncatalog",
+      "lib_actions_taxes_taxbatchrow",
+      "lib_setting_constants",
+      "lib_setting_constants_settingdef"
+    ],
+    "30": [
+      "app_dashboard_inventory_brands_page",
+      "app_dashboard_inventory_brands_page_brandspage",
+      "components_modules_brandmanager_brandmanager",
+      "lib_actions_brands_listbrands"
+    ],
+    "31": [
+      "docs_os_11_templates_landing_page",
+      "docs_os_11_templates_landing_page_1_hero_rh_hero_a_or_rh_wholesale_hero",
+      "docs_os_11_templates_landing_page_2_trust_bar_line",
+      "docs_os_11_templates_landing_page_3_offer_range_block",
+      "docs_os_11_templates_landing_page_4_proof_block",
+      "docs_os_11_templates_landing_page_5_how_it_works_trade_pages_only_3_steps_max",
+      "docs_os_11_templates_landing_page_6_named_person_promise_trade_pages",
+      "docs_os_11_templates_landing_page_7_faq_3_5_entries_rh_faq_accordion_from_faq_entry_template",
+      "docs_os_11_templates_landing_page_8_final_cta_repeat_the_one_action",
+      "docs_os_11_templates_landing_page_gates_before_publish",
+      "docs_os_11_templates_landing_page_meta_set",
+      "docs_os_11_templates_landing_page_template_landing_page"
+    ],
+    "32": [
+      "docs_os_08_development_git_standards",
+      "docs_os_08_development_git_standards_branches_flow",
+      "docs_os_08_development_git_standards_commits_conventional_ai_writes_them_owner_enforces",
+      "docs_os_08_development_git_standards_git_standards",
+      "docs_os_08_development_git_standards_hygiene_safety",
+      "docs_os_08_development_git_standards_the_pr_ritual_the_quality_system_for_a_team_of_one"
+    ],
+    "33": [
+      "docs_os_07_design_system_components",
+      "docs_os_07_design_system_components_10_accordion_rh_faq_accordion",
+      "docs_os_07_design_system_components_11_modal_drawer",
+      "docs_os_07_design_system_components_12_alerts_toasts",
+      "docs_os_07_design_system_components_13_breadcrumbs_rh_breadcrumbs",
+      "docs_os_07_design_system_components_14_footer_rh_footer",
+      "docs_os_07_design_system_components_15_carousel_splide",
+      "docs_os_07_design_system_components_16_wholesale_set_rh_wholesale_hero_rh_ladder_explainer",
+      "docs_os_07_design_system_components_1_button",
+      "docs_os_07_design_system_components_2_inputs_forms",
+      "docs_os_07_design_system_components_3_trust_microbar_signature",
+      "docs_os_07_design_system_components_4_header_navbar",
+      "docs_os_07_design_system_components_5_hero_rh_hero",
+      "docs_os_07_design_system_components_6_product_card",
+      "docs_os_07_design_system_components_7_badges",
+      "docs_os_07_design_system_components_8_price_block_rh_price",
+      "docs_os_07_design_system_components_9_spec_table_rh_spec_table",
+      "docs_os_07_design_system_components_design_system_component_specifications"
+    ],
+    "34": [
+      "app_dashboard_inventory_units_page",
+      "app_dashboard_inventory_units_page_unitspage",
+      "components_modules_brandmanager",
+      "components_modules_brandmanager_brand",
+      "components_modules_brandmanager_columns",
+      "components_modules_companymanager",
+      "components_modules_companymanager_columns",
+      "components_modules_companymanager_company",
+      "components_modules_locationmanager",
+      "components_modules_locationmanager_columns",
+      "components_modules_locationmanager_location",
+      "components_modules_recordmanager",
+      "components_modules_recordmanager_dangerzone",
+      "components_modules_recordmanager_recordmanager",
+      "components_modules_taxmanager",
+      "components_modules_taxmanager_columns",
+      "components_modules_taxmanager_tax",
+      "components_modules_unitmanager",
+      "components_modules_unitmanager_columns",
+      "components_modules_unitmanager_unit",
+      "components_modules_unitmanager_unitmanager",
+      "lib_actions_units_listunits",
+      "lib_table",
+      "lib_table_amountcolumn",
+      "lib_table_columndef",
+      "lib_table_statuscolumn"
+    ],
+    "35": [
+      "app_dashboard_error",
+      "app_dashboard_error_dashboarderror",
+      "components_modules_convertquotationdialog",
+      "components_modules_convertquotationdialog_convertquotationdialog",
+      "components_modules_quotationdetail",
+      "components_modules_quotationdetail_itemoption",
+      "components_modules_quotationdetail_option",
+      "components_modules_quotationdetail_scopedoption",
+      "components_modules_quotationform_quotationdefaults",
+      "components_ui_form_styles_primaryactionclass",
+      "components_ui_form_styles_secondaryactionclass",
+      "lib_actions_quotations_quotationline"
+    ],
+    "36": [
+      "components_modules_brandform",
+      "components_modules_brandform_batchrow",
+      "components_modules_brandform_brandbatchadddialog",
+      "components_modules_brandform_brandeditform",
+      "components_modules_brandform_brandvalues",
+      "components_modules_brandform_createdbrand",
+      "components_modules_brandform_deletebrandbutton",
+      "components_modules_brandform_emptybatchrow",
+      "components_modules_brandform_fields",
+      "components_modules_locationform",
+      "components_modules_locationform_batchrow",
+      "components_modules_locationform_createdlocation",
+      "components_modules_locationform_deletelocationbutton",
+      "components_modules_locationform_emptybatchrow",
+      "components_modules_locationform_fields",
+      "components_modules_locationform_location_types",
+      "components_modules_locationform_locationbatchadddialog",
+      "components_modules_locationform_locationeditform",
+      "components_modules_locationform_locationvalues",
+      "components_modules_unitconversionform",
+      "components_modules_unitconversionform_batchrow",
+      "components_modules_unitconversionform_conversionvalues",
+      "components_modules_unitconversionform_deleteunitconversionbutton",
+      "components_modules_unitconversionform_editfields",
+      "components_modules_unitconversionform_itemlabel",
+      "components_modules_unitconversionform_itemoption",
+      "components_modules_unitconversionform_option",
+      "components_modules_unitconversionform_unitconversionbatchadddialog",
+      "components_modules_unitconversionform_unitconversioneditform",
+      "components_modules_unitconversionform_unitlabel",
+      "components_modules_unitconversionform_unitoption",
+      "components_modules_unitform",
+      "components_modules_unitform_batchrow",
+      "components_modules_unitform_createdunit",
+      "components_modules_unitform_deleteunitbutton",
+      "components_modules_unitform_emptybatchrow",
+      "components_modules_unitform_fields",
+      "components_modules_unitform_unitbatchadddialog",
+      "components_modules_unitform_uniteditform",
+      "components_modules_unitform_unitvalues",
+      "components_modules_userform",
+      "components_modules_userform_batchrow",
+      "components_modules_userform_emptybatchrow",
+      "components_modules_userform_userbatchadddialog",
+      "components_ui_batchadddialog",
+      "components_ui_batchadddialog_batchadddialog",
+      "components_ui_batchadddialog_batchcellclass",
+      "components_ui_batchadddialog_batchinputclass",
+      "lib_actions_brands_brandbatchrow",
+      "lib_actions_locations_locationbatchrow",
+      "lib_actions_unit_conversions_unitconversionbatchrow",
+      "lib_actions_units_unitbatchrow",
+      "lib_actions_users_userbatchrow"
+    ],
+    "37": [
+      "docs_db_royal_hardware_erp_sql_categories_table",
+      "docs_db_royal_hardware_erp_sql_contacts_table",
+      "docs_db_royal_hardware_erp_sql_document_lines_table",
+      "docs_db_royal_hardware_erp_sql_document_number_ledger",
+      "docs_db_royal_hardware_erp_sql_documents_table",
+      "docs_db_royal_hardware_erp_sql_items_table",
+      "docs_db_royal_hardware_erp_sql_locations_table",
+      "docs_db_royal_hardware_erp_sql_number_sequences",
+      "docs_db_royal_hardware_erp_sql_rate_list_view",
+      "docs_db_royal_hardware_erp_sql_unit_conversions_table",
+      "docs_db_royal_hardware_erp_sql_user_warehouse_access_table",
+      "docs_phase_3_database_design_attachments",
+      "docs_phase_3_database_design_contacts_unify_customers_suppliers",
+      "docs_phase_3_database_design_divergence_location_thresholds",
+      "docs_phase_3_database_design_divergence_quotation_link",
+      "docs_phase_4_er_diagram_documents_diagram",
+      "docs_phase_4_er_diagram_missing_quotation_conversion_edge"
+    ],
+    "38": [
+      "docs_os_16_knowledge_readme",
+      "docs_os_16_knowledge_readme_access",
+      "docs_os_16_knowledge_readme_knowledge_base_contract",
+      "docs_os_16_knowledge_readme_review_rhythm",
+      "docs_os_16_knowledge_readme_the_three_capture_laws",
+      "docs_os_16_knowledge_readme_why_this_folder_exists"
+    ],
+    "39": [
+      "app_dashboard_companies_page",
+      "app_dashboard_companies_page_companiespage",
+      "components_modules_companymanager_companymanager",
+      "lib_actions_companies_listcompanies"
+    ],
+    "40": [
+      "app_dashboard_taxes_page",
+      "app_dashboard_taxes_page_taxespage",
+      "components_modules_taxmanager_taxmanager",
+      "lib_actions_taxes_listtaxes"
+    ],
+    "41": [
+      "components_layout_globalsearch",
+      "components_layout_globalsearch_globalsearch",
+      "lib_actions_search",
+      "lib_actions_search_globalsearch",
+      "lib_queries_search",
+      "lib_queries_search_check",
+      "lib_queries_search_check_main",
+      "lib_queries_search_document_kinds",
+      "lib_queries_search_searchgrants",
+      "lib_queries_search_searchrow",
+      "lib_queries_search_searchrows",
+      "lib_search_constants",
+      "lib_search_constants_kind_label",
+      "lib_search_constants_per_kind",
+      "lib_search_constants_search_href",
+      "lib_search_constants_searchhit",
+      "lib_search_constants_searchkind"
+    ],
+    "42": [
+      "docs_os_02_brand_brand",
+      "docs_os_02_brand_brand_1_1_the_brand_idea",
+      "docs_os_02_brand_brand_1_2_positioning_statement_internal_formula",
+      "docs_os_02_brand_brand_1_3_the_onliness_statement",
+      "docs_os_02_brand_brand_1_4_brand_archetype",
+      "docs_os_02_brand_brand_1_5_brand_pillars_everything_ladders_to_these_three",
+      "docs_os_02_brand_brand_1_brand_foundation",
+      "docs_os_02_brand_brand_2_personality",
+      "docs_os_02_brand_brand_3_1_voice_definition",
+      "docs_os_02_brand_brand_3_2_register_by_context",
+      "docs_os_02_brand_brand_3_3_vocabulary",
+      "docs_os_02_brand_brand_3_4_urdu_voice",
+      "docs_os_02_brand_brand_3_5_message_architecture_what_we_say_first_second_third",
+      "docs_os_02_brand_brand_3_6_tagline_system",
+      "docs_os_02_brand_brand_3_verbal_identity",
+      "docs_os_02_brand_brand_4_brand_behavior_what_we_never_do",
+      "docs_os_02_brand_brand_royal_hardware_brand_book_part_i_strategy_voice"
+    ],
+    "43": [
+      "components_modules_saleform",
+      "components_modules_saleform_deletesalebutton",
+      "components_modules_saleform_emptyline",
+      "components_modules_saleform_itemoption",
+      "components_modules_saleform_line",
+      "components_modules_saleform_option",
+      "components_modules_saleform_paidmode",
+      "components_modules_saleform_rate1",
+      "components_modules_saleform_saleactionstate",
+      "components_modules_saleform_saledefaults",
+      "components_modules_saleform_scopedoption",
+      "components_modules_saleform_settlement_types",
+      "components_ui_combobox",
+      "components_ui_combobox_combobox",
+      "components_ui_combobox_comboinputprops",
+      "components_ui_combobox_combooption",
+      "lib_sale_constants",
+      "lib_sale_constants_default_sale_type",
+      "lib_sale_constants_sale_types",
+      "lib_sale_constants_saletype"
+    ],
+    "44": [
+      "docs_db_royal_hardware_erp_sql_permissions_table",
+      "docs_db_royal_hardware_erp_sql_role_permissions_table",
+      "docs_db_royal_hardware_erp_sql_roles_table",
+      "docs_db_royal_hardware_erp_sql_user_company_access_table",
+      "docs_db_royal_hardware_erp_sql_user_roles_table",
+      "docs_phase_3_database_design_disable_rls_migration",
+      "docs_phase_3_database_design_rbac_tables",
+      "docs_phase_4_er_diagram_rbac_diagram",
+      "docs_phase_8_authentication_company_warehouse_context",
+      "docs_phase_8_authentication_get_session",
+      "docs_phase_8_authentication_rbac_model",
+      "docs_phase_8_authentication_require_permission",
+      "docs_phase_8_authentication_require_session",
+      "docs_phase_8_authentication_seed_rbac",
+      "docs_phase_8_authentication_supabase_rls_default_gotcha"
+    ],
+    "45": [
+      "docs_phase_1_business_requirements",
+      "docs_phase_2_functional_requirements",
+      "docs_phase_5_folder_structure",
+      "docs_phase_6_ui_wireframes",
+      "docs_phase_6_ui_wireframes_deferred_to_later_phases",
+      "docs_phase_6_ui_wireframes_design_direction_confirmed_at_this_fidelity",
+      "docs_phase_6_ui_wireframes_royal_hardware_erp_ui_wireframes",
+      "docs_phase_6_ui_wireframes_screens_covered",
+      "docs_phase_7_api_design"
+    ],
+    "46": [
+      "agents_nextjs_agent_rules",
+      "claude_project_instructions",
+      "docs_db_royal_hardware_erp_sql_drizzle_schema_source_of_truth",
+      "docs_db_royal_hardware_erp_sql_schema_reference",
+      "docs_phase_3_database_design_document",
+      "docs_phase_4_er_diagram_document",
+      "docs_phase_8_authentication_document",
+      "docs_phase_8_authentication_nextjs16_proxy_rename",
+      "docs_phase_8_authentication_proxy_ts",
+      "docs_phase_8_authentication_session_handling",
+      "docs_phase_8_authentication_update_session",
+      "readme_dev_server",
+      "readme_nextjs_project",
+      "readme_vercel_deploy"
+    ],
+    "47": [
+      "lib_actions_quotations_readform",
+      "lib_actions_sales",
+      "lib_actions_sales_createsale",
+      "lib_actions_sales_getcustomeroutstanding",
+      "lib_actions_sales_getorcreatesalesdocumenttype",
+      "lib_actions_sales_getshoplocationid",
+      "lib_actions_sales_listsales",
+      "lib_actions_sales_num",
+      "lib_actions_sales_opt",
+      "lib_actions_sales_paymenterror",
+      "lib_actions_sales_readlines",
+      "lib_actions_sales_readpayment",
+      "lib_actions_sales_resolvelinerows",
+      "lib_actions_sales_salelineinput",
+      "lib_actions_sales_salesfilters",
+      "lib_actions_sales_saletx",
+      "lib_actions_sales_updatesale",
+      "lib_format_round1",
+      "lib_sale_constants_issaletype"
+    ],
+    "48": [
+      "components_modules_accountforms_chequequickaddbutton",
+      "components_modules_expenseform",
+      "components_modules_expenseform_bankoption",
+      "components_modules_expenseform_batchrow",
+      "components_modules_expenseform_cashoption",
+      "components_modules_expenseform_deleteexpensebutton",
+      "components_modules_expenseform_expensebatchadddialog",
+      "components_modules_expenseform_expenseeditform",
+      "components_modules_expenseform_expensevalues",
+      "components_modules_expenseform_fields",
+      "components_modules_expenseform_forchequedialog",
+      "components_modules_expenseform_option",
+      "components_modules_expenseform_scopedoption",
+      "components_modules_expenseform_settlement_types",
+      "lib_actions_expenses_expensebatchrow",
+      "lib_actions_payments_paymentbatchrow",
+      "lib_actions_settlement_settlementtype"
+    ],
+    "49": [
+      "drizzle_0006_jittery_kabuki_sql_attachments",
+      "drizzle_0006_jittery_kabuki_sql_audit_log",
+      "drizzle_0006_jittery_kabuki_sql_brands",
+      "drizzle_0006_jittery_kabuki_sql_categories",
+      "drizzle_0006_jittery_kabuki_sql_currencies",
+      "drizzle_0006_jittery_kabuki_sql_document_lines",
+      "drizzle_0006_jittery_kabuki_sql_document_types",
+      "drizzle_0006_jittery_kabuki_sql_expense_categories",
+      "drizzle_0006_jittery_kabuki_sql_inventory_transactions",
+      "drizzle_0006_jittery_kabuki_sql_item_images",
+      "drizzle_0006_jittery_kabuki_sql_ledger_entries",
+      "drizzle_0006_jittery_kabuki_sql_payment_methods",
+      "drizzle_0006_jittery_kabuki_sql_public_companies",
+      "drizzle_0006_jittery_kabuki_sql_taxes",
+      "drizzle_0006_jittery_kabuki_sql_unit_conversions",
+      "drizzle_0006_jittery_kabuki_sql_units",
+      "drizzle_0006_jittery_kabuki_sql_user_roles"
+    ],
+    "50": [
+      "agents_no_invented_data",
+      "docs_db_royal_hardware_erp_sql_derived_stock_on_hand",
+      "docs_db_royal_hardware_erp_sql_inventory_transactions_table",
+      "docs_db_royal_hardware_erp_sql_ledger_entries_table",
+      "docs_phase_3_database_design_cascade_rules",
+      "docs_phase_3_database_design_chart_of_accounts",
+      "docs_phase_3_database_design_divergence_stock_balance_cache",
+      "docs_phase_3_database_design_double_entry_accounting",
+      "docs_phase_3_database_design_stock_on_hand_computed",
+      "docs_phase_4_er_diagram_accounting_diagram",
+      "docs_phase_4_er_diagram_derived_contact_ledger",
+      "docs_phase_4_er_diagram_inventory_ledger_diagram"
+    ],
+    "51": [
+      "app_dashboard_accounts_page",
+      "app_dashboard_accounts_page_accountspage",
+      "app_dashboard_sales_quotations_page",
+      "app_dashboard_sales_quotations_page_dynamic",
+      "app_dashboard_sales_quotations_page_page",
+      "lib_actions_accounts_listbankaccounts",
+      "lib_actions_accounts_listcashaccounts",
+      "lib_actions_accounts_listcheques",
+      "lib_actions_contacts",
+      "lib_actions_contacts_contactcolumns",
+      "lib_actions_contacts_getcontactsforedit",
+      "lib_actions_contacts_listsuppliers",
+      "lib_actions_contacts_readcontactform",
+      "lib_actions_contacts_requirecontactpermission",
+      "lib_actions_contacts_updatecontact",
+      "lib_actions_dashboard_loaddashboard",
+      "lib_actions_expenses_listexpenses",
+      "lib_actions_payments_listpayments",
+      "lib_actions_purchases_listpurchasemergecandidates",
+      "lib_actions_purchases_liststockpurchases",
+      "lib_actions_quotations_listquotations",
+      "lib_actions_quotations_statusof",
+      "lib_actions_stock_adjustments_liststockadjustments",
+      "lib_actions_stock_liststocklevels",
+      "lib_actions_stock_movements_itemstockcard",
+      "lib_actions_stock_movements_liststockmovements",
+      "lib_actions_stock_movements_movementtypes",
+      "lib_actions_stock_transfers_liststocktransfers",
+      "lib_actions_transfers_listcashtransfers",
+      "lib_auth_scope_companyinscope",
+      "lib_auth_scope_scopedwhere"
+    ],
+    "52": [
+      "docs_db_royal_hardware_erp_sql_bank_accounts_table",
+      "docs_db_royal_hardware_erp_sql_cash_accounts_table",
+      "docs_db_royal_hardware_erp_sql_cheque_register_table",
+      "docs_db_royal_hardware_erp_sql_document_types_table",
+      "docs_db_royal_hardware_erp_sql_expenses_table",
+      "docs_db_royal_hardware_erp_sql_settlement_model",
+      "docs_db_royal_hardware_erp_sql_table_then_fk_ordering",
+      "docs_db_royal_hardware_erp_sql_universal_document_model",
+      "docs_phase_3_database_design_divergence_sales_channels",
+      "docs_phase_3_database_design_universal_transaction_pair",
+      "docs_phase_4_er_diagram_bespoke_table_collapse",
+      "docs_phase_4_er_diagram_high_level_overview"
+    ],
+    "53": [
+      "docs_os_02_brand_iconography",
+      "docs_os_02_brand_iconography_brand_book_part_v_iconography",
+      "docs_os_02_brand_iconography_color_scale_law",
+      "docs_os_02_brand_iconography_don_ts",
+      "docs_os_02_brand_iconography_sources",
+      "docs_os_02_brand_iconography_style_dna"
+    ],
+    "54": [
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_attachments",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_audit_log",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_brands",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_categories",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_currencies",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_document_lines",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_document_types",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_expense_categories",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_inventory_transactions",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_item_images",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_ledger_entries",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_payment_methods",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_public_companies",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_taxes",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_unit_conversions",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_units",
+      "supabase_migrations_20260812000006_jittery_kabuki_sql_user_roles"
+    ],
+    "55": [
+      "components_modules_ledgermanager",
+      "components_modules_ledgermanager_buildcolumns",
+      "components_modules_ledgermanager_ledgermanager",
+      "components_modules_ledgermanager_modalstate",
+      "components_modules_ledgermanager_option",
+      "components_modules_ledgermanager_scopedoption",
+      "components_modules_ledgermanager_statementcolumn",
+      "components_modules_ledgersheet_letterhead",
+      "components_modules_ledgersheet_sheetrenderer",
+      "lib_actions_ledger_contactledgerbalance",
+      "lib_invoice_png",
+      "lib_node_download",
+      "lib_node_download_downloadnodeaspdf",
+      "lib_node_download_downloadnodeaspng",
+      "lib_node_download_rasterize",
+      "lib_node_download_saveblob"
+    ],
+    "56": [
+      "docs_db_royal_hardware_erp_sql_app_user_role",
+      "docs_db_royal_hardware_erp_sql_companies_table",
+      "docs_db_royal_hardware_erp_sql_rls_inert_known_issue",
+      "docs_db_royal_hardware_erp_sql_row_level_security",
+      "docs_phase_3_database_design_company_scoping",
+      "docs_phase_3_database_design_company_scoping_extension",
+      "docs_phase_3_database_design_divergence_shared_master_data",
+      "docs_phase_4_er_diagram_denormalized_company_id",
+      "docs_phase_8_authentication_defense_in_depth",
+      "docs_phase_8_authentication_drizzle_bypassrls_gotcha",
+      "docs_phase_8_authentication_with_user_context"
+    ],
+    "57": [
+      "agents_cache_invalidation",
+      "agents_checks",
+      "agents_guard",
+      "agents_invariants",
+      "agents_no_loops_in_transaction",
+      "agents_no_mutation_throws",
+      "agents_one_list_component",
+      "agents_use_server_async_only",
+      "docs_phase_8_authentication_csrf_xss_validation",
+      "docs_phase_8_authentication_permission_error"
+    ],
+    "58": [
+      "docs_os_01_company_company",
+      "docs_os_01_company_company_10_expansion_plans",
+      "docs_os_01_company_company_10_year_goals_2035",
+      "docs_os_01_company_company_1_company_snapshot",
+      "docs_os_01_company_company_1_year_goals_end_of_2026",
+      "docs_os_01_company_company_2_vision",
+      "docs_os_01_company_company_3_mission",
+      "docs_os_01_company_company_4_values",
+      "docs_os_01_company_company_5_goals",
+      "docs_os_01_company_company_5_year_goals_2030",
+      "docs_os_01_company_company_6_target_markets",
+      "docs_os_01_company_company_7_competitors",
+      "docs_os_01_company_company_8_business_model_summary",
+      "docs_os_01_company_company_9_revenue_streams",
+      "docs_os_01_company_company_royal_hardware_company_blueprint"
+    ],
+    "59": [
+      "docs_os_11_templates_architecture",
+      "docs_os_11_templates_architecture_consequences_accepted",
+      "docs_os_11_templates_architecture_migration_plan",
+      "docs_os_11_templates_architecture_option_a_name",
+      "docs_os_11_templates_architecture_option_b_name",
+      "docs_os_11_templates_architecture_options_2",
+      "docs_os_11_templates_architecture_recommendation",
+      "docs_os_11_templates_architecture_template_architecture_document"
+    ],
+    "60": [
+      "docs_os_07_design_system_foundations",
+      "docs_os_07_design_system_foundations_1_color_tokens",
+      "docs_os_07_design_system_foundations_2_typography_tokens",
+      "docs_os_07_design_system_foundations_3_spacing_grid",
+      "docs_os_07_design_system_foundations_4_elevation_deliberately_flat_machined_calm",
+      "docs_os_07_design_system_foundations_5_shape_borders",
+      "docs_os_07_design_system_foundations_6_iconography_tokens",
+      "docs_os_07_design_system_foundations_7_dark_mode",
+      "docs_os_07_design_system_foundations_brass_ramp_the_seal_10_of_any_view",
+      "docs_os_07_design_system_foundations_design_system_foundations",
+      "docs_os_07_design_system_foundations_navy_ramp_authority",
+      "docs_os_07_design_system_foundations_neutrals_the_stage",
+      "docs_os_07_design_system_foundations_semantic_tints",
+      "docs_os_07_design_system_foundations_usage_laws_from_02_brand_enforced_in_review"
+    ],
+    "61": [
+      "docs_phase_2_functional_requirements_10_global_search",
+      "docs_phase_2_functional_requirements_1_dashboard",
+      "docs_phase_2_functional_requirements_3_1_local_purchases_import_purchases_m52_company_scoped_import_purchases_are_always_company_m52",
+      "docs_phase_2_functional_requirements_3_2_suppliers_shared_supplier_ledger_company_scoped",
+      "docs_phase_2_functional_requirements_3_purchases",
+      "docs_phase_2_functional_requirements_5_expenses",
+      "docs_phase_2_functional_requirements_6_whatsapp",
+      "docs_phase_2_functional_requirements_7_reports",
+      "docs_phase_2_functional_requirements_8_users_roles_permissions_audit_logs",
+      "docs_phase_2_functional_requirements_9_settings_backups",
+      "docs_phase_2_functional_requirements_conventions",
+      "docs_phase_2_functional_requirements_open_items_carried_into_phase_3_database_design",
+      "docs_phase_2_functional_requirements_royal_hardware_erp_functional_requirements_specification_frs"
+    ],
+    "62": [
+      "docs_phase_7_api_design_1_10_users_roles_permissions_audit",
+      "docs_phase_7_api_design_1_11_settings_backups",
+      "docs_phase_7_api_design_1_12_global_search",
+      "docs_phase_7_api_design_1_1_standard_crud_pattern_master_lookup_data",
+      "docs_phase_7_api_design_1_2_products_modules_inventory_products",
+      "docs_phase_7_api_design_1_3_stock_modules_inventory_stock",
+      "docs_phase_7_api_design_1_4_purchases_modules_purchases",
+      "docs_phase_7_api_design_1_5_sales_invoices_quotations_customers_modules_sales",
+      "docs_phase_7_api_design_1_6_ledgers_modules_sales_customers_modules_purchases_suppliers",
+      "docs_phase_7_api_design_1_7_expenses",
+      "docs_phase_7_api_design_1_8_whatsapp_modules_whatsapp",
+      "docs_phase_7_api_design_1_9_reports",
+      "docs_phase_7_api_design_1_module_action_catalog"
+    ],
+    "63": [
+      "docs_os_16_knowledge_suppliers",
+      "docs_os_16_knowledge_suppliers_entry_format_one_section_per_supplier",
+      "docs_os_16_knowledge_suppliers_seeding_task_tbd_owner_the_knowledge_transfer",
+      "docs_os_16_knowledge_suppliers_standing_analyses_owner_quarterly",
+      "docs_os_16_knowledge_suppliers_supplier_name_what_we_buy_from_them",
+      "docs_os_16_knowledge_suppliers_suppliers_the_crown_jewels"
+    ],
+    "64": [
+      "lib_auth_session_check",
+      "lib_auth_session_check_fromsinglequery",
+      "lib_auth_session_check_legacyload",
+      "lib_auth_session_check_main",
+      "lib_db_retry",
+      "lib_db_retry_isconnectfailure",
+      "lib_db_retry_transient",
+      "lib_db_retry_withconnectretry",
+      "lib_db_schema_userwarehouseaccess",
+      "lib_db_session_query",
+      "lib_db_session_query_sessionquery",
+      "lib_db_session_query_sessionrow",
+      "lib_db_session_query_sessionrows"
+    ],
+    "65": [
+      "public_file_document_icon",
+      "public_globe_globe_icon",
+      "public_next_create_next_app_starter_assets",
+      "public_next_next_js_logo",
+      "public_vercel_vercel_logo",
+      "public_window_browser_window_icon"
+    ],
+    "66": [
+      "agents_record_audit",
+      "docs_db_royal_hardware_erp_sql_users_table",
+      "docs_phase_3_database_design_audit_log",
+      "docs_phase_3_database_design_divergence_users_audit",
+      "docs_phase_8_authentication_supabase_auth_identity"
+    ],
+    "67": [
+      "app_dashboard_layout",
+      "app_dashboard_layout_dashboardlayout",
+      "components_layout_backtotop",
+      "components_layout_backtotop_backtotop",
+      "components_layout_keyboardshortcuts_openshortcuts",
+      "components_layout_sidebar_opennav",
+      "components_layout_topbar",
+      "components_layout_topbar_topbar",
+      "lib_actions_scope_getaccessiblecompanies",
+      "lib_actions_scope_setscopecompany",
+      "lib_auth_scope_getselectedscope",
+      "lib_auth_session_requiresession"
+    ],
+    "68": [
+      "app_dashboard_settings_page",
+      "app_dashboard_settings_page_dynamic",
+      "app_dashboard_settings_page_page",
+      "app_layout",
+      "app_layout_fraunces",
+      "app_layout_inter",
+      "app_layout_metadata",
+      "app_layout_rootlayout",
+      "app_layout_viewport",
+      "components_layout_keyboardshortcuts_clearfield",
+      "components_layout_keyboardshortcuts_currentscale",
+      "components_layout_keyboardshortcuts_istyping",
+      "components_layout_keyboardshortcuts_keyboardshortcuts",
+      "components_layout_keyboardshortcuts_zoom_event",
+      "components_layout_serviceworkerregister",
+      "components_layout_serviceworkerregister_serviceworkerregister",
+      "components_modules_appearancesettings",
+      "components_modules_appearancesettings_appearancesettings",
+      "components_modules_appearancesettings_moonicon",
+      "components_modules_appearancesettings_sunicon",
+      "components_modules_appearancesettings_zoominicon",
+      "components_modules_appearancesettings_zoomouticon",
+      "components_modules_settingsform_settingsform",
+      "lib_actions_preferences_settheme",
+      "lib_actions_preferences_setzoom",
+      "lib_actions_settings_getsettings",
+      "lib_actions_settings_settingsoverview",
+      "lib_preference_constants",
+      "lib_preference_constants_check",
+      "lib_preference_constants_check_checkladder",
+      "lib_preference_constants_check_checksnapping",
+      "lib_preference_constants_check_checkstepping",
+      "lib_preference_constants_check_checktheme",
+      "lib_preference_constants_check_main",
+      "lib_preference_constants_default_scale",
+      "lib_preference_constants_fontsizeforscale",
+      "lib_preference_constants_istheme",
+      "lib_preference_constants_max_scale",
+      "lib_preference_constants_min_scale",
+      "lib_preference_constants_neareststep",
+      "lib_preference_constants_themepreference",
+      "lib_preference_constants_themes",
+      "lib_preference_constants_zoom_steps",
+      "lib_preference_constants_zoomin",
+      "lib_preference_constants_zoomout",
+      "lib_setting_constants_setting_defs"
+    ],
+    "69": [
+      "docs_os_11_templates_product_page",
+      "docs_os_11_templates_product_page_gates_13_checklists_product_md_pre_filled_with_the_draft",
+      "docs_os_11_templates_product_page_inputs_all_required",
+      "docs_os_11_templates_product_page_output_skeleton",
+      "docs_os_11_templates_product_page_template_product_page_fill_in_consumed_by_product_writer"
+    ],
+    "70": [
+      "docs_os_11_templates_pr",
+      "docs_os_11_templates_pr_template_pull_request"
+    ],
+    "71": [
+      "lib_supabase_middleware",
+      "lib_supabase_middleware_updatesession",
+      "proxy",
+      "proxy_config",
+      "proxy_proxy"
+    ],
+    "72": [
+      "drizzle_0002_parallel_firestar",
+      "drizzle_0002_parallel_firestar_permissions",
+      "drizzle_0002_parallel_firestar_role_permissions",
+      "drizzle_0002_parallel_firestar_roles",
+      "drizzle_0002_parallel_firestar_sql_public_companies",
+      "drizzle_0002_parallel_firestar_sql_public_locations",
+      "drizzle_0002_parallel_firestar_sql_public_permissions",
+      "drizzle_0002_parallel_firestar_sql_public_roles",
+      "drizzle_0002_parallel_firestar_sql_public_users",
+      "drizzle_0002_parallel_firestar_user_company_access",
+      "drizzle_0002_parallel_firestar_user_roles",
+      "drizzle_0002_parallel_firestar_user_warehouse_access"
+    ],
+    "73": [
+      "docs_os_11_templates_readme",
+      "docs_os_11_templates_readme_templates_usage_contract"
+    ],
+    "74": [
+      "supabase_migrations_20260812000002_parallel_firestar",
+      "supabase_migrations_20260812000002_parallel_firestar_permissions",
+      "supabase_migrations_20260812000002_parallel_firestar_role_permissions",
+      "supabase_migrations_20260812000002_parallel_firestar_roles",
+      "supabase_migrations_20260812000002_parallel_firestar_sql_public_companies",
+      "supabase_migrations_20260812000002_parallel_firestar_sql_public_locations",
+      "supabase_migrations_20260812000002_parallel_firestar_sql_public_permissions",
+      "supabase_migrations_20260812000002_parallel_firestar_sql_public_roles",
+      "supabase_migrations_20260812000002_parallel_firestar_sql_public_users",
+      "supabase_migrations_20260812000002_parallel_firestar_user_company_access",
+      "supabase_migrations_20260812000002_parallel_firestar_user_roles",
+      "supabase_migrations_20260812000002_parallel_firestar_user_warehouse_access"
+    ],
+    "75": [
+      "docs_os_02_brand_ui_style",
+      "docs_os_02_brand_ui_style_brand_book_part_vi_digital_surface",
+      "docs_os_02_brand_ui_style_motion_character_precision_machinery",
+      "docs_os_02_brand_ui_style_rtl_dignity",
+      "docs_os_02_brand_ui_style_signature_components_specs_live_in_07_design_system",
+      "docs_os_02_brand_ui_style_surface_language",
+      "docs_os_02_brand_ui_style_the_test"
+    ],
+    "76": [
+      "components_modules_auditlogmanager",
+      "components_modules_auditlogmanager_auditlogmanager",
+      "components_modules_auditlogmanager_columns",
+      "components_modules_auditlogmanager_when",
+      "components_modules_saleitemshover",
+      "components_modules_saleitemshover_saleitemshover",
+      "components_ui_detailhover",
+      "components_ui_detailhover_detailhover",
+      "components_ui_detailhover_hoverrow",
+      "lib_actions_audit_auditrow",
+      "lib_actions_sales_saleitemrow"
+    ],
+    "77": [
+      "docs_os_01_company_business_model",
+      "docs_os_01_company_business_model_1_customers",
+      "docs_os_01_company_business_model_2_suppliers",
+      "docs_os_01_company_business_model_3_pricing",
+      "docs_os_01_company_business_model_4_margins",
+      "docs_os_01_company_business_model_5_sales_channels",
+      "docs_os_01_company_business_model_6_marketplace_strategy",
+      "docs_os_01_company_business_model_7_wholesale",
+      "docs_os_01_company_business_model_8_retail",
+      "docs_os_01_company_business_model_9_b2b",
+      "docs_os_01_company_business_model_royal_hardware_business_model"
+    ],
+    "78": [
+      "app_auth_layout",
+      "app_auth_layout_authlayout"
+    ],
+    "79": [
+      "app_dashboard_loading",
+      "app_dashboard_loading_loading"
+    ],
+    "80": [
+      "app_dashboard_sales_new_page",
+      "app_dashboard_sales_new_page_page"
+    ],
+    "81": [
+      "app_page",
+      "app_page_rootpage"
+    ],
+    "82": [
+      "components_modules_quick_add",
+      "components_modules_quick_add_selectfirstcreated"
+    ],
+    "83": [
+      "docs_os_02_brand_identity",
+      "docs_os_02_brand_identity_1_design_concept_the_standard",
+      "docs_os_02_brand_identity_2_1_components",
+      "docs_os_02_brand_identity_2_2_lockups",
+      "docs_os_02_brand_identity_2_3_construction_clear_space",
+      "docs_os_02_brand_identity_2_4_color_variants_complete_set_nothing_else_exists",
+      "docs_os_02_brand_identity_2_5_misuse_never",
+      "docs_os_02_brand_identity_2_logo_system_execution_brief_for_the_designer",
+      "docs_os_02_brand_identity_3_layout_principles_how_everything_is_composed",
+      "docs_os_02_brand_identity_4_applications_specs",
+      "docs_os_02_brand_identity_brand_book_part_ii_visual_identity_system"
+    ],
+    "84": [
+      "docs_phase_1_business_requirements_1_executive_summary",
+      "docs_phase_1_business_requirements_2_business_context",
+      "docs_phase_1_business_requirements_3_business_objectives",
+      "docs_phase_1_business_requirements_4_in_scope_modules",
+      "docs_phase_1_business_requirements_5_users_roles",
+      "docs_phase_1_business_requirements_6_key_business_rules",
+      "docs_phase_1_business_requirements_7_assumptions",
+      "docs_phase_1_business_requirements_8_success_criteria",
+      "docs_phase_1_business_requirements_9_open_items_carried_into_later_phases",
+      "docs_phase_1_business_requirements_explicitly_deferred_future_not_phase_1_scope",
+      "docs_phase_1_business_requirements_royal_hardware_erp_business_requirements_document_brd"
+    ],
+    "85": [
+      "docs_phase_5_folder_structure_0_1_app_stays_thin_modules_holds_the_logic",
+      "docs_phase_5_folder_structure_0_2_every_module_is_the_same_five_folders",
+      "docs_phase_5_folder_structure_0_3_audit_logging_is_a_service_layer_concern_not_a_db_trigger",
+      "docs_phase_5_folder_structure_0_4_centralized_constants_types_mirror_the_drizzle_enums",
+      "docs_phase_5_folder_structure_0_5_shared_validation_primitives_feature_specific_schemas",
+      "docs_phase_5_folder_structure_0_6_shared_data_table_wrapper",
+      "docs_phase_5_folder_structure_0_structural_decisions",
+      "docs_phase_5_folder_structure_1_full_tree",
+      "docs_phase_5_folder_structure_2_naming_conventions",
+      "docs_phase_5_folder_structure_3_company_warehouse_context",
+      "docs_phase_5_folder_structure_royal_hardware_erp_folder_structure"
+    ],
+    "86": [
+      "docs_os_01_company_roadmap",
+      "docs_os_01_company_roadmap_2026_digital_foundation",
+      "docs_os_01_company_roadmap_2026_exit_criteria",
+      "docs_os_01_company_roadmap_2027_scale_systems",
+      "docs_os_01_company_roadmap_2028_brand_scale",
+      "docs_os_01_company_roadmap_q1_q2_build",
+      "docs_os_01_company_roadmap_q2_q3_launch",
+      "docs_os_01_company_roadmap_q3_q4_grow",
+      "docs_os_01_company_roadmap_roadmap_rules",
+      "docs_os_01_company_roadmap_royal_hardware_roadmap"
+    ],
+    "87": [
+      "public_manifest",
+      "public_manifest_background_color",
+      "public_manifest_description",
+      "public_manifest_display",
+      "public_manifest_icons",
+      "public_manifest_name",
+      "public_manifest_orientation",
+      "public_manifest_scope",
+      "public_manifest_short_name",
+      "public_manifest_start_url",
+      "public_manifest_theme_color"
+    ],
+    "88": [
+      "docs_phase_7_api_design_0_1_one_result_shape_everywhere",
+      "docs_phase_7_api_design_0_2_every_action_follows_the_same_five_steps",
+      "docs_phase_7_api_design_0_3_reads_are_server_actions_too_no_parallel_rest_layer",
+      "docs_phase_7_api_design_0_4_route_handlers_are_the_exception_not_the_default",
+      "docs_phase_7_api_design_0_5_posting_is_atomic_and_idempotent_by_construction",
+      "docs_phase_7_api_design_0_6_file_uploads",
+      "docs_phase_7_api_design_0_7_rate_limiting",
+      "docs_phase_7_api_design_0_cross_cutting_conventions",
+      "docs_phase_7_api_design_2_open_items_carried_into_phase_8_9",
+      "docs_phase_7_api_design_royal_hardware_erp_api_design"
+    ],
+    "89": [
+      "docs_os_02_brand_photography",
+      "docs_os_02_brand_photography_1_the_three_registers",
+      "docs_os_02_brand_photography_2_grading_treatment",
+      "docs_os_02_brand_photography_3_practical_kit_owner_achievable",
+      "docs_os_02_brand_photography_4_files",
+      "docs_os_02_brand_photography_a_catalog_white_the_standard",
+      "docs_os_02_brand_photography_b_proof_macro_the_genuineness_evidence",
+      "docs_os_02_brand_photography_brand_book_part_iv_photography_art_direction",
+      "docs_os_02_brand_photography_c_heritage_work_the_story"
+    ],
+    "90": [
+      "docs_phase_12_deployment",
+      "docs_phase_12_deployment_0_the_split",
+      "docs_phase_12_deployment_1_provision_supabase",
+      "docs_phase_12_deployment_2_apply_migrations_and_seed",
+      "docs_phase_12_deployment_3_deploy_to_vercel",
+      "docs_phase_12_deployment_4_pwa_offline_already_built",
+      "docs_phase_12_deployment_5_checks",
+      "docs_phase_12_deployment_6_post_deploy_smoke_checklist",
+      "docs_phase_12_deployment_royal_hardware_erp_deployment"
+    ],
+    "91": [
+      "app_auth_login_page",
+      "app_auth_login_page_loginpage",
+      "lib_auth_actions",
+      "lib_auth_actions_login",
+      "lib_auth_actions_logout",
+      "lib_auth_session_getcookiesession",
+      "lib_supabase_server",
+      "lib_supabase_server_createclient"
+    ],
+    "92": [
+      "docs_os_07_design_system_motion",
+      "docs_os_07_design_system_motion_1_tokens",
+      "docs_os_07_design_system_motion_2_the_complete_vocabulary_v1_nothing_else_exists",
+      "docs_os_07_design_system_motion_3_lenis",
+      "docs_os_07_design_system_motion_4_reduced_motion_non_negotiable_launch_gated",
+      "docs_os_07_design_system_motion_5_performance_law",
+      "docs_os_07_design_system_motion_6_choreography_rules",
+      "docs_os_07_design_system_motion_design_system_motion_precision_machinery"
+    ],
+    "93": [
+      "docs_os_11_templates_collection_page",
+      "docs_os_11_templates_collection_page_bulk_cta_consumable_categories_only_rh_bulk_cta",
+      "docs_os_11_templates_collection_page_buying_guide_callout_rh_buying_guide_callout",
+      "docs_os_11_templates_collection_page_filters_verify_against_taxonomy_md_metafield_tag_driven_only",
+      "docs_os_11_templates_collection_page_gates",
+      "docs_os_11_templates_collection_page_intro_150_250_words_above_the_grid",
+      "docs_os_11_templates_collection_page_meta_set",
+      "docs_os_11_templates_collection_page_template_collection_page"
+    ],
+    "94": [
+      "docs_os_11_templates_email",
+      "docs_os_11_templates_email_gates_one_cta_ur_variant_where_contact_language_known",
+      "docs_os_11_templates_email_template_email_5_types_one_layout",
+      "docs_os_11_templates_email_type_a_order_confirmation_transactional",
+      "docs_os_11_templates_email_type_b_dispatch",
+      "docs_os_11_templates_email_type_c_abandoned_cart_one_send_6_12h",
+      "docs_os_11_templates_email_type_d_monthly_digest",
+      "docs_os_11_templates_email_type_e_b2b_price_list_update_formal_register"
+    ],
+    "95": [
+      "drizzle_0045_audit_whatsapp_quotations",
+      "drizzle_0045_audit_whatsapp_quotations_audit_logs",
+      "drizzle_0045_audit_whatsapp_quotations_sql_documents",
+      "drizzle_0045_audit_whatsapp_quotations_sql_public_companies",
+      "drizzle_0045_audit_whatsapp_quotations_sql_public_contacts",
+      "drizzle_0045_audit_whatsapp_quotations_sql_public_documents",
+      "drizzle_0045_audit_whatsapp_quotations_sql_public_users",
+      "drizzle_0045_audit_whatsapp_quotations_whatsapp_messages"
+    ],
+    "96": [
+      "docs_os_11_templates_release_notes",
+      "docs_os_11_templates_release_notes_gates_passed",
+      "docs_os_11_templates_release_notes_known_issues",
+      "docs_os_11_templates_release_notes_technical",
+      "docs_os_11_templates_release_notes_template_release_notes",
+      "docs_os_11_templates_release_notes_user_visible",
+      "docs_os_11_templates_release_notes_v_x_y_z_yyyy_mm_dd"
+    ],
+    "97": [
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_audit_logs",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_sql_documents",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_sql_public_companies",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_sql_public_contacts",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_sql_public_documents",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_sql_public_users",
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_whatsapp_messages"
+    ],
+    "98": [
+      "supabase_readme",
+      "supabase_readme_1_database",
+      "supabase_readme_2_edge_functions",
+      "supabase_readme_3_environment_variables",
+      "supabase_readme_deployment",
+      "supabase_readme_folder_contents",
+      "supabase_readme_keeping_the_two_migration_histories_in_sync",
+      "supabase_readme_supabase_backend_edge_functions"
+    ],
+    "99": [
+      "drizzle_0012_parallel_blur",
+      "drizzle_0012_parallel_blur_bank_accounts",
+      "drizzle_0012_parallel_blur_cheque_register",
+      "drizzle_0012_parallel_blur_sql_public_bank_accounts",
+      "drizzle_0012_parallel_blur_sql_public_companies",
+      "drizzle_0012_parallel_blur_sql_public_contacts",
+      "drizzle_0012_parallel_blur_sql_public_documents"
+    ],
+    "100": [
+      "lib_db_schema_permissions",
+      "lib_db_schema_rolepermissions",
+      "lib_db_seed_rbac",
+      "lib_db_seed_rbac_main",
+      "lib_db_seed_rbac_permission_catalog",
+      "lib_db_seed_rbac_salesman_permissions",
+      "lib_db_seed_rbac_upsertrole"
+    ],
+    "101": [
+      "supabase_functions_readme",
+      "supabase_functions_readme_adding_a_function",
+      "supabase_functions_readme_calling_from_the_frontend",
+      "supabase_functions_readme_database_access_from_a_function",
+      "supabase_functions_readme_deploying",
+      "supabase_functions_readme_edge_functions",
+      "supabase_functions_readme_jwt_verification"
+    ],
+    "102": [
+      "supabase_migrations_20260812000012_parallel_blur",
+      "supabase_migrations_20260812000012_parallel_blur_bank_accounts",
+      "supabase_migrations_20260812000012_parallel_blur_cheque_register",
+      "supabase_migrations_20260812000012_parallel_blur_sql_public_bank_accounts",
+      "supabase_migrations_20260812000012_parallel_blur_sql_public_companies",
+      "supabase_migrations_20260812000012_parallel_blur_sql_public_contacts",
+      "supabase_migrations_20260812000012_parallel_blur_sql_public_documents"
+    ],
+    "103": [
+      "docs_os_02_brand_typography",
+      "docs_os_02_brand_typography_1_the_pairing_why",
+      "docs_os_02_brand_typography_2_weights_complete_set_nothing_else_loads",
+      "docs_os_02_brand_typography_3_type_scale_desktop_mobile_1_25_ratio_4px_snapped",
+      "docs_os_02_brand_typography_4_composition_rules",
+      "docs_os_02_brand_typography_brand_book_part_iii_typography"
+    ],
+    "104": [
+      "docs_os_08_development_testing",
+      "docs_os_08_development_testing_escapes",
+      "docs_os_08_development_testing_layer_1_ci_every_pr_automatic",
+      "docs_os_08_development_testing_layer_2_the_manual_test_matrix_before_every_main_merge",
+      "docs_os_08_development_testing_layer_3_critical_flow_discipline",
+      "docs_os_08_development_testing_testing_right_sized_honest_boring"
+    ],
+    "105": [
+      "docs_os_11_templates_meeting_notes",
+      "docs_os_11_templates_meeting_notes_decisions_each_with_owner_deadline_a_decision_without_both",
+      "docs_os_11_templates_meeting_notes_for_the_log_lessons_mistakes_spotted_their_files_same_day",
+      "docs_os_11_templates_meeting_notes_numbers_glanced_weekly_ops_orders_stockouts_ad_spend_flags",
+      "docs_os_11_templates_meeting_notes_parked_16_knowledge_ideas_md_or_20_future_nothing_dies",
+      "docs_os_11_templates_meeting_notes_template_meeting_notes"
+    ],
+    "106": [
+      "docs_os_16_knowledge_mistakes",
+      "docs_os_16_knowledge_mistakes_entry_format",
+      "docs_os_16_knowledge_mistakes_mistakes_the_honest_file",
+      "docs_os_16_knowledge_mistakes_monthly_roll_up_owner_with_lessons_md",
+      "docs_os_16_knowledge_mistakes_the_recurrence_law",
+      "docs_os_16_knowledge_mistakes_yyyy_mm_dd_one_line_title_severity_sales_blocking"
+    ],
+    "107": [
+      "docs_phase_11_testing",
+      "docs_phase_11_testing_1_what_s_actually_running_today",
+      "docs_phase_11_testing_2_what_s_scaffolded_but_needs_a_real_database_to_run",
+      "docs_phase_11_testing_3_to_make_the_above_runnable",
+      "docs_phase_11_testing_4_what_manual_verification_confirmed_in_this_session",
+      "docs_phase_11_testing_royal_hardware_erp_testing"
+    ],
+    "108": [
+      "docs_phase_3_database_design_divergence_whatsapp_backups",
+      "docs_phase_3_database_design_price_lists_dead_table"
+    ],
+    "109": [
+      "docs_phase_2_functional_requirements_2_1_products_shared",
+      "docs_phase_2_functional_requirements_2_2_categories_sub_categories_brands_units_shared",
+      "docs_phase_2_functional_requirements_2_3_unit_conversions_shared",
+      "docs_phase_2_functional_requirements_2_4_warehouses_shared",
+      "docs_phase_2_functional_requirements_2_5_stock_stock_transfers_stock_adjustments_stock_movement_history",
+      "docs_phase_2_functional_requirements_2_inventory"
+    ],
+    "110": [
+      "eslint_config",
+      "eslint_config_eslintconfig"
+    ],
+    "111": [
+      "lib_supabase_client",
+      "lib_supabase_client_createclient"
+    ],
+    "112": [
+      "next_config",
+      "next_config_nextconfig"
+    ],
+    "113": [
+      "postcss_config",
+      "postcss_config_config"
+    ],
+    "114": [
+      "drizzle_0007_create_rate_list_view",
+      "drizzle_0007_create_rate_list_view_rate_list",
+      "drizzle_0007_create_rate_list_view_sql_document_lines",
+      "drizzle_0007_create_rate_list_view_sql_document_types",
+      "drizzle_0007_create_rate_list_view_sql_documents",
+      "drizzle_0007_create_rate_list_view_sql_items"
+    ],
+    "115": [
+      "drizzle_0011_real_vengeance",
+      "drizzle_0011_real_vengeance_rate_list",
+      "drizzle_0011_real_vengeance_sql_document_lines",
+      "drizzle_0011_real_vengeance_sql_document_types",
+      "drizzle_0011_real_vengeance_sql_documents",
+      "drizzle_0011_real_vengeance_sql_items"
+    ],
+    "116": [
+      "drizzle_0022_closed_dragon_lord",
+      "drizzle_0022_closed_dragon_lord_expenses",
+      "drizzle_0022_closed_dragon_lord_sql_public_companies",
+      "drizzle_0022_closed_dragon_lord_sql_public_expense_categories",
+      "drizzle_0022_closed_dragon_lord_sql_public_locations",
+      "drizzle_0022_closed_dragon_lord_sql_public_payment_methods"
+    ],
+    "117": [
+      "drizzle_0027_optimize_rate_list_view",
+      "drizzle_0027_optimize_rate_list_view_rate_list",
+      "drizzle_0027_optimize_rate_list_view_sql_document_lines",
+      "drizzle_0027_optimize_rate_list_view_sql_document_types",
+      "drizzle_0027_optimize_rate_list_view_sql_documents",
+      "drizzle_0027_optimize_rate_list_view_sql_items"
+    ],
+    "118": [
+      "drizzle_0044_rate_list_stock_receipts",
+      "drizzle_0044_rate_list_stock_receipts_rate_list",
+      "drizzle_0044_rate_list_stock_receipts_sql_document_lines",
+      "drizzle_0044_rate_list_stock_receipts_sql_document_types",
+      "drizzle_0044_rate_list_stock_receipts_sql_documents",
+      "drizzle_0044_rate_list_stock_receipts_sql_items"
+    ],
+    "119": [
+      "drizzle_0049_landed_unit_cost",
+      "drizzle_0049_landed_unit_cost_rate_list",
+      "drizzle_0049_landed_unit_cost_sql_document_lines",
+      "drizzle_0049_landed_unit_cost_sql_document_types",
+      "drizzle_0049_landed_unit_cost_sql_documents",
+      "drizzle_0049_landed_unit_cost_sql_items"
+    ],
+    "120": [
+      "supabase_migrations_20260812000007_create_rate_list_view",
+      "supabase_migrations_20260812000007_create_rate_list_view_rate_list",
+      "supabase_migrations_20260812000007_create_rate_list_view_sql_document_lines",
+      "supabase_migrations_20260812000007_create_rate_list_view_sql_document_types",
+      "supabase_migrations_20260812000007_create_rate_list_view_sql_documents",
+      "supabase_migrations_20260812000007_create_rate_list_view_sql_items"
+    ],
+    "121": [
+      "supabase_migrations_20260812000011_real_vengeance",
+      "supabase_migrations_20260812000011_real_vengeance_rate_list",
+      "supabase_migrations_20260812000011_real_vengeance_sql_document_lines",
+      "supabase_migrations_20260812000011_real_vengeance_sql_document_types",
+      "supabase_migrations_20260812000011_real_vengeance_sql_documents",
+      "supabase_migrations_20260812000011_real_vengeance_sql_items"
+    ],
+    "122": [
+      "supabase_migrations_20260812000022_closed_dragon_lord",
+      "supabase_migrations_20260812000022_closed_dragon_lord_expenses",
+      "supabase_migrations_20260812000022_closed_dragon_lord_sql_public_companies",
+      "supabase_migrations_20260812000022_closed_dragon_lord_sql_public_expense_categories",
+      "supabase_migrations_20260812000022_closed_dragon_lord_sql_public_locations",
+      "supabase_migrations_20260812000022_closed_dragon_lord_sql_public_payment_methods"
+    ],
+    "123": [
+      "supabase_migrations_20260812000027_optimize_rate_list_view",
+      "supabase_migrations_20260812000027_optimize_rate_list_view_rate_list",
+      "supabase_migrations_20260812000027_optimize_rate_list_view_sql_document_lines",
+      "supabase_migrations_20260812000027_optimize_rate_list_view_sql_document_types",
+      "supabase_migrations_20260812000027_optimize_rate_list_view_sql_documents",
+      "supabase_migrations_20260812000027_optimize_rate_list_view_sql_items"
+    ],
+    "124": [
+      "supabase_migrations_20260812000044_rate_list_stock_receipts",
+      "supabase_migrations_20260812000044_rate_list_stock_receipts_rate_list",
+      "supabase_migrations_20260812000044_rate_list_stock_receipts_sql_document_lines",
+      "supabase_migrations_20260812000044_rate_list_stock_receipts_sql_document_types",
+      "supabase_migrations_20260812000044_rate_list_stock_receipts_sql_documents",
+      "supabase_migrations_20260812000044_rate_list_stock_receipts_sql_items"
+    ],
+    "125": [
+      "supabase_migrations_20260812000049_landed_unit_cost",
+      "supabase_migrations_20260812000049_landed_unit_cost_rate_list",
+      "supabase_migrations_20260812000049_landed_unit_cost_sql_document_lines",
+      "supabase_migrations_20260812000049_landed_unit_cost_sql_document_types",
+      "supabase_migrations_20260812000049_landed_unit_cost_sql_documents",
+      "supabase_migrations_20260812000049_landed_unit_cost_sql_items"
+    ],
+    "126": [
+      "docs_os_16_knowledge_best_practices",
+      "docs_os_16_knowledge_best_practices_best_practices_adopted_with_provenance",
+      "docs_os_16_knowledge_best_practices_entry_format",
+      "docs_os_16_knowledge_best_practices_practice_adopted_yyyy_mm",
+      "docs_os_16_knowledge_best_practices_the_rejection_ledger_equally_valuable"
+    ],
+    "127": [
+      "docs_os_16_knowledge_competitors",
+      "docs_os_16_knowledge_competitors_competitors_awareness_not_obsession",
+      "docs_os_16_knowledge_competitors_entry_format_quarterly_sweep_45_min",
+      "docs_os_16_knowledge_competitors_the_copying_line",
+      "docs_os_16_knowledge_competitors_yyyy_q_sweep"
+    ],
+    "128": [
+      "docs_os_16_knowledge_experiments",
+      "docs_os_16_knowledge_experiments_entry_format",
+      "docs_os_16_knowledge_experiments_exp_nnn_name_start_end_dates",
+      "docs_os_16_knowledge_experiments_experiments_the_end_of_we_think",
+      "docs_os_16_knowledge_experiments_laws"
+    ],
+    "129": [
+      "docs_os_16_knowledge_ideas",
+      "docs_os_16_knowledge_ideas_entry_format",
+      "docs_os_16_knowledge_ideas_ideas_the_inbox_with_a_pipeline",
+      "docs_os_16_knowledge_ideas_review_monthly_10_minutes_alongside_the_question_log_review",
+      "docs_os_16_knowledge_ideas_the_pipeline"
+    ],
+    "130": [
+      "docs_os_16_knowledge_research",
+      "docs_os_16_knowledge_research_entry_format",
+      "docs_os_16_knowledge_research_research_durable_findings",
+      "docs_os_16_knowledge_research_standing_research_files_living_entries_updated_not_rewritten",
+      "docs_os_16_knowledge_research_yyyy_mm_dd_topic_trigger_what_question_forced_this"
+    ],
+    "131": [
+      "docs_phase_2_functional_requirements_4_1_sales_unified_company_scoped_via_sales_channel",
+      "docs_phase_2_functional_requirements_4_2_invoices",
+      "docs_phase_2_functional_requirements_4_3_quotations",
+      "docs_phase_2_functional_requirements_4_4_customers_shared_customer_ledger_company_scoped",
+      "docs_phase_2_functional_requirements_4_sales"
+    ],
+    "132": [
+      "drizzle_0015_kind_siren",
+      "drizzle_0015_kind_siren_document_number_ledger",
+      "drizzle_0015_kind_siren_sql_public_companies",
+      "drizzle_0015_kind_siren_sql_public_document_types",
+      "drizzle_0015_kind_siren_sql_public_documents"
+    ],
+    "133": [
+      "lib_actions_resolve_refs_check",
+      "lib_actions_resolve_refs_check_contactrow",
+      "lib_actions_resolve_refs_check_faketx",
+      "lib_actions_resolve_refs_check_main",
+      "lib_actions_resolve_refs_resolvecontactids"
+    ],
+    "134": [
+      "lib_theme_check",
+      "lib_theme_check_block",
+      "lib_theme_check_colorvars",
+      "lib_theme_check_main",
+      "lib_theme_check_vars"
+    ],
+    "135": [
+      "supabase_migrations_20260812000015_kind_siren",
+      "supabase_migrations_20260812000015_kind_siren_document_number_ledger",
+      "supabase_migrations_20260812000015_kind_siren_sql_public_companies",
+      "supabase_migrations_20260812000015_kind_siren_sql_public_document_types",
+      "supabase_migrations_20260812000015_kind_siren_sql_public_documents"
+    ],
+    "136": [
+      "app_dashboard_inventory_warehouses_page",
+      "app_dashboard_inventory_warehouses_page_warehousespage",
+      "components_modules_locationmanager_locationmanager",
+      "lib_actions_locations_listlocations"
+    ],
+    "137": [
+      "docs_os_11_templates_blog",
+      "docs_os_11_templates_blog_gates",
+      "docs_os_11_templates_blog_structure",
+      "docs_os_11_templates_blog_template_blog_post"
+    ],
+    "138": [
+      "docs_os_16_knowledge_lessons",
+      "docs_os_16_knowledge_lessons_entry_format",
+      "docs_os_16_knowledge_lessons_lessons_what_worked",
+      "docs_os_16_knowledge_lessons_yyyy_mm_dd_one_line_title_domain_sales_ops"
+    ],
+    "139": [
+      "drizzle_0024_remarkable_swarm_sql_expenses",
+      "drizzle_0024_remarkable_swarm_sql_public_bank_accounts",
+      "drizzle_0024_remarkable_swarm_sql_public_cash_accounts",
+      "drizzle_0024_remarkable_swarm_sql_public_cheque_register"
+    ],
+    "140": [
+      "package",
+      "package_name",
+      "package_private",
+      "package_version"
+    ],
+    "141": [
+      "supabase_migrations_20260812000024_remarkable_swarm_sql_expenses",
+      "supabase_migrations_20260812000024_remarkable_swarm_sql_public_bank_accounts",
+      "supabase_migrations_20260812000024_remarkable_swarm_sql_public_cash_accounts",
+      "supabase_migrations_20260812000024_remarkable_swarm_sql_public_cheque_register"
+    ],
+    "142": [
+      "docs_os_11_templates_proposal_quotation",
+      "docs_os_11_templates_proposal_quotation_gates_tender_pricing_calc_never_from_retail_specs",
+      "docs_os_11_templates_proposal_quotation_template_proposal_quotation_the_b2b_money_document"
+    ],
+    "143": [
+      "drizzle_0020_flippant_kree",
+      "drizzle_0020_flippant_kree_cash_accounts",
+      "drizzle_0020_flippant_kree_sql_public_companies"
+    ],
+    "144": [
+      "drizzle_0023_jazzy_lizard_sql_documents",
+      "drizzle_0023_jazzy_lizard_sql_public_bank_accounts",
+      "drizzle_0023_jazzy_lizard_sql_public_cash_accounts"
+    ],
+    "145": [
+      "scripts_mark_migrations_applied",
+      "scripts_mark_migrations_applied_files",
+      "scripts_mark_migrations_applied_sql"
+    ],
+    "146": [
+      "supabase_migrations_20260812000020_flippant_kree",
+      "supabase_migrations_20260812000020_flippant_kree_cash_accounts",
+      "supabase_migrations_20260812000020_flippant_kree_sql_public_companies"
+    ],
+    "147": [
+      "supabase_migrations_20260812000023_jazzy_lizard_sql_documents",
+      "supabase_migrations_20260812000023_jazzy_lizard_sql_public_bank_accounts",
+      "supabase_migrations_20260812000023_jazzy_lizard_sql_public_cash_accounts"
+    ],
+    "148": [
+      "docs_os_08_development_deployment",
+      "docs_os_08_development_deployment_deployment_discipline"
+    ],
+    "149": [
+      "docs_os_08_development_folder_standards",
+      "docs_os_08_development_folder_standards_folder_standards"
+    ],
+    "150": [
+      "docs_os_08_development_javascript_standards",
+      "docs_os_08_development_javascript_standards_javascript_standards_compiled_output_unavoidable_plain_js"
+    ],
+    "151": [
+      "docs_os_08_development_typescript_standards",
+      "docs_os_08_development_typescript_standards_typescript_standards"
+    ],
+    "152": [
+      "docs_os_11_templates_faq_entry",
+      "docs_os_11_templates_faq_entry_template_faq_entry"
+    ],
+    "153": [
+      "docs_os_11_templates_issue",
+      "docs_os_11_templates_issue_template_issue"
+    ],
+    "154": [
+      "docs_os_08_development_coding_standards",
+      "docs_os_08_development_coding_standards_coding_standards_prime_rules",
+      "docs_os_08_development_coding_standards_hygiene",
+      "docs_os_08_development_coding_standards_the_four_laws",
+      "docs_os_08_development_coding_standards_the_grep_gates_run_before_every_pr_ci_mirrors_them"
+    ],
+    "155": [
+      "docs_os_16_knowledge_meeting_notes_readme",
+      "docs_os_16_knowledge_meeting_notes_readme_meeting_notes_readme_md"
+    ],
+    "156": [
+      "drizzle_0016_swift_alex_wilder_sql_contacts",
+      "drizzle_0016_swift_alex_wilder_sql_public_companies"
+    ],
+    "157": [
+      "docs_os_08_development_liquid_standards",
+      "docs_os_08_development_liquid_standards_data",
+      "docs_os_08_development_liquid_standards_liquid_standards_the_law_l6_liquid_guidelines_is_the_manual",
+      "docs_os_08_development_liquid_standards_protected_logic_single_homes_never_re_implemented",
+      "docs_os_08_development_liquid_standards_strings_locales",
+      "docs_os_08_development_liquid_standards_structure"
+    ],
+    "158": [
+      "drizzle_0017_blushing_shocker_sql_documents",
+      "drizzle_0017_blushing_shocker_sql_public_payment_methods"
+    ],
+    "159": [
+      "drizzle_0028_lame_shinobi_shaw",
+      "drizzle_0028_lame_shinobi_shaw_number_sequences"
+    ],
+    "160": [
+      "docs_os_08_development_naming",
+      "docs_os_08_development_naming_commerce_shared_with_ops_one_code_everywhere",
+      "docs_os_08_development_naming_files_code",
+      "docs_os_08_development_naming_naming_one_vocabulary_across_code_content_and_commerce"
+    ],
+    "161": [
+      "docs_os_08_development_performance",
+      "docs_os_08_development_performance_every_pr",
+      "docs_os_08_development_performance_every_release",
+      "docs_os_08_development_performance_performance_practice",
+      "docs_os_08_development_performance_standing_rules"
+    ],
+    "162": [
+      "drizzle_0052_pretty_black_crow_sql_expenses",
+      "drizzle_0052_pretty_black_crow_sql_public_documents"
+    ],
+    "163": [
+      "lib_actions_server_exports_check",
+      "lib_actions_server_exports_check_main"
+    ],
+    "164": [
+      "docs_os_08_development_security",
+      "docs_os_08_development_security_account_access_hygiene_8_staff_this_matters",
+      "docs_os_08_development_security_data_minimalism",
+      "docs_os_08_development_security_platform_boundary_the_biggest_rule",
+      "docs_os_08_development_security_security",
+      "docs_os_08_development_security_theme_level_rules"
+    ],
+    "165": [
+      "public_sw",
+      "public_sw_shell"
+    ],
+    "166": [
+      "supabase_migrations_20260812000016_swift_alex_wilder_sql_contacts",
+      "supabase_migrations_20260812000016_swift_alex_wilder_sql_public_companies"
+    ],
+    "167": [
+      "supabase_migrations_20260812000017_blushing_shocker_sql_documents",
+      "supabase_migrations_20260812000017_blushing_shocker_sql_public_payment_methods"
+    ],
+    "168": [
+      "supabase_migrations_20260812000028_lame_shinobi_shaw",
+      "supabase_migrations_20260812000028_lame_shinobi_shaw_number_sequences"
+    ],
+    "169": [
+      "supabase_migrations_20260812000052_pretty_black_crow_sql_expenses",
+      "supabase_migrations_20260812000052_pretty_black_crow_sql_public_documents"
+    ],
+    "170": [
+      "drizzle_0001_sad_dust"
+    ],
+    "171": [
+      "drizzle_0001_sad_dust_sql_users"
+    ],
+    "172": [
+      "drizzle_0002_parallel_firestar_sql_chart_of_accounts"
+    ],
+    "173": [
+      "drizzle_0002_parallel_firestar_sql_contacts"
+    ],
+    "174": [
+      "drizzle_0002_parallel_firestar_sql_documents"
+    ],
+    "175": [
+      "drizzle_0002_parallel_firestar_sql_items"
+    ],
+    "176": [
+      "drizzle_0002_parallel_firestar_sql_locations"
+    ],
+    "177": [
+      "drizzle_0002_parallel_firestar_sql_price_lists"
+    ],
+    "178": [
+      "drizzle_0002_parallel_firestar_sql_settings"
+    ],
+    "179": [
+      "drizzle_0002_parallel_firestar_sql_users"
+    ],
+    "180": [
+      "drizzle_0003_disable_rls_on_unscoped_tables"
+    ],
+    "181": [
+      "drizzle_config"
+    ],
+    "182": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_attachments"
+    ],
+    "183": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_audit_log"
+    ],
+    "184": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_brands"
+    ],
+    "185": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_categories"
+    ],
+    "186": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_companies"
+    ],
+    "187": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_currencies"
+    ],
+    "188": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_document_lines"
+    ],
+    "189": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_document_types"
+    ],
+    "190": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_expense_categories"
+    ],
+    "191": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_inventory_transactions"
+    ],
+    "192": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_item_images"
+    ],
+    "193": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_ledger_entries"
+    ],
+    "194": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_payment_methods"
+    ],
+    "195": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_permissions"
+    ],
+    "196": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_role_permissions"
+    ],
+    "197": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_roles"
+    ],
+    "198": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_taxes"
+    ],
+    "199": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_unit_conversions"
+    ],
+    "200": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_units"
+    ],
+    "201": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_user_company_access"
+    ],
+    "202": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_user_roles"
+    ],
+    "203": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_user_warehouse_access"
+    ],
+    "204": [
+      "drizzle_0003_disable_rls_on_unscoped_tables_sql_users"
+    ],
+    "205": [
+      "drizzle_0004_users_backfilled_not_null"
+    ],
+    "206": [
+      "drizzle_0004_users_backfilled_not_null_sql_users"
+    ],
+    "207": [
+      "drizzle_0005_strange_ultimates"
+    ],
+    "208": [
+      "drizzle_0005_strange_ultimates_sql_users"
+    ],
+    "209": [
+      "drizzle_0006_jittery_kabuki"
+    ],
+    "210": [
+      "drizzle_0008_organic_phil_sheldon"
+    ],
+    "211": [
+      "drizzle_0008_organic_phil_sheldon_sql_items"
+    ],
+    "212": [
+      "drizzle_0009_magenta_professor_monster"
+    ],
+    "213": [
+      "drizzle_0009_magenta_professor_monster_sql_contacts"
+    ],
+    "214": [
+      "drizzle_0010_volatile_norman_osborn"
+    ],
+    "215": [
+      "drizzle_0010_volatile_norman_osborn_sql_items"
+    ],
+    "216": [
+      "drizzle_0011_real_vengeance_sql_audit_log"
+    ],
+    "217": [
+      "drizzle_0011_real_vengeance_sql_companies"
+    ],
+    "218": [
+      "drizzle_0011_real_vengeance_sql_contacts"
+    ],
+    "219": [
+      "drizzle_0011_real_vengeance_sql_ledger_entries"
+    ],
+    "220": [
+      "drizzle_0013_tearful_hawkeye"
+    ],
+    "221": [
+      "drizzle_0013_tearful_hawkeye_sql_units"
+    ],
+    "222": [
+      "drizzle_0014_young_mephistopheles"
+    ],
+    "223": [
+      "drizzle_0014_young_mephistopheles_sql_documents"
+    ],
+    "224": [
+      "drizzle_0016_swift_alex_wilder"
+    ],
+    "225": [
+      "drizzle_0017_blushing_shocker"
+    ],
+    "226": [
+      "drizzle_0018_backfill_document_number_ledger"
+    ],
+    "227": [
+      "drizzle_0019_backfill_inventory_transactions"
+    ],
+    "228": [
+      "drizzle_0021_many_omega_sentinel"
+    ],
+    "229": [
+      "drizzle_0021_many_omega_sentinel_sql_bank_accounts"
+    ],
+    "230": [
+      "drizzle_0023_jazzy_lizard"
+    ],
+    "231": [
+      "drizzle_0024_remarkable_swarm"
+    ],
+    "232": [
+      "drizzle_0025_high_blink"
+    ],
+    "233": [
+      "drizzle_0025_high_blink_sql_documents"
+    ],
+    "234": [
+      "drizzle_0025_high_blink_sql_expenses"
+    ],
+    "235": [
+      "drizzle_0026_flowery_tyrannus"
+    ],
+    "236": [
+      "drizzle_0029_dizzy_sage"
+    ],
+    "237": [
+      "drizzle_0029_dizzy_sage_sql_document_types"
+    ],
+    "238": [
+      "drizzle_0030_bizarre_silk_fever"
+    ],
+    "239": [
+      "drizzle_0030_bizarre_silk_fever_sql_brands"
+    ],
+    "240": [
+      "drizzle_0030_bizarre_silk_fever_sql_categories"
+    ],
+    "241": [
+      "drizzle_0030_bizarre_silk_fever_sql_currencies"
+    ],
+    "242": [
+      "drizzle_0030_bizarre_silk_fever_sql_unit_conversions"
+    ],
+    "243": [
+      "drizzle_0031_common_lila_cheney"
+    ],
+    "244": [
+      "drizzle_0031_common_lila_cheney_sql_brands"
+    ],
+    "245": [
+      "drizzle_0031_common_lila_cheney_sql_categories"
+    ],
+    "246": [
+      "drizzle_0031_common_lila_cheney_sql_currencies"
+    ],
+    "247": [
+      "drizzle_0031_common_lila_cheney_sql_locations"
+    ],
+    "248": [
+      "drizzle_0031_common_lila_cheney_sql_taxes"
+    ],
+    "249": [
+      "drizzle_0032_drop_unused_columns"
+    ],
+    "250": [
+      "drizzle_0032_drop_unused_columns_sql_bank_accounts"
+    ],
+    "251": [
+      "drizzle_0032_drop_unused_columns_sql_brands"
+    ],
+    "252": [
+      "drizzle_0032_drop_unused_columns_sql_companies"
+    ],
+    "253": [
+      "drizzle_0032_drop_unused_columns_sql_contacts"
+    ],
+    "254": [
+      "drizzle_0032_drop_unused_columns_sql_expense_categories"
+    ],
+    "255": [
+      "drizzle_0032_drop_unused_columns_sql_items"
+    ],
+    "256": [
+      "drizzle_0033_drop_more_columns"
+    ],
+    "257": [
+      "drizzle_0033_drop_more_columns_sql_contacts"
+    ],
+    "258": [
+      "drizzle_0033_drop_more_columns_sql_document_lines"
+    ],
+    "259": [
+      "drizzle_0033_drop_more_columns_sql_documents"
+    ],
+    "260": [
+      "drizzle_0033_drop_more_columns_sql_units"
+    ],
+    "261": [
+      "drizzle_0034_drop_currency_and_contact_type"
+    ],
+    "262": [
+      "drizzle_0034_drop_currency_and_contact_type_sql_contacts"
+    ],
+    "263": [
+      "drizzle_0034_drop_currency_and_contact_type_sql_currencies"
+    ],
+    "264": [
+      "drizzle_0034_drop_currency_and_contact_type_sql_documents"
+    ],
+    "265": [
+      "drizzle_0035_unit_symbol_nullable_category_sort"
+    ],
+    "266": [
+      "drizzle_0035_unit_symbol_nullable_category_sort_sql_categories"
+    ],
+    "267": [
+      "drizzle_0035_unit_symbol_nullable_category_sort_sql_units"
+    ],
+    "268": [
+      "drizzle_0036_shared_document_series"
+    ],
+    "269": [
+      "drizzle_0037_documents_reason"
+    ],
+    "270": [
+      "drizzle_0037_documents_reason_sql_documents"
+    ],
+    "271": [
+      "drizzle_0038_documents_paid_amount"
+    ],
+    "272": [
+      "drizzle_0038_documents_paid_amount_sql_documents"
+    ],
+    "273": [
+      "drizzle_0039_backfill_sales_receivables"
+    ],
+    "274": [
+      "drizzle_0040_backfill_movement_costs"
+    ],
+    "275": [
+      "drizzle_0041_expenses_drop_location"
+    ],
+    "276": [
+      "drizzle_0041_expenses_drop_location_sql_expenses"
+    ],
+    "277": [
+      "drizzle_0042_items_sku_per_company"
+    ],
+    "278": [
+      "drizzle_0042_items_sku_per_company_sql_items"
+    ],
+    "279": [
+      "drizzle_0043_documents_sale_type"
+    ],
+    "280": [
+      "drizzle_0043_documents_sale_type_sql_documents"
+    ],
+    "281": [
+      "drizzle_0045_audit_whatsapp_quotations_sql_document_lines"
+    ],
+    "282": [
+      "drizzle_0046_users_whatsapp_number"
+    ],
+    "283": [
+      "drizzle_0046_users_whatsapp_number_sql_users"
+    ],
+    "284": [
+      "drizzle_0047_whatsapp_handoff_status"
+    ],
+    "285": [
+      "drizzle_0048_backfill_payments_received"
+    ],
+    "286": [
+      "drizzle_0050_whole_rupee_unit_cost"
+    ],
+    "287": [
+      "drizzle_0051_user_display_prefs"
+    ],
+    "288": [
+      "drizzle_0051_user_display_prefs_sql_users"
+    ],
+    "289": [
+      "drizzle_0052_pretty_black_crow"
+    ],
+    "290": [
+      "drizzle_0053_ambitious_exodus"
+    ],
+    "291": [
+      "drizzle_0053_ambitious_exodus_sql_audit_logs"
+    ],
+    "292": [
+      "drizzle_0053_ambitious_exodus_sql_bank_accounts"
+    ],
+    "293": [
+      "drizzle_0053_ambitious_exodus_sql_cash_accounts"
+    ],
+    "294": [
+      "drizzle_0053_ambitious_exodus_sql_cheque_register"
+    ],
+    "295": [
+      "drizzle_0053_ambitious_exodus_sql_contacts"
+    ],
+    "296": [
+      "drizzle_0053_ambitious_exodus_sql_document_lines"
+    ],
+    "297": [
+      "drizzle_0053_ambitious_exodus_sql_document_number_ledger"
+    ],
+    "298": [
+      "drizzle_0053_ambitious_exodus_sql_document_types"
+    ],
+    "299": [
+      "drizzle_0053_ambitious_exodus_sql_documents"
+    ],
+    "300": [
+      "drizzle_0053_ambitious_exodus_sql_expense_categories"
+    ],
+    "301": [
+      "drizzle_0053_ambitious_exodus_sql_expenses"
+    ],
+    "302": [
+      "drizzle_0053_ambitious_exodus_sql_inventory_transactions"
+    ],
+    "303": [
+      "drizzle_0053_ambitious_exodus_sql_item_images"
+    ],
+    "304": [
+      "drizzle_0053_ambitious_exodus_sql_items"
+    ],
+    "305": [
+      "drizzle_0053_ambitious_exodus_sql_ledger_entries"
+    ],
+    "306": [
+      "drizzle_0053_ambitious_exodus_sql_settings"
+    ],
+    "307": [
+      "drizzle_0053_ambitious_exodus_sql_unit_conversions"
+    ],
+    "308": [
+      "drizzle_0053_ambitious_exodus_sql_whatsapp_messages"
+    ],
+    "309": [
+      "html2canvas_html2canvas"
+    ],
+    "310": [
+      "supabase_migrations_20260812000001_sad_dust"
+    ],
+    "311": [
+      "supabase_migrations_20260812000001_sad_dust_sql_users"
+    ],
+    "312": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_chart_of_accounts"
+    ],
+    "313": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_contacts"
+    ],
+    "314": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_documents"
+    ],
+    "315": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_items"
+    ],
+    "316": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_locations"
+    ],
+    "317": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_price_lists"
+    ],
+    "318": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_settings"
+    ],
+    "319": [
+      "supabase_migrations_20260812000002_parallel_firestar_sql_users"
+    ],
+    "320": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables"
+    ],
+    "321": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_attachments"
+    ],
+    "322": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_audit_log"
+    ],
+    "323": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_brands"
+    ],
+    "324": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_categories"
+    ],
+    "325": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_companies"
+    ],
+    "326": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_currencies"
+    ],
+    "327": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_document_lines"
+    ],
+    "328": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_document_types"
+    ],
+    "329": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_expense_categories"
+    ],
+    "330": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_inventory_transactions"
+    ],
+    "331": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_item_images"
+    ],
+    "332": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_ledger_entries"
+    ],
+    "333": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_payment_methods"
+    ],
+    "334": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_permissions"
+    ],
+    "335": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_role_permissions"
+    ],
+    "336": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_roles"
+    ],
+    "337": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_taxes"
+    ],
+    "338": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_unit_conversions"
+    ],
+    "339": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_units"
+    ],
+    "340": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_user_company_access"
+    ],
+    "341": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_user_roles"
+    ],
+    "342": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_user_warehouse_access"
+    ],
+    "343": [
+      "supabase_migrations_20260812000003_disable_rls_on_unscoped_tables_sql_users"
+    ],
+    "344": [
+      "supabase_migrations_20260812000004_users_backfilled_not_null"
+    ],
+    "345": [
+      "supabase_migrations_20260812000004_users_backfilled_not_null_sql_users"
+    ],
+    "346": [
+      "supabase_migrations_20260812000005_strange_ultimates"
+    ],
+    "347": [
+      "supabase_migrations_20260812000005_strange_ultimates_sql_users"
+    ],
+    "348": [
+      "supabase_migrations_20260812000006_jittery_kabuki"
+    ],
+    "349": [
+      "supabase_migrations_20260812000008_organic_phil_sheldon"
+    ],
+    "350": [
+      "supabase_migrations_20260812000008_organic_phil_sheldon_sql_items"
+    ],
+    "351": [
+      "supabase_migrations_20260812000009_magenta_professor_monster"
+    ],
+    "352": [
+      "supabase_migrations_20260812000009_magenta_professor_monster_sql_contacts"
+    ],
+    "353": [
+      "supabase_migrations_20260812000010_volatile_norman_osborn"
+    ],
+    "354": [
+      "supabase_migrations_20260812000010_volatile_norman_osborn_sql_items"
+    ],
+    "355": [
+      "supabase_migrations_20260812000011_real_vengeance_sql_audit_log"
+    ],
+    "356": [
+      "supabase_migrations_20260812000011_real_vengeance_sql_companies"
+    ],
+    "357": [
+      "supabase_migrations_20260812000011_real_vengeance_sql_contacts"
+    ],
+    "358": [
+      "supabase_migrations_20260812000011_real_vengeance_sql_ledger_entries"
+    ],
+    "359": [
+      "supabase_migrations_20260812000013_tearful_hawkeye"
+    ],
+    "360": [
+      "supabase_migrations_20260812000013_tearful_hawkeye_sql_units"
+    ],
+    "361": [
+      "supabase_migrations_20260812000014_young_mephistopheles"
+    ],
+    "362": [
+      "supabase_migrations_20260812000014_young_mephistopheles_sql_documents"
+    ],
+    "363": [
+      "supabase_migrations_20260812000016_swift_alex_wilder"
+    ],
+    "364": [
+      "supabase_migrations_20260812000017_blushing_shocker"
+    ],
+    "365": [
+      "supabase_migrations_20260812000018_backfill_document_number_ledger"
+    ],
+    "366": [
+      "supabase_migrations_20260812000019_backfill_inventory_transactions"
+    ],
+    "367": [
+      "supabase_migrations_20260812000021_many_omega_sentinel"
+    ],
+    "368": [
+      "supabase_migrations_20260812000021_many_omega_sentinel_sql_bank_accounts"
+    ],
+    "369": [
+      "supabase_migrations_20260812000023_jazzy_lizard"
+    ],
+    "370": [
+      "supabase_migrations_20260812000024_remarkable_swarm"
+    ],
+    "371": [
+      "supabase_migrations_20260812000025_high_blink"
+    ],
+    "372": [
+      "supabase_migrations_20260812000025_high_blink_sql_documents"
+    ],
+    "373": [
+      "supabase_migrations_20260812000025_high_blink_sql_expenses"
+    ],
+    "374": [
+      "supabase_migrations_20260812000026_flowery_tyrannus"
+    ],
+    "375": [
+      "supabase_migrations_20260812000029_dizzy_sage"
+    ],
+    "376": [
+      "supabase_migrations_20260812000029_dizzy_sage_sql_document_types"
+    ],
+    "377": [
+      "supabase_migrations_20260812000030_bizarre_silk_fever"
+    ],
+    "378": [
+      "supabase_migrations_20260812000030_bizarre_silk_fever_sql_brands"
+    ],
+    "379": [
+      "supabase_migrations_20260812000030_bizarre_silk_fever_sql_categories"
+    ],
+    "380": [
+      "supabase_migrations_20260812000030_bizarre_silk_fever_sql_currencies"
+    ],
+    "381": [
+      "supabase_migrations_20260812000030_bizarre_silk_fever_sql_unit_conversions"
+    ],
+    "382": [
+      "supabase_migrations_20260812000031_common_lila_cheney"
+    ],
+    "383": [
+      "supabase_migrations_20260812000031_common_lila_cheney_sql_brands"
+    ],
+    "384": [
+      "supabase_migrations_20260812000031_common_lila_cheney_sql_categories"
+    ],
+    "385": [
+      "supabase_migrations_20260812000031_common_lila_cheney_sql_currencies"
+    ],
+    "386": [
+      "supabase_migrations_20260812000031_common_lila_cheney_sql_locations"
+    ],
+    "387": [
+      "supabase_migrations_20260812000031_common_lila_cheney_sql_taxes"
+    ],
+    "388": [
+      "supabase_migrations_20260812000032_drop_unused_columns"
+    ],
+    "389": [
+      "supabase_migrations_20260812000032_drop_unused_columns_sql_bank_accounts"
+    ],
+    "390": [
+      "supabase_migrations_20260812000032_drop_unused_columns_sql_brands"
+    ],
+    "391": [
+      "supabase_migrations_20260812000032_drop_unused_columns_sql_companies"
+    ],
+    "392": [
+      "supabase_migrations_20260812000032_drop_unused_columns_sql_contacts"
+    ],
+    "393": [
+      "supabase_migrations_20260812000032_drop_unused_columns_sql_expense_categories"
+    ],
+    "394": [
+      "supabase_migrations_20260812000032_drop_unused_columns_sql_items"
+    ],
+    "395": [
+      "supabase_migrations_20260812000033_drop_more_columns"
+    ],
+    "396": [
+      "supabase_migrations_20260812000033_drop_more_columns_sql_contacts"
+    ],
+    "397": [
+      "supabase_migrations_20260812000033_drop_more_columns_sql_document_lines"
+    ],
+    "398": [
+      "supabase_migrations_20260812000033_drop_more_columns_sql_documents"
+    ],
+    "399": [
+      "supabase_migrations_20260812000033_drop_more_columns_sql_units"
+    ],
+    "400": [
+      "supabase_migrations_20260812000034_drop_currency_and_contact_type"
+    ],
+    "401": [
+      "supabase_migrations_20260812000034_drop_currency_and_contact_type_sql_contacts"
+    ],
+    "402": [
+      "supabase_migrations_20260812000034_drop_currency_and_contact_type_sql_currencies"
+    ],
+    "403": [
+      "supabase_migrations_20260812000034_drop_currency_and_contact_type_sql_documents"
+    ],
+    "404": [
+      "supabase_migrations_20260812000035_unit_symbol_nullable_category_sort"
+    ],
+    "405": [
+      "supabase_migrations_20260812000035_unit_symbol_nullable_category_sort_sql_categories"
+    ],
+    "406": [
+      "supabase_migrations_20260812000035_unit_symbol_nullable_category_sort_sql_units"
+    ],
+    "407": [
+      "supabase_migrations_20260812000036_shared_document_series"
+    ],
+    "408": [
+      "supabase_migrations_20260812000037_documents_reason"
+    ],
+    "409": [
+      "supabase_migrations_20260812000037_documents_reason_sql_documents"
+    ],
+    "410": [
+      "supabase_migrations_20260812000038_documents_paid_amount"
+    ],
+    "411": [
+      "supabase_migrations_20260812000038_documents_paid_amount_sql_documents"
+    ],
+    "412": [
+      "supabase_migrations_20260812000039_backfill_sales_receivables"
+    ],
+    "413": [
+      "supabase_migrations_20260812000040_backfill_movement_costs"
+    ],
+    "414": [
+      "supabase_migrations_20260812000041_expenses_drop_location"
+    ],
+    "415": [
+      "supabase_migrations_20260812000041_expenses_drop_location_sql_expenses"
+    ],
+    "416": [
+      "supabase_migrations_20260812000042_items_sku_per_company"
+    ],
+    "417": [
+      "supabase_migrations_20260812000042_items_sku_per_company_sql_items"
+    ],
+    "418": [
+      "supabase_migrations_20260812000043_documents_sale_type"
+    ],
+    "419": [
+      "supabase_migrations_20260812000043_documents_sale_type_sql_documents"
+    ],
+    "420": [
+      "supabase_migrations_20260812000045_audit_whatsapp_quotations_sql_document_lines"
+    ],
+    "421": [
+      "supabase_migrations_20260812000046_users_whatsapp_number"
+    ],
+    "422": [
+      "supabase_migrations_20260812000046_users_whatsapp_number_sql_users"
+    ],
+    "423": [
+      "supabase_migrations_20260812000047_whatsapp_handoff_status"
+    ],
+    "424": [
+      "supabase_migrations_20260812000048_backfill_payments_received"
+    ],
+    "425": [
+      "supabase_migrations_20260812000050_whole_rupee_unit_cost"
+    ],
+    "426": [
+      "supabase_migrations_20260812000051_user_display_prefs"
+    ],
+    "427": [
+      "supabase_migrations_20260812000051_user_display_prefs_sql_users"
+    ],
+    "428": [
+      "supabase_migrations_20260812000052_pretty_black_crow"
+    ],
+    "429": [
+      "supabase_migrations_20260812000053_ambitious_exodus"
+    ],
+    "430": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_audit_logs"
+    ],
+    "431": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_bank_accounts"
+    ],
+    "432": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_cash_accounts"
+    ],
+    "433": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_cheque_register"
+    ],
+    "434": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_contacts"
+    ],
+    "435": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_document_lines"
+    ],
+    "436": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_document_number_ledger"
+    ],
+    "437": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_document_types"
+    ],
+    "438": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_documents"
+    ],
+    "439": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_expense_categories"
+    ],
+    "440": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_expenses"
+    ],
+    "441": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_inventory_transactions"
+    ],
+    "442": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_item_images"
+    ],
+    "443": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_items"
+    ],
+    "444": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_ledger_entries"
+    ],
+    "445": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_settings"
+    ],
+    "446": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_unit_conversions"
+    ],
+    "447": [
+      "supabase_migrations_20260812000053_ambitious_exodus_sql_whatsapp_messages"
+    ]
+  },
+  "cohesion": {
+    "0": 0.06575091575091575,
+    "1": 0.09022907900888266,
+    "2": 0.12688172043010754,
+    "3": 0.07396870554765292,
+    "4": 0.09288824383164006,
+    "5": 0.07897793263646923,
+    "6": 0.07948717948717948,
+    "7": 0.13333333333333333,
+    "8": 0.21212121212121213,
+    "9": 0.2878787878787879,
+    "10": 0.09309309309309309,
+    "11": 0.07896575821104122,
+    "12": 0.11076923076923077,
+    "13": 0.13333333333333333,
+    "14": 0.19852941176470587,
+    "15": 0.06110102843315184,
+    "16": 0.1695906432748538,
+    "17": 0.0596078431372549,
+    "18": 0.13450292397660818,
+    "19": 0.19047619047619047,
+    "20": 0.07396870554765292,
+    "21": 0.08695652173913043,
+    "22": 0.05745814307458143,
+    "23": 0.08695652173913043,
+    "24": 0.12648221343873517,
+    "25": 0.14532019704433496,
+    "26": 0.10121951219512196,
+    "27": 0.06896551724137931,
+    "28": 0.0684931506849315,
+    "29": 0.05974025974025974,
+    "30": 0.6666666666666666,
+    "31": 0.16666666666666666,
+    "32": 0.3333333333333333,
+    "33": 0.1111111111111111,
+    "34": 0.15076923076923077,
+    "35": 0.22727272727272727,
+    "36": 0.05370101596516691,
+    "37": 0.14705882352941177,
+    "38": 0.3333333333333333,
+    "39": 0.6666666666666666,
+    "40": 0.6666666666666666,
+    "41": 0.2426470588235294,
+    "42": 0.11764705882352941,
+    "43": 0.12105263157894737,
+    "44": 0.17142857142857143,
+    "45": 0.25,
+    "46": 0.15384615384615385,
+    "47": 0.23976608187134502,
+    "48": 0.13970588235294118,
+    "49": 0.11764705882352941,
+    "50": 0.19696969696969696,
+    "51": 0.09462365591397849,
+    "52": 0.16666666666666666,
+    "53": 0.3333333333333333,
+    "54": 0.11764705882352941,
+    "55": 0.20833333333333334,
+    "56": 0.23636363636363636,
+    "57": 0.2222222222222222,
+    "58": 0.13333333333333333,
+    "59": 0.25,
+    "60": 0.14285714285714285,
+    "61": 0.15384615384615385,
+    "62": 0.15384615384615385,
+    "63": 0.3333333333333333,
+    "64": 0.2692307692307692,
+    "65": 0.5333333333333333,
+    "66": 0.4,
+    "67": 0.25757575757575757,
+    "68": 0.08695652173913043,
+    "69": 0.4,
+    "70": 1.0,
+    "71": 0.6,
+    "72": 0.21212121212121213,
+    "73": 1.0,
+    "74": 0.21212121212121213,
+    "75": 0.2857142857142857,
+    "76": 0.23636363636363636,
+    "77": 0.18181818181818182,
+    "78": 1.0,
+    "79": 1.0,
+    "80": 1.0,
+    "81": 1.0,
+    "82": 1.0,
+    "83": 0.18181818181818182,
+    "84": 0.18181818181818182,
+    "85": 0.18181818181818182,
+    "86": 0.2,
+    "87": 0.18181818181818182,
+    "88": 0.2,
+    "89": 0.2222222222222222,
+    "90": 0.2222222222222222,
+    "91": 0.42857142857142855,
+    "92": 0.25,
+    "93": 0.25,
+    "94": 0.25,
+    "95": 0.2857142857142857,
+    "96": 0.2857142857142857,
+    "97": 0.2857142857142857,
+    "98": 0.25,
+    "99": 0.3333333333333333,
+    "100": 0.3333333333333333,
+    "101": 0.2857142857142857,
+    "102": 0.3333333333333333,
+    "103": 0.3333333333333333,
+    "104": 0.3333333333333333,
+    "105": 0.3333333333333333,
+    "106": 0.3333333333333333,
+    "107": 0.3333333333333333,
+    "108": 1.0,
+    "109": 0.3333333333333333,
+    "110": 1.0,
+    "111": 1.0,
+    "112": 1.0,
+    "113": 1.0,
+    "114": 0.3333333333333333,
+    "115": 0.3333333333333333,
+    "116": 0.3333333333333333,
+    "117": 0.3333333333333333,
+    "118": 0.3333333333333333,
+    "119": 0.3333333333333333,
+    "120": 0.3333333333333333,
+    "121": 0.3333333333333333,
+    "122": 0.3333333333333333,
+    "123": 0.3333333333333333,
+    "124": 0.3333333333333333,
+    "125": 0.3333333333333333,
+    "126": 0.4,
+    "127": 0.4,
+    "128": 0.4,
+    "129": 0.4,
+    "130": 0.4,
+    "131": 0.4,
+    "132": 0.4,
+    "133": 0.6,
+    "134": 0.6,
+    "135": 0.4,
+    "136": 0.6666666666666666,
+    "137": 0.5,
+    "138": 0.5,
+    "139": 0.5,
+    "140": 0.5,
+    "141": 0.5,
+    "142": 0.6666666666666666,
+    "143": 0.6666666666666666,
+    "144": 0.6666666666666666,
+    "145": 0.6666666666666666,
+    "146": 0.6666666666666666,
+    "147": 0.6666666666666666,
+    "148": 1.0,
+    "149": 1.0,
+    "150": 1.0,
+    "151": 1.0,
+    "152": 1.0,
+    "153": 1.0,
+    "154": 0.4,
+    "155": 1.0,
+    "156": 1.0,
+    "157": 0.3333333333333333,
+    "158": 1.0,
+    "159": 1.0,
+    "160": 0.5,
+    "161": 0.4,
+    "162": 1.0,
+    "163": 1.0,
+    "164": 0.3333333333333333,
+    "165": 1.0,
+    "166": 1.0,
+    "167": 1.0,
+    "168": 1.0,
+    "169": 1.0,
+    "170": 1.0,
+    "171": 1.0,
+    "172": 1.0,
+    "173": 1.0,
+    "174": 1.0,
+    "175": 1.0,
+    "176": 1.0,
+    "177": 1.0,
+    "178": 1.0,
+    "179": 1.0,
+    "180": 1.0,
+    "181": 1.0,
+    "182": 1.0,
+    "183": 1.0,
+    "184": 1.0,
+    "185": 1.0,
+    "186": 1.0,
+    "187": 1.0,
+    "188": 1.0,
+    "189": 1.0,
+    "190": 1.0,
+    "191": 1.0,
+    "192": 1.0,
+    "193": 1.0,
+    "194": 1.0,
+    "195": 1.0,
+    "196": 1.0,
+    "197": 1.0,
+    "198": 1.0,
+    "199": 1.0,
+    "200": 1.0,
+    "201": 1.0,
+    "202": 1.0,
+    "203": 1.0,
+    "204": 1.0,
+    "205": 1.0,
+    "206": 1.0,
+    "207": 1.0,
+    "208": 1.0,
+    "209": 1.0,
+    "210": 1.0,
+    "211": 1.0,
+    "212": 1.0,
+    "213": 1.0,
+    "214": 1.0,
+    "215": 1.0,
+    "216": 1.0,
+    "217": 1.0,
+    "218": 1.0,
+    "219": 1.0,
+    "220": 1.0,
+    "221": 1.0,
+    "222": 1.0,
+    "223": 1.0,
+    "224": 1.0,
+    "225": 1.0,
+    "226": 1.0,
+    "227": 1.0,
+    "228": 1.0,
+    "229": 1.0,
+    "230": 1.0,
+    "231": 1.0,
+    "232": 1.0,
+    "233": 1.0,
+    "234": 1.0,
+    "235": 1.0,
+    "236": 1.0,
+    "237": 1.0,
+    "238": 1.0,
+    "239": 1.0,
+    "240": 1.0,
+    "241": 1.0,
+    "242": 1.0,
+    "243": 1.0,
+    "244": 1.0,
+    "245": 1.0,
+    "246": 1.0,
+    "247": 1.0,
+    "248": 1.0,
+    "249": 1.0,
+    "250": 1.0,
+    "251": 1.0,
+    "252": 1.0,
+    "253": 1.0,
+    "254": 1.0,
+    "255": 1.0,
+    "256": 1.0,
+    "257": 1.0,
+    "258": 1.0,
+    "259": 1.0,
+    "260": 1.0,
+    "261": 1.0,
+    "262": 1.0,
+    "263": 1.0,
+    "264": 1.0,
+    "265": 1.0,
+    "266": 1.0,
+    "267": 1.0,
+    "268": 1.0,
+    "269": 1.0,
+    "270": 1.0,
+    "271": 1.0,
+    "272": 1.0,
+    "273": 1.0,
+    "274": 1.0,
+    "275": 1.0,
+    "276": 1.0,
+    "277": 1.0,
+    "278": 1.0,
+    "279": 1.0,
+    "280": 1.0,
+    "281": 1.0,
+    "282": 1.0,
+    "283": 1.0,
+    "284": 1.0,
+    "285": 1.0,
+    "286": 1.0,
+    "287": 1.0,
+    "288": 1.0,
+    "289": 1.0,
+    "290": 1.0,
+    "291": 1.0,
+    "292": 1.0,
+    "293": 1.0,
+    "294": 1.0,
+    "295": 1.0,
+    "296": 1.0,
+    "297": 1.0,
+    "298": 1.0,
+    "299": 1.0,
+    "300": 1.0,
+    "301": 1.0,
+    "302": 1.0,
+    "303": 1.0,
+    "304": 1.0,
+    "305": 1.0,
+    "306": 1.0,
+    "307": 1.0,
+    "308": 1.0,
+    "309": 1.0,
+    "310": 1.0,
+    "311": 1.0,
+    "312": 1.0,
+    "313": 1.0,
+    "314": 1.0,
+    "315": 1.0,
+    "316": 1.0,
+    "317": 1.0,
+    "318": 1.0,
+    "319": 1.0,
+    "320": 1.0,
+    "321": 1.0,
+    "322": 1.0,
+    "323": 1.0,
+    "324": 1.0,
+    "325": 1.0,
+    "326": 1.0,
+    "327": 1.0,
+    "328": 1.0,
+    "329": 1.0,
+    "330": 1.0,
+    "331": 1.0,
+    "332": 1.0,
+    "333": 1.0,
+    "334": 1.0,
+    "335": 1.0,
+    "336": 1.0,
+    "337": 1.0,
+    "338": 1.0,
+    "339": 1.0,
+    "340": 1.0,
+    "341": 1.0,
+    "342": 1.0,
+    "343": 1.0,
+    "344": 1.0,
+    "345": 1.0,
+    "346": 1.0,
+    "347": 1.0,
+    "348": 1.0,
+    "349": 1.0,
+    "350": 1.0,
+    "351": 1.0,
+    "352": 1.0,
+    "353": 1.0,
+    "354": 1.0,
+    "355": 1.0,
+    "356": 1.0,
+    "357": 1.0,
+    "358": 1.0,
+    "359": 1.0,
+    "360": 1.0,
+    "361": 1.0,
+    "362": 1.0,
+    "363": 1.0,
+    "364": 1.0,
+    "365": 1.0,
+    "366": 1.0,
+    "367": 1.0,
+    "368": 1.0,
+    "369": 1.0,
+    "370": 1.0,
+    "371": 1.0,
+    "372": 1.0,
+    "373": 1.0,
+    "374": 1.0,
+    "375": 1.0,
+    "376": 1.0,
+    "377": 1.0,
+    "378": 1.0,
+    "379": 1.0,
+    "380": 1.0,
+    "381": 1.0,
+    "382": 1.0,
+    "383": 1.0,
+    "384": 1.0,
+    "385": 1.0,
+    "386": 1.0,
+    "387": 1.0,
+    "388": 1.0,
+    "389": 1.0,
+    "390": 1.0,
+    "391": 1.0,
+    "392": 1.0,
+    "393": 1.0,
+    "394": 1.0,
+    "395": 1.0,
+    "396": 1.0,
+    "397": 1.0,
+    "398": 1.0,
+    "399": 1.0,
+    "400": 1.0,
+    "401": 1.0,
+    "402": 1.0,
+    "403": 1.0,
+    "404": 1.0,
+    "405": 1.0,
+    "406": 1.0,
+    "407": 1.0,
+    "408": 1.0,
+    "409": 1.0,
+    "410": 1.0,
+    "411": 1.0,
+    "412": 1.0,
+    "413": 1.0,
+    "414": 1.0,
+    "415": 1.0,
+    "416": 1.0,
+    "417": 1.0,
+    "418": 1.0,
+    "419": 1.0,
+    "420": 1.0,
+    "421": 1.0,
+    "422": 1.0,
+    "423": 1.0,
+    "424": 1.0,
+    "425": 1.0,
+    "426": 1.0,
+    "427": 1.0,
+    "428": 1.0,
+    "429": 1.0,
+    "430": 1.0,
+    "431": 1.0,
+    "432": 1.0,
+    "433": 1.0,
+    "434": 1.0,
+    "435": 1.0,
+    "436": 1.0,
+    "437": 1.0,
+    "438": 1.0,
+    "439": 1.0,
+    "440": 1.0,
+    "441": 1.0,
+    "442": 1.0,
+    "443": 1.0,
+    "444": 1.0,
+    "445": 1.0,
+    "446": 1.0,
+    "447": 1.0
+  },
+  "gods": [
+    {
+      "id": "lib_auth_session_getsession",
+      "label": "getSession()",
+      "degree": 193
+    },
+    {
+      "id": "lib_auth_permissions_requirepermission",
+      "label": "requirePermission()",
+      "degree": 172
+    },
+    {
+      "id": "lib_actions_audit_recordaudit",
+      "label": "recordAudit()",
+      "degree": 104
+    },
+    {
+      "id": "lib_actions_guard_guard",
+      "label": "guard()",
+      "degree": 89
+    },
+    {
+      "id": "lib_queries_lookups_invalidatelookups",
+      "label": "invalidateLookups()",
+      "degree": 72
+    },
+    {
+      "id": "lib_format_money",
+      "label": "money()",
+      "degree": 62
+    },
+    {
+      "id": "lib_auth_scope_companyinscope",
+      "label": "companyInScope()",
+      "degree": 58
+    },
+    {
+      "id": "lib_format_formatdate",
+      "label": "formatDate()",
+      "degree": 52
+    },
+    {
+      "id": "lib_db_index_db",
+      "label": "db",
+      "degree": 46
+    },
+    {
+      "id": "lib_queries_lookups_getcompanies",
+      "label": "getCompanies()",
+      "degree": 43
+    }
+  ],
+  "surprises": [
+    {
+      "source": "No Statement Loops Inside a Transaction",
+      "target": "number_sequences Atomic Allocation",
+      "source_files": [
+        "AGENTS.md",
+        "docs/db/Royal_Hardware_ERP_SQL.md"
+      ],
+      "confidence": "INFERRED",
+      "relation": "semantically_similar_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities; semantically similar concepts with no structural link"
+    },
+    {
+      "source": "DeleteQuotationButton()",
+      "target": "deleteQuotation()",
+      "source_files": [
+        "components/modules/QuotationForm.tsx",
+        "lib/actions/quotations.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "indirect_call",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities; peripheral node `DeleteQuotationButton()` unexpectedly reaches hub `deleteQuotation()`"
+    },
+    {
+      "source": "PermissionError → PERMISSION_DENIED",
+      "target": "guard() Action Wrapper",
+      "source_files": [
+        "docs/phase-8-authentication.md",
+        "AGENTS.md"
+      ],
+      "confidence": "INFERRED",
+      "relation": "semantically_similar_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; semantically similar concepts with no structural link"
+    },
+    {
+      "source": "No Invented Data",
+      "target": "Derived Stock on Hand",
+      "source_files": [
+        "AGENTS.md",
+        "docs/db/Royal_Hardware_ERP_SQL.md"
+      ],
+      "confidence": "INFERRED",
+      "relation": "semantically_similar_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; semantically similar concepts with no structural link"
+    },
+    {
+      "source": "DeleteBankAccountButton()",
+      "target": "deleteBankAccount()",
+      "source_files": [
+        "components/modules/AccountForms.tsx",
+        "lib/actions/accounts.ts"
+      ],
+      "confidence": "INFERRED",
+      "relation": "indirect_call",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `getSession()` connect `getSession` to `lookups.ts`, `purchases.ts`, `form-styles.ts`, `guard.ts`, `PaymentManager.tsx`, `warehouses/page.tsx`, `SnapshotExport.tsx`, `InvoiceManager.tsx`, `CategoryManager.tsx`, `actions/reports.ts`, `qty`, `StockPurchaseManager.tsx`, `actions/products.ts`, `inter-company.ts`, `getCompanies`, `errorTextClass`, `brands/page.tsx`, `table.ts`, `companies/page.tsx`, `taxes/page.tsx`, `actions/search.ts`, `sales.ts`, `companyInScope`, `(dashboard)/layout.tsx`, `settings/page.tsx`, `actions.ts`?",
+      "why": "High betweenness centrality (0.038) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `requirePermission()` connect `getSession` to `lookups.ts`, `purchases.ts`, `form-styles.ts`, `guard.ts`, `PaymentManager.tsx`, `warehouses/page.tsx`, `SnapshotExport.tsx`, `InvoiceManager.tsx`, `CategoryManager.tsx`, `actions/reports.ts`, `qty`, `StockPurchaseManager.tsx`, `actions/products.ts`, `inter-company.ts`, `getCompanies`, `errorTextClass`, `brands/page.tsx`, `table.ts`, `companies/page.tsx`, `taxes/page.tsx`, `sales.ts`, `companyInScope`, `settings/page.tsx`?",
+      "why": "High betweenness centrality (0.022) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `money()` connect `format.ts` to `ConvertQuotationDialog.tsx`, `form-styles.ts`, `PaymentManager.tsx`, `InvoiceManager.tsx`, `StockPurchaseForm.tsx`, `SaleForm.tsx`, `actions/reports.ts`, `qty`, `StockPurchaseManager.tsx`, `actions/products.ts`, `LedgerManager.tsx`?",
+      "why": "High betweenness centrality (0.010) - this node is a cross-community bridge."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `dynamic`, `ACTIONS`, `dynamic` to the rest of the system?",
+      "why": "706 weakly-connected nodes found - possible documentation gaps or missing edges."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `lookups.ts` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.06575091575091575 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `getSession` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.09022907900888266 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `purchases.ts` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.12688172043010754 - nodes in this community are weakly interconnected."
+    }
+  ]
+}

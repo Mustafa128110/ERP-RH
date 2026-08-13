@@ -19,8 +19,11 @@ Supabase CLI project: its schema history and any edge functions.
 
 - `config.toml` — Supabase CLI project config (project id, edge function
   settings).
-- `migrations/` — the full SQL schema history (53 migrations), copied from the
-  drizzle-generated history in `drizzle/`. **`drizzle/` remains the source of
+- `migrations/` — the full SQL schema history (54 migrations), copied from the
+  drizzle-generated history in `drizzle/`. Migration `0053` removed the inert
+  RLS machinery (`app_user` role + policies; the app scopes per company in code
+  via `lib/auth/scope.ts`), so the schema has no row-level security — do not
+  re-add `pgRole`/`pgPolicy` entries. **`drizzle/` remains the source of
   truth for development** (`npm run db:generate` / `db:migrate`); when you
   regenerate there, copy the new migration here too, or run
   `supabase db pull` to diff.
@@ -61,7 +64,8 @@ Supabase-specific ones are:
 - `NEXT_PUBLIC_SUPABASE_URL` — `https://<ref>.supabase.co`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public anon key (safe for the browser)
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (**server only**, never exposed)
-- `DATABASE_URL_DIRECT` / `DATABASE_URL` — Postgres connection strings
+- `DATABASE_URL_DIRECT` — Postgres connection string (the only one `.env.example`
+  lists; `lib/db/index.ts` also accepts `DATABASE_URL` as a fallback alias)
 
 For edge function secrets: `supabase secrets set KEY=value --env production`.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createStockPurchase, updateStockPurchase, deleteStockPurchase } from "@/lib/actions/purchases";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
@@ -12,7 +12,8 @@ import { landedUnitCost, money, perUnitShare, resolveAdjustment, round1, todayIS
 
 import { fieldClass, labelClass, labelTextClass, errorTextClass } from "@/components/ui/form-styles";
 import { inCompany } from "@/lib/contact-scope";
-import { clearDraft, draftSnapshot, noDraft, saveDraft, subscribeDraft } from "@/lib/draft";
+import { clearDraft } from "@/lib/draft";
+import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input filling a table cell; the collapsed cell border is the line.
@@ -153,38 +154,33 @@ export function StockPurchaseCreateForm({
   // --- Draft ----------------------------------------------------------------
   // The same protection the sale form has, for the same reason: a purchase is a
   // lot of typing, and the thing that loses it is a render that throws after the
-  // save (a database blip on the reload), not the save itself. See lib/draft.ts.
+  // save (a database blip on the reload), not the save itself. See lib/draft.ts
+  // and components/ui/useDraft.tsx — the hook owns the store read, the
+  // offer/restore/discard logic and the save-on-change effect.
   //
   // New purchases only — restoring a stale copy over a saved one would overwrite
   // whatever someone else had corrected.
   const draftState = { lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxTotal, shippingTotal, isPaid, settlementType };
   type PurchaseDraft = typeof draftState;
 
-  const savedDraft = useSyncExternalStore(subscribeDraft, () => draftSnapshot<PurchaseDraft>(PURCHASE_DRAFT_KEY), noDraft);
-  const [dismissed, setDismissed] = useState(false);
-  const offerDraft = !isEdit && !dismissed && !!savedDraft?.lines?.some((l) => l.itemText?.trim() || l.quantity?.trim());
-
-  function restoreDraft() {
-    if (!savedDraft) return;
-    setLines(savedDraft.lines);
-    setCompanyId(savedDraft.companyId);
-    setContactId(savedDraft.contactId);
-    setSupplierText(savedDraft.supplierText);
-    setLocationId(savedDraft.locationId);
-    setLocationText(savedDraft.locationText);
-    setDiscountTotal(savedDraft.discountTotal);
-    setTaxTotal(savedDraft.taxTotal);
-    setShippingTotal(savedDraft.shippingTotal);
-    setIsPaid(savedDraft.isPaid);
-    setSettlementType(savedDraft.settlementType);
-    setDismissed(true);
-  }
-
-  useEffect(() => {
-    if (isEdit) return;
-    saveDraft(PURCHASE_DRAFT_KEY, draftState);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxTotal, shippingTotal, isPaid, settlementType, isEdit]);
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(PURCHASE_DRAFT_KEY, {
+    state: draftState,
+    enabled: !isEdit,
+    hasContent: (d) => d.lines.some((l) => l.itemText?.trim() || l.quantity?.trim()),
+    apply: (d) => {
+      setLines(d.lines);
+      setCompanyId(d.companyId);
+      setContactId(d.contactId);
+      setSupplierText(d.supplierText);
+      setLocationId(d.locationId);
+      setLocationText(d.locationText);
+      setDiscountTotal(d.discountTotal);
+      setTaxTotal(d.taxTotal);
+      setShippingTotal(d.shippingTotal);
+      setIsPaid(d.isPaid);
+      setSettlementType(d.settlementType);
+    },
+  });
 
   // A delivery usually arrives as a stack of invoices, and closing the popup
   // between them costs a click, a reopen and the scroll back down to the grid.
@@ -345,26 +341,7 @@ export function StockPurchaseCreateForm({
       {/* An unfinished purchase from before — a crash, a closed tab, a reload.
           Offered, never applied on its own: silently refilling the grid would
           have someone post a delivery they thought they had typed fresh. */}
-      {offerDraft && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-brass-600 bg-brass-100 px-3 py-2 text-sm text-ink">
-          <span>You have an unsaved purchase from earlier.</span>
-          <span className="flex items-center gap-3">
-            <button type="button" onClick={restoreDraft} className="font-semibold text-navy-800 hover:underline">
-              Restore it
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                clearDraft(PURCHASE_DRAFT_KEY);
-                setDismissed(true);
-              }}
-              className="text-steel hover:underline"
-            >
-              Discard
-            </button>
-          </span>
-        </div>
-      )}
+      {offerDraft && <DraftBanner noun="purchase" onRestore={restoreDraft} onDiscard={discardDraft} />}
 
       {/* --- documents header. Clear sits on the section heading's own line
           rather than in a strip of its own above it. --- */}

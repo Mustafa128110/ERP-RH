@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { roles, permissions, rolePermissions, userRoles } from "@/lib/db/schema";
@@ -207,14 +207,4 @@ export async function deleteRole(_prevState: ActionResult | undefined, formData:
   });
 }
 
-// Small helper for the "reassign first" story above — not used yet by the UI,
-// but keeps the delete guard's promise checkable.
-export async function roleUserCount(roleIds: string[]): Promise<Map<string, number>> {
-  if (roleIds.length === 0) return new Map();
-  const rows = await db
-    .select({ roleId: userRoles.roleId, count: sql<number>`count(*)::int` })
-    .from(userRoles)
-    .where(inArray(userRoles.roleId, roleIds))
-    .groupBy(userRoles.roleId);
-  return new Map(rows.map((r) => [r.roleId, r.count]));
-}
+
