@@ -3,6 +3,7 @@ import { Fraunces, Inter } from "next/font/google";
 import { getSession } from "@/lib/auth/session";
 import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
 import { ServiceWorkerRegister } from "@/components/layout/ServiceWorkerRegister";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 // Brand pairing (docs/OS/02-brand/typography.md): Fraunces 600 for
@@ -88,6 +89,12 @@ export default async function RootLayout({
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         {children}
         <ServiceWorkerRegister />
+        {/*
+          Web-vitals beacon to Vercel Speed Insights. Renders nothing; injects
+          its script after hydration (a client component), so it costs nothing
+          on the first paint. Dev builds don't send data.
+        */}
+        <SpeedInsights />
       </body>
     </html>
   );
