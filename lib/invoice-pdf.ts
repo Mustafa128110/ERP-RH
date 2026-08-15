@@ -1,5 +1,9 @@
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+// jspdf and jspdf-autotable are deliberately NOT imported at module scope: they
+// are ~400KB between them, and this file is imported by the invoice list and
+// ledger pages (for the letterhead constant and the row download buttons).
+// Both load on the first click that actually draws a file — the invoices page
+// should not pay for the printer on the way in.
+import type { jsPDF } from "jspdf";
 import { formatDate, money, qty } from "@/lib/format";
 
 // What an invoice looks like once it's for reading rather than editing: names,
@@ -77,7 +81,10 @@ export function invoiceFileName(invoice: Invoice, extension = "pdf") {
   return `${safe || "invoice"}.${extension}`;
 }
 
-export function buildInvoicePdf(invoice: Invoice): jsPDF {
+export async function buildInvoicePdf(invoice: Invoice): Promise<jsPDF> {
+  // The two heavy dependencies, loaded the moment a file is actually asked for.
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const right = pageWidth - MARGIN;
@@ -215,6 +222,6 @@ export function buildInvoicePdf(invoice: Invoice): jsPDF {
 }
 
 // One click, no dialog: this writes the file and returns.
-export function downloadInvoicePdf(invoice: Invoice) {
-  buildInvoicePdf(invoice).save(invoiceFileName(invoice));
+export async function downloadInvoicePdf(invoice: Invoice) {
+  (await buildInvoicePdf(invoice)).save(invoiceFileName(invoice));
 }

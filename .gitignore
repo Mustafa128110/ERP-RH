@@ -48,3 +48,6 @@ supabase/.supabase/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Pre-change DB exports (recovery artifacts, contain business data)
+db-export/

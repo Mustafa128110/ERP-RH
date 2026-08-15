@@ -1,5 +1,3 @@
-import { jsPDF } from "jspdf";
-
 // Turning something already on the page into a file people can send.
 //
 // The alternative is drawing every document twice — once for the screen and once
@@ -56,6 +54,10 @@ export async function downloadNodeAsPng(node: HTMLElement, fileName: string) {
 // scratch canvas because jsPDF places whole images and cannot crop.
 export async function downloadNodeAsPdf(node: HTMLElement, fileName: string) {
   const canvas = await rasterize(node);
+  // jsPDF is the other heavy dependency (with html2canvas it makes up the
+  // ~400KB print chunk) — loaded on the click that asks for a file, same as
+  // html2canvas above.
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const margin = 10;
   const pageWidth = doc.internal.pageSize.getWidth() - margin * 2;
