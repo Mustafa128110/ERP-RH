@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describeDbError, guard } from "./guard";
 import { PermissionError } from "../auth/permissions";
+import { DuplicateOperationError, DUPLICATE_OPERATION_MESSAGE } from "./operation-id";
 
 // The rule this file exists to hold: a failing write returns a sentence, it
 // never throws. No database needed:
@@ -78,6 +79,13 @@ async function asyncChecks() {
     throw Object.assign(new Error("dup"), { code: "23505", constraint_name: "brands_name_unique" });
   });
   assert.deepEqual(failed, { error: "The name already exists. Nothing was saved." });
+
+  // --- A replayed operation id is refused with its own message, not the ------
+  // --- fallback: the first save landed even though the user never saw it. -----
+  const replayed = await guard(FALLBACK, async () => {
+    throw new DuplicateOperationError();
+  });
+  assert.deepEqual(replayed, { error: DUPLICATE_OPERATION_MESSAGE });
 
   // --- redirect()/notFound() work by throwing and must not be swallowed ------
   await assert.rejects(

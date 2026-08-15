@@ -656,6 +656,21 @@ export const whatsappMessages = pgTable(
     index("idx_whatsapp_provider_id").on(table.providerMessageId),
   ],  );
 
+// --- Duplicate-submission protection ---
+
+// One row per save attempt, keyed by an id the client form generates once per
+// open form. The row is claimed inside the same transaction that writes the
+// record it guards, so a retry of an already-committed save finds the key
+// already taken and is refused instead of posting the document twice; a retry
+// after a *failed* save finds nothing (the transaction rolled the claim back
+// with the rest) and goes ahead. Old keys are pruned by the claiming statement
+// itself, so the table never grows past a day of saves (lib/actions/
+// operation-id.ts).
+export const submittedOperations = pgTable("submitted_operations", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- Audit trail ---
 
 // Who changed what, when, and why. Deliberately not a copy of the row before and

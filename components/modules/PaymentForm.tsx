@@ -124,6 +124,11 @@ export function PaymentBatchAddDialog({
   // from every row — and the row that opened the dialog gets the first one
   // selected, which is what it was opened for.
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
+  // One operation id per dialog session: every submit of this batch posts under
+  // the same id, so a response lost after a successful save can't post the batch
+  // a second time when the user clicks Save again. Fresh mount = fresh id = a
+  // genuinely new batch.
+  const [operationId] = useState(() => crypto.randomUUID());
   // An account belongs to one company (or to none, which means all of them), and
   // money moves within one set of books — so a row offers that company's
   // accounts and the global ones, nothing else.
@@ -193,7 +198,7 @@ export function PaymentBatchAddDialog({
           // One date at the top of the dialog, saved on every row.
           paymentDate: batchDate,
         }));
-        return createPaymentsBatch(values);
+        return createPaymentsBatch(values, operationId);
       }}
       renderRow={(row, i, update) => (
         <>

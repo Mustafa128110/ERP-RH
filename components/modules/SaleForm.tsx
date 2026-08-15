@@ -300,6 +300,9 @@ export function SaleFormPage({
   //
   // New sales are entered back to back, so a created one clears the form and
   // stays put. A saved edit is finished business — it goes back to the list.
+  // One id per open form: sent with every submit, claimed by the server inside
+  // the same transaction as the sale, so a replayed submit can't post twice.
+  const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: SaleActionState, formData: FormData) => {
     const result: SaleActionState = isEdit ? await updateSale(saleId!, prev, formData) : await createSale(prev, formData);
     if (result?.success) {
@@ -425,6 +428,7 @@ export function SaleFormPage({
   return (
     <>
       <form ref={formRef} action={action} className="flex flex-col gap-5">
+        <input type="hidden" name="operationId" value={operationId} />
         <input
           type="hidden"
           name="linesJson"

@@ -87,6 +87,12 @@ export function ExpenseBatchAddDialog({
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
   const settlementList = (t: SettlementType) => (t === "account" ? bankAccountOptions : t === "cash" ? cashAccountOptions : chequeOpts);
 
+  // One operation id per dialog session: every submit of this batch posts under
+  // the same id, so a response lost after a successful save can't post the batch
+  // a second time when the user clicks Save again. Fresh mount = fresh id = a
+  // genuinely new batch.
+  const [operationId] = useState(() => crypto.randomUUID());
+
   // Expenses are almost always entered the day they happen, so one date at the
   // top covers the whole batch — there is no per-row date to retype. en-CA is
   // the YYYY-MM-DD the date input wants, in local time — toISOString() would
@@ -146,7 +152,7 @@ export function ExpenseBatchAddDialog({
           expenseDate: batchDate,
           notes: r.notes.trim() || null,
         }));
-        return createExpensesBatch(values);
+        return createExpensesBatch(values, operationId);
       }}
       renderRow={(row, i, update) => (
         <>

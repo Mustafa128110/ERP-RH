@@ -21,6 +21,7 @@ import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-n
 import { resolveContactId, resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
 import { describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // One company selling to the other was two jobs done by hand: a sale in the
 // seller and a matching purchase in the buyer, typed twice, with two chances to
@@ -370,10 +371,13 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
 
   const total = linesTotal(header.lines);
   const reason = `${IC_REASON} ${crypto.randomUUID()}`;
+  const operationId = readOperationId(formData);
 
   let result: { saleId: string; saleNumber: string; purchaseId: string; purchaseNumber: string };
   try {
     result = await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const saleNumber = await nextDocumentNumber(salesType.series, tx);
       const purchaseNumber = await nextDocumentNumber(purchaseType.series, tx);
 
@@ -430,6 +434,7 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
       return { saleId: sale.id, saleNumber, purchaseId: purchase.id, purchaseNumber };
     });
   } catch (e) {
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — a document number is already in use for one of these companies.") };
   }
 

@@ -24,6 +24,7 @@ import { averageCost } from "@/lib/queries/stock-cost";
 import { UNASSIGNED_LABEL, locationFormValue, locationIdOrNull } from "@/lib/location-constants";
 import { describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // A transfer is stored as two document_lines per item: one at the source location
 // carrying the -1 inventory movement, one at the destination carrying the +1.
@@ -296,6 +297,7 @@ export async function createStockTransfer(
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
+  const operationId = readOperationId(formData);
 
   const documentType = await getOrCreateTransferDocumentType(header.companyId);
 
@@ -303,6 +305,8 @@ export async function createStockTransfer(
   let createdNumber = "";
   try {
     createdId = await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const number = await nextDocumentNumber(documentType.series, tx);
       createdNumber = number;
       const [doc] = await tx
@@ -325,6 +329,7 @@ export async function createStockTransfer(
       return doc.id;
     });
   } catch (e) {
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 

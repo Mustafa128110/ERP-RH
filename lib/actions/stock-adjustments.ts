@@ -25,6 +25,7 @@ import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-cons
 import { UNASSIGNED_LABEL, locationIdOrNull } from "@/lib/location-constants";
 import { describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // An adjustment is the one document that writes stock without a counterparty: no
 // customer, no supplier, no second location. One line per item at the adjusted
@@ -182,6 +183,7 @@ export async function createStockAdjustment(
   const session = await getSession();
   requirePermission(session, "stock_adjustments", "create");
 
+  const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   const locationRaw = String(formData.get("locationId") ?? "");
@@ -204,6 +206,8 @@ export async function createStockAdjustment(
   let createdNumber = "";
   try {
     createdId = await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const number = await nextDocumentNumber(documentType.series, tx);
       createdNumber = number;
       const [doc] = await tx
@@ -269,6 +273,7 @@ export async function createStockAdjustment(
       return doc.id;
     });
   } catch (e) {
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 

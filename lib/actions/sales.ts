@@ -28,6 +28,7 @@ import { DEFAULT_SALE_TYPE, isSaleType } from "@/lib/sale-constants";
 import { round1 } from "@/lib/format";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 export interface SaleItemRow {
   itemName: string;
@@ -437,11 +438,16 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
 
   const documentType = await getOrCreateSalesDocumentType(companyId);
   const shopLocationId = await getShopLocationId();
+  // Minted by the form when it opened; claimed inside the transaction below so a
+  // replayed submit of a committed sale is refused instead of posted twice.
+  const operationId = readOperationId(formData);
 
   let createdId: string;
   let createdNumber = "";
   try {
     createdId = await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       // Allocated inside the transaction so a failure gives the number back.
       const number = await nextDocumentNumber(documentType.series, tx);
       createdNumber = number;
@@ -516,6 +522,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
       return doc.id;
     });
   } catch (e) {
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 

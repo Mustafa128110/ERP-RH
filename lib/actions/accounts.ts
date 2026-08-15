@@ -13,6 +13,7 @@ import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/ac
 import { bankAccountLabel } from "@/lib/account-label";
 import { recordAudit } from "@/lib/actions/audit";
 import { resolveContactIds } from "@/lib/actions/resolve-refs";
+import { claimOperation, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // Every account and cheque write goes through guard(): the hand-written messages
 // below are what a duplicate key should say, and guard adds the cases nobody can
@@ -285,12 +286,16 @@ export interface ChequeBatchRow {
   issuedByCompany: boolean;
 }
 
-export async function createChequesBatch(rows: ChequeBatchRow[]): Promise<CreateResult<{ id: string; name: string }>> {
+export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: string): Promise<CreateResult<{ id: string; name: string }>> {
   return guard(
     "Couldn't save the cheques.",
     async () => {
       const session = await getSession();
       requirePermission(session, "cheques", "create");
+
+      // Minted by the cheque dialog when it opened; a replayed submit of a
+      // committed batch is refused rather than registering every cheque twice.
+      const opId = operationId || crypto.randomUUID();
 
       const valid = rows.filter((r) => r.companyId && r.chequeNumber.trim() && r.chequeDate && r.chequeType && Number(r.amount) > 0);
       if (valid.length === 0) {
@@ -302,6 +307,8 @@ export async function createChequesBatch(rows: ChequeBatchRow[]): Promise<Create
       // multi-row INSERT. A cheque that fails on its number rolls back the
       // contacts its batch would have minted.
       const inserted = await db.transaction(async (tx) => {
+        // First statement: claim the operation id, or abort as a duplicate.
+        if (!(await claimOperation(tx, opId))) throw new DuplicateOperationError();
         const contactIds = await resolveContactIds(tx, valid);
         return tx
           .insert(chequeRegister)

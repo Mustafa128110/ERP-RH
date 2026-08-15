@@ -601,6 +601,10 @@ export function ChequeBatchAddDialog({
   // the thing being batch-created here, not a quick-add target.
   const [bankOpts, setBankOpts] = useState(bankAccountOptions);
   const contactOpts = contactOptions;
+  // One operation id per dialog session: every submit of this batch posts under
+  // the same id, so a response lost after a successful save can't register the
+  // cheques a second time when the user clicks Save again.
+  const [operationId] = useState(() => crypto.randomUUID());
 
   const emptyRow = (): ChequeBatchRowLocal => ({
     companyId: defaultCompanyId,
@@ -645,7 +649,7 @@ export function ChequeBatchAddDialog({
           status: r.status as (typeof CHEQUE_STATUSES)[number],
           issuedByCompany: r.issuedByCompany,
         }));
-        return createChequesBatch(values);
+        return createChequesBatch(values, operationId);
       }}
       renderRow={(row, i, update) => (
         <>

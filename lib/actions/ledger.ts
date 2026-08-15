@@ -11,6 +11,7 @@ import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId } from "@/lib/actions/resolve-refs";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { recordAudit } from "@/lib/actions/audit";
 
 export interface ContactPayment {
@@ -171,15 +172,18 @@ function readEntryForm(formData: FormData) {
 // difference can hand it straight over without re-deciding which column it is.
 //
 // Shared by "+ Add Entry" and by saving a contact's balance.
-async function writeJournalEntry(input: {
-  companyId: string;
-  documentDate: string;
-  contactId: string | null;
-  contactName: string | null;
-  signedAmount: number;
-  note: string;
-  userId: string;
-}) {
+async function writeJournalEntry(
+  input: {
+    companyId: string;
+    documentDate: string;
+    contactId: string | null;
+    contactName: string | null;
+    signedAmount: number;
+    note: string;
+    userId: string;
+  },
+  operationId: string,
+) {
   const documentType = await ensureDocumentType({
     companyId: input.companyId,
     code: "JOURNAL_ENTRY",
@@ -191,6 +195,8 @@ async function writeJournalEntry(input: {
   const magnitude = Math.abs(input.signedAmount).toFixed(2);
 
   await db.transaction(async (tx) => {
+    // First statement: claim the operation id, or abort as a duplicate.
+    if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
     const number = await nextDocumentNumber(documentType.series, tx);
     const resolvedContactId = await resolveContactId(tx, input.companyId, input.contactId, input.contactName);
     const [doc] = await tx
@@ -234,15 +240,18 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
       if (!contactId && !contactName) return { error: "Pick a contact or type a new name." };
       if (error) return { error };
 
-      await writeJournalEntry({
-        companyId,
-        documentDate,
-        contactId: contactId || null,
-        contactName: contactName || null,
-        signedAmount: direction === "we_owe" ? amount : -amount,
-        note,
-        userId: session.userId,
-      });
+      await writeJournalEntry(
+        {
+          companyId,
+          documentDate,
+          contactId: contactId || null,
+          contactName: contactName || null,
+          signedAmount: direction === "we_owe" ? amount : -amount,
+          note,
+          userId: session.userId,
+        },
+        readOperationId(formData),
+      );
 
       // A typed-in contact is a new contact.
       invalidateLookups(CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
@@ -297,15 +306,18 @@ export async function setContactBalance(
       // to post — and a zero-value ledger row would fail the table's CHECK anyway.
       if (delta === 0) return { success: true };
 
-      await writeJournalEntry({
-        companyId,
-        documentDate,
-        contactId,
-        contactName: null,
-        signedAmount: delta,
-        note: note || "Balance correction",
-        userId: session.userId,
-      });
+      await writeJournalEntry(
+        {
+          companyId,
+          documentDate,
+          contactId,
+          contactName: null,
+          signedAmount: delta,
+          note: note || "Balance correction",
+          userId: session.userId,
+        },
+        readOperationId(formData),
+      );
 
       invalidateLookups(CACHE.documentTypes, CACHE.cheques);
       revalidatePath("/ledger");

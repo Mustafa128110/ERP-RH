@@ -227,6 +227,9 @@ function LedgerEntryForm({
   onClose: () => void;
 }) {
   const isEdit = !!balance;
+  // One id per open form: sent with every submit, claimed by the server inside
+  // the same transaction as the entry, so a replayed submit can't post twice.
+  const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(
     isEdit ? setContactBalance.bind(null, balance.companyId, balance.contactId) : createLedgerEntry,
     undefined,
@@ -248,6 +251,7 @@ function LedgerEntryForm({
 
   return (
     <form action={action} className="flex flex-col gap-4">
+      <input type="hidden" name="operationId" value={operationId} />
       <div className="flex flex-wrap gap-3">
         <div className={`${labelClass} w-52`}>
           <span className={labelTextClass}>Company</span>

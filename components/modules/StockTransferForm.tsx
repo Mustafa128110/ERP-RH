@@ -126,6 +126,9 @@ export function StockTransferFormPage({
   // New transfers are entered back to back, so a created one clears the form
   // rather than navigating away (see SaleForm for why this isn't an effect). An
   // edit keeps what's on screen — it's still the transfer you're looking at.
+  // One id per open form: sent with every submit, claimed by the server inside
+  // the same transaction as the transfer, so a replayed submit can't post twice.
+  const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: TransferActionState, formData: FormData) => {
     const result: TransferActionState = isEdit ? await updateStockTransfer(transferId!, prev, formData) : await createStockTransfer(prev, formData);
     if (result?.success) {
@@ -157,6 +160,7 @@ export function StockTransferFormPage({
 
   return (
     <form ref={formRef} action={action} className="flex flex-col gap-5">
+      <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
         name="linesJson"

@@ -138,6 +138,9 @@ export function QuotationForm({
     },
   });
 
+  // One id per open form: sent with every submit, claimed by the server inside
+  // the same transaction as the quotation, so a replayed submit can't post twice.
+  const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(
     isEdit ? updateQuotation.bind(null, quotationId) : createQuotation,
     undefined,
@@ -194,6 +197,7 @@ export function QuotationForm({
 
   return (
     <form action={action} className="flex h-full min-h-0 flex-col gap-4">
+      <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="companyId" value={companyId} />
       <input type="hidden" name="contactId" value={contactId} />
       {/* A name typed over the dropdown becomes a new contact on save, exactly as

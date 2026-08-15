@@ -130,6 +130,9 @@ export function InterCompanyFormPage({
   // New sales are entered back to back, so a created one clears the form rather
   // than navigating away. An edit keeps what's on screen — it's still the sale
   // you're looking at.
+  // One id per open form: sent with every submit, claimed by the server inside
+  // the same transaction as the sale, so a replayed submit can't post twice.
+  const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: InterCompanyResult | undefined, formData: FormData) => {
     const result = isEdit ? await updateInterCompanySale(saleId!, prev, formData) : await createInterCompanySale(prev, formData);
     if (result?.success) {
@@ -175,6 +178,7 @@ export function InterCompanyFormPage({
 
   return (
     <form ref={formRef} action={action} className="flex flex-col gap-5">
+      <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
         name="linesJson"

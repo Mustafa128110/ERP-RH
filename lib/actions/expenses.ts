@@ -21,6 +21,7 @@ import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/loo
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 export interface ExpenseFilters {
   company?: string;
@@ -113,10 +114,13 @@ export interface ExpenseBatchRow {
   notes: string | null;
 }
 
-export async function createExpensesBatch(rows: ExpenseBatchRow[]): Promise<ActionResult> {
+export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?: string): Promise<ActionResult> {
   return guard("Couldn't save the expenses.", async () => {
     const session = await getSession();
     requirePermission(session, "expenses", "create");
+    // Minted by the batch dialog when it opened; a replayed submit of a
+    // committed batch is refused rather than posting every row twice.
+    const opId = operationId || crypto.randomUUID();
 
     // A row counts only if it's complete: category, date, positive amount, and
     // exactly one settlement target. Half-filled rows are skipped, not rejected.
@@ -143,6 +147,8 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[]): Promise<Acti
     // rows are usually two or three distinct categories drawn on one account, so
     // grouping collapses sixty trips into about five.
     await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, opId))) throw new DuplicateOperationError();
       // Distinct typed category names, resolved once each. A name repeated down
       // the grid is the same category, and creating it twice is what the
       // per-row loop did until the unique constraint stopped it.
@@ -224,8 +230,11 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
     if (!values.expenseDate) return { error: "Date is required." };
     if (Number.isNaN(Number(values.amount)) || Number(values.amount) <= 0) return { error: "Amount must be greater than zero." };
     if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
+    const operationId = readOperationId(formData);
 
     await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId });
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);

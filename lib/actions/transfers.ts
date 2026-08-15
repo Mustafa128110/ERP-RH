@@ -14,6 +14,7 @@ import { adjustSettlementBalance } from "@/lib/actions/settlement";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // Moving money between the company's own accounts — cash drawer to bank, bank to
 // cash, one drawer to another. No contact, nothing owed either way, so it writes
@@ -122,6 +123,9 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       const fromValue = String(formData.get("fromAccount") ?? "");
       const toValue = String(formData.get("toAccount") ?? "");
       const amount = Number(String(formData.get("amount") ?? "").trim());
+      // Minted by the transfer dialog when it opened; a replayed submit of a
+      // committed transfer is refused rather than moving the money twice.
+      const operationId = readOperationId(formData);
 
       if (!companyId) return { error: "Company is required." };
       if (!documentDate) return { error: "Date is required." };
@@ -148,6 +152,8 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       const total = amount.toFixed(2);
 
       await db.transaction(async (tx) => {
+        // First statement: claim the operation id, or abort as a duplicate.
+        if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
         for (const side of [
           { reason: outReason(key), account: from, direction: "out" as const },
           { reason: inReason(key), account: to, direction: "in" as const },

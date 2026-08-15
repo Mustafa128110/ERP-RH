@@ -44,6 +44,7 @@ import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, to
 import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 export interface StockPurchaseItemRow {
   itemName: string;
@@ -287,6 +288,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   const session = await getSession();
   requirePermission(session, "purchases", "create");
 
+  const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   if (!companyId) return { error: "Company is required." };
@@ -396,6 +398,8 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   let createdId = "";
   try {
     await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       // Allocated inside the transaction so a failure gives the number back. A
       // manually entered number bypasses the counter entirely — the unique
       // constraint on (company, type, number) is what stops it colliding.
@@ -510,6 +514,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
       }
     });
   } catch (e) {
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 

@@ -111,6 +111,9 @@ export function StockPurchaseCreateForm({
   onDone: () => void;
 }) {
   const isEdit = !!purchaseId;
+  // One id per open form: sent with every submit, claimed by the server inside
+  // the same transaction as the purchase, so a replayed submit can't post twice.
+  const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(isEdit ? updateStockPurchase.bind(null, purchaseId!) : createStockPurchase, undefined);
   // The saved lines plus one blank row: the grid only grows when its last row is
   // edited, and on an existing purchase every row is already filled — so without
@@ -320,6 +323,7 @@ export function StockPurchaseCreateForm({
   return (
     <>
     <form ref={formRef} action={action} className="flex flex-col gap-5">
+      <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
         name="linesJson"

@@ -26,6 +26,7 @@ import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { paymentLedgerSide } from "@/lib/payment-constants";
 import { chequeStatusAfterSettling, UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { recordAudit } from "@/lib/actions/audit";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 export type PaymentDirection = "made" | "received";
 export type PaymentType = SettlementType;
@@ -190,11 +191,14 @@ export async function createPayment(
   values.amount = resolvedAmount.amount;
 
   const documentType = await getOrCreatePaymentDocumentType(values.companyId, direction);
+  const operationId = readOperationId(formData);
 
   let createdNumber = "";
   let createdId = "";
   try {
     await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       // Allocated inside the transaction so a failure gives the number back.
       const number = await nextDocumentNumber(documentType.series, tx);
       createdNumber = number;
@@ -239,6 +243,7 @@ export async function createPayment(
       }
     });
   } catch (e) {
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -310,9 +315,12 @@ export interface PaymentBatchRow {
 // bulk insert. Each row runs the same steps createPayment does, and the whole
 // batch shares one transaction: any bad row rolls all of them back rather than
 // leaving numbers issued and balances moved for a half-done batch.
-export async function createPaymentsBatch(rows: PaymentBatchRow[]): Promise<ActionResult> {
+export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?: string): Promise<ActionResult> {
   const session = await getSession();
   requirePermission(session, "payments", "create");
+  // Minted by the batch dialog when it opened; a replayed submit of a committed
+  // batch is refused rather than posting every row twice.
+  const opId = operationId || crypto.randomUUID();
 
   // A row counts once someone has typed an amount into it — a cheque row is the
   // exception, it settles for the cheque's own registered amount. Spare rows at
@@ -346,6 +354,8 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[]): Promise<Acti
 
   try {
     await db.transaction(async (tx) => {
+      // First statement: claim the operation id, or abort as a duplicate.
+      if (!(await claimOperation(tx, opId))) throw new DuplicateOperationError();
       for (const r of valid) {
         // A cheque settles for its own amount; account/cash use the typed value.
         const resolved = await resolveSettlementAmount(r.amount, r.chequeId);

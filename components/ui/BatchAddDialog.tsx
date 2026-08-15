@@ -107,7 +107,19 @@ export function BatchAddDialog<T, C = unknown>({
   async function submit() {
     setPending(true);
     setError(null);
-    const result = await onSubmit(rows);
+    let result;
+    try {
+      result = await onSubmit(rows);
+    } catch {
+      // The transport failed — the request may or may not have reached the
+      // server, so say exactly that rather than leaving the dialog stuck on
+      // "Saving…" or pretending nothing happened. The rows are still in the
+      // grid (and in the draft), so Save stays available: a replayed click
+      // after a save that did land is refused server-side by the operation id.
+      setPending(false);
+      setError("Couldn't reach the server — the save may or may not have gone through. Check the list, then Save again if it didn't.");
+      return;
+    }
     setPending(false);
     if (result.error) {
       setError(result.error);

@@ -14,6 +14,7 @@ import { round1, todayISO } from "@/lib/format";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { createSale } from "@/lib/actions/sales";
+import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // A quotation is an ordinary document of type QUOTATION — the universal model
 // already had the type and the QT series, so this needed three nullable columns
@@ -278,11 +279,14 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
 
       const f = readForm(formData);
       if (f.error) return { error: f.error };
+      const operationId = readOperationId(formData);
 
       const documentType = await quotationType(f.companyId);
 
       let createdNumber = "";
       const createdId = await db.transaction(async (tx) => {
+        // First statement: claim the operation id, or abort as a duplicate.
+        if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
         // Allocated inside the transaction so a failure gives the number back.
         const number = await nextDocumentNumber(documentType.series, tx);
         createdNumber = number;

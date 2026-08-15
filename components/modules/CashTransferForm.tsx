@@ -38,6 +38,9 @@ export function CashTransferDialog({
 }) {
   const [state, action, pending] = useActionState(createCashTransfer, undefined);
   const [from, setFrom] = useState("");
+  // One id per dialog session: a replayed submit (response lost after a
+  // successful save) is refused by the server rather than moving the money twice.
+  const [operationId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     if (state?.success) onDone();
@@ -47,6 +50,7 @@ export function CashTransferDialog({
   return (
     <Dialog title="Transfer Money" onClose={onClose}>
       <form action={action} className="flex flex-col gap-4">
+        <input type="hidden" name="operationId" value={operationId} />
         <label className={labelClass}>
           <span className={labelTextClass}>Company</span>
           <select name="companyId" required defaultValue={companyOptions[0]?.id ?? ""} className={inputClass}>

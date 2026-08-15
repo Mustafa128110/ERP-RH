@@ -1,5 +1,6 @@
 import "server-only";
 import { PermissionError } from "@/lib/auth/permissions";
+import { DuplicateOperationError } from "@/lib/actions/operation-id";
 
 // Every write in this app used to be one unhandled database error away from
 // losing typed work. A server action that throws doesn't return a value the form
@@ -114,6 +115,9 @@ export async function guard<T extends object>(
   try {
     return await run();
   } catch (e) {
+    // A replayed save id: nothing was written on this attempt, and the message
+    // says exactly that.
+    if (e instanceof DuplicateOperationError) return { error: e.message };
     // Next's redirect() and notFound() work by throwing; swallowing those would
     // turn a redirect into an error message.
     if (e && typeof e === "object" && "digest" in e && typeof (e as { digest: unknown }).digest === "string") throw e;
