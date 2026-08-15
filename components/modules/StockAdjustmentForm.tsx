@@ -35,11 +35,15 @@ export function StockAdjustmentFormPage({
   itemOptions,
   unitOptions,
   locationOptions,
+  onDone,
 }: {
   companyOptions: Option[];
   itemOptions: ScopedOption[];
   unitOptions: Option[];
   locationOptions: Option[];
+  // When the form lives in a popup (the list page's add dialog), a successful
+  // save closes it instead of clearing for the next entry.
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -92,7 +96,8 @@ export function StockAdjustmentFormPage({
       if (result?.success) {
         // Saved — the local copy has nothing left to protect.
         clearDraft(ADJUSTMENT_DRAFT_KEY);
-        resetForm();
+        if (onDone) onDone();
+        else resetForm();
       }
       return result;
     },
@@ -271,13 +276,16 @@ export function StockAdjustmentFormPage({
         >
           {pending ? "Posting…" : "Post Adjustment"}
         </button>
-        <button
-          type="button"
-          onClick={() => router.push("/inventory/stock-adjustments")}
-          className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
-        >
-          Back to Adjustments
-        </button>
+        {/* The popup's own ✕ is the way out when this form sits in a dialog. */}
+        {!onDone && (
+          <button
+            type="button"
+            onClick={() => router.push("/inventory/stock-adjustments")}
+            className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
+          >
+            Back to Adjustments
+          </button>
+        )}
       </div>
     </form>
   );

@@ -23,10 +23,11 @@ export default async function Page({
     <StockMovementsManager
       movements={movements}
       filters={
-        // ListFilters is here for the date range — reaching past the 500-row cap
-        // is what it's for. Finding a row that's already on screen is the table's
-        // own search box, which is instant.
-        <ListFilters key="filters" nameParam="reference" namePlaceholder="Reference">
+        // ListFilters is here for the date range and the type/location/company
+        // selects — reaching past the 500-row cap is what it's for. Finding a
+        // row that's already on screen is the table's own search box, which is
+        // instant.
+        <ListFilters key="filters">
           <StockFilter param="type" allLabel="All movements" options={types} />
           <StockFilter param="location" allLabel="All locations" options={locationRows.map((l) => ({ id: l.id, name: l.name }))} />
           <StockFilter param="company" allLabel="All companies" options={companyRows.map((c) => ({ id: c.id, name: c.name }))} />

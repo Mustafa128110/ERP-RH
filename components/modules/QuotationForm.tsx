@@ -66,6 +66,7 @@ export function QuotationForm({
   unitOptions,
   quotationId,
   defaults,
+  onDone,
 }: {
   companyOptions: Option[];
   customerOptions: ScopedOption[];
@@ -73,6 +74,9 @@ export function QuotationForm({
   unitOptions: Option[];
   quotationId?: string;
   defaults?: QuotationDefaults;
+  // When the form lives in a popup (the list page's add dialog), a successful
+  // save closes it instead of navigating away to the list.
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const isEdit = !!quotationId;
@@ -143,7 +147,8 @@ export function QuotationForm({
     if (state?.success) {
       // Saved — the local copy has nothing left to protect.
       clearDraft(QUOTATION_DRAFT_KEY);
-      router.push("/sales/quotations");
+      if (onDone) onDone();
+      else router.push("/sales/quotations");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.success]);

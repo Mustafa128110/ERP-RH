@@ -40,7 +40,7 @@ export default async function Page({
       cashAccountOptions={cashAccountOptions}
       chequeOptions={chequeOptions}
       filters={
-        <ListFilters key="filters" nameParam="contact" namePlaceholder="Contact name">
+        <ListFilters key="filters">
           <StockFilter
             param="direction"
             allLabel="Made & Received"

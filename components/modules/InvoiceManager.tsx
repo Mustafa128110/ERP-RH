@@ -183,7 +183,7 @@ export function InvoiceManager({
   return (
     <div className="flex h-full flex-col gap-2">
       <PageHeader title="Invoices" subtitle={subtitle}>
-        <ListFilters nameParam="customer" namePlaceholder="Customer name">
+        <ListFilters>
           <StockFilter
             param="saleType"
             allLabel="All Types"

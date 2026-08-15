@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { DataTable } from "@/components/ui/DataTable";
+import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
@@ -11,6 +12,7 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import { formatDate, money, qty } from "@/lib/format";
 import { statusColumn, type ColumnDef, type Row } from "@/lib/table";
 import type { QuotationListRow } from "@/lib/actions/quotations";
+import { QuotationForm } from "@/components/modules/QuotationForm";
 
 const columns: ColumnDef[] = [
   {
@@ -43,8 +45,23 @@ const columns: ColumnDef[] = [
   statusColumn(),
 ];
 
-export function QuotationManager({ quotations }: { quotations: QuotationListRow[] }) {
+export function QuotationManager({
+  quotations,
+  companyOptions,
+  customerOptions,
+  itemOptions,
+  unitOptions,
+}: {
+  quotations: QuotationListRow[];
+  // The options the add popup's form needs — the same bundle the sale form
+  // uses, minus the settlement lists a quotation never touches.
+  companyOptions: { id: string; name: string }[];
+  customerOptions: { id: string; name: string; companyId: string }[];
+  itemOptions: ({ id: string; name: string; companyId: string } & { salesRate: string | null })[];
+  unitOptions: { id: string; name: string }[];
+}) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const rows: Row[] = quotations.map((q) => ({
     id: q.id,
     number: q.number,
@@ -59,21 +76,27 @@ export function QuotationManager({ quotations }: { quotations: QuotationListRow[
     lines: JSON.stringify(q.lines),
   }));
 
-  const open = quotations.filter((q) => q.status === "Open" || q.status === "Partly converted").length;
+  const openCount = quotations.filter((q) => q.status === "Open" || q.status === "Partly converted").length;
 
-  // No popup here — a quotation is its own page, so Alt+N goes where the button
-  // links.
-  useNewEntry(() => router.push("/sales/quotations/new"));
+  useNewEntry(() => setOpen(true));
+
+  function close() {
+    setOpen(false);
+    router.refresh();
+  }
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader
-        title="Quotations"
-        subtitle={`${quotations.length} quotation(s) · ${open} still open`}
-      >
-        <Link href="/sales/quotations/new" className={primaryIconButtonClass} aria-label="New quotation" title="New quotation">
+      <PageHeader title="Quotations" subtitle={`${quotations.length} quotation(s) · ${openCount} still open`}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className={primaryIconButtonClass}
+          aria-label="New quotation"
+          title="New quotation — Alt+N"
+        >
           <Icon name="plus" />
-        </Link>
+        </button>
       </PageHeader>
 
       <DataTable
@@ -84,6 +107,18 @@ export function QuotationManager({ quotations }: { quotations: QuotationListRow[
         emptyMessage="No quotations yet."
         searchPlaceholder="Search quotations…"
       />
+
+      {open && (
+        <Dialog title="New Quotation" onClose={close} size="xwide">
+          <QuotationForm
+            companyOptions={companyOptions}
+            customerOptions={customerOptions}
+            itemOptions={itemOptions}
+            unitOptions={unitOptions}
+            onDone={close}
+          />
+        </Dialog>
+      )}
     </div>
   );
 }

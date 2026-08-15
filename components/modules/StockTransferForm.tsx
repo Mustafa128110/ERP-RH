@@ -51,6 +51,7 @@ export function StockTransferFormPage({
   locationOptions,
   transferId,
   defaults,
+  onDone,
 }: {
   companyOptions: Option[];
   itemOptions: ScopedOption[];
@@ -58,6 +59,9 @@ export function StockTransferFormPage({
   locationOptions: Option[];
   transferId?: string;
   defaults?: TransferDefaults;
+  // When the form lives in a popup (the list page's add dialog), a successful
+  // save closes it instead of clearing for the next entry.
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const isEdit = !!transferId;
@@ -124,10 +128,11 @@ export function StockTransferFormPage({
   // edit keeps what's on screen — it's still the transfer you're looking at.
   const [state, action, pending] = useActionState(async (prev: TransferActionState, formData: FormData) => {
     const result: TransferActionState = isEdit ? await updateStockTransfer(transferId!, prev, formData) : await createStockTransfer(prev, formData);
-    if (!isEdit && result?.success) {
+    if (result?.success) {
       // Saved — the local copy has nothing left to protect.
       clearDraft(TRANSFER_DRAFT_KEY);
-      resetForm();
+      if (onDone) onDone();
+      else if (!isEdit) resetForm();
     }
     return result;
   }, undefined);
@@ -313,13 +318,16 @@ export function StockTransferFormPage({
         >
           {pending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save Transfer" : "Create Transfer"}
         </button>
-        <button
-          type="button"
-          onClick={() => router.push("/inventory/stock-transfers")}
-          className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
-        >
-          Back to Transfers
-        </button>
+        {/* The popup's own ✕ is the way out when this form sits in a dialog. */}
+        {!onDone && (
+          <button
+            type="button"
+            onClick={() => router.push("/inventory/stock-transfers")}
+            className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
+          >
+            Back to Transfers
+          </button>
+        )}
       </div>
     </form>
   );

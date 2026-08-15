@@ -367,6 +367,13 @@
   }
 }
 
+html {
+  /* Scroll momentum on a phone — a flick on the list carries, rather than
+     stopping dead. Honoured for keyboard/scrollbar movement too, which is what
+     makes the DataTable's "back to top" glide instead of jump. */
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -417,86 +424,14 @@ tr[data-focused="true"] {
 /*
  * Phone layout for the list tables.
  *
- * An eight-column table on a 360px screen is a horizontal scrollbar and a row
- * you can never see the whole of. Below the md breakpoint each row becomes a
- * card and each cell a "Label   value" line, with the header row hidden — the
- * labels come from data-label, which DataTable copies off the column def.
- *
- * Done in CSS on the one table rather than by rendering a second card list in
- * JSX: there is one DOM tree, so the arrow keys, the tick boxes, the row
- * highlight and the instant search all keep working on a phone exactly as they
- * do on a desktop, with no second code path to keep in step.
+ * The tables stay tables on every screen size: rows keep their columns and the
+ * header stays put, and the horizontal overflow just scrolls inside the same
+ * container it does on a desktop. A row that has to become a card to fit loses
+ * the at-a-glance column reading that is the whole point of a data table, so
+ * there is no card conversion below the md breakpoint.
  */
-@media (max-width: 767px) {
-  table[data-responsive] {
-    display: block;
-    min-width: 0;
-  }
-  table[data-responsive] thead {
-    /* Not display:none — that would drop it from the accessibility tree too.
-       Clipped instead, so a screen reader still announces the columns. */
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  table[data-responsive] tbody {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  table[data-responsive] tr {
-    display: block;
-    border: 1px solid var(--color-sand);
-    border-radius: var(--radius-md);
-    background: var(--color-white);
-    padding: 0.25rem 0.75rem;
-  }
-  table[data-responsive] td {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
-    width: auto !important;
-    padding: 0.375rem 0 !important;
-    text-align: right !important;
-    white-space: normal;
-    border-bottom: 1px solid var(--color-ivory);
-  }
-  table[data-responsive] tr td:last-child {
-    border-bottom: 0;
-  }
-  table[data-responsive] td::before {
-    content: attr(data-label);
-    flex: 0 0 auto;
-    padding-right: 0.5rem;
-    text-align: left;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-steel);
-  }
-  /* A cell whose content is a link fills the row; the anchor has to become the
-     flex row itself or the label and value stack instead of sitting apart. */
-  table[data-responsive] td > a,
-  table[data-responsive] td > span {
-    display: block;
-    padding: 0 !important;
-    text-align: right;
-  }
-  /* The row number and the tick box read as chrome, not as data — no label,
-     and the tick sits on its own line at the top of the card. */
-  table[data-responsive] td[data-label="#"] {
-    color: var(--color-steel);
-    font-size: 0.75rem;
-  }
-  table[data-responsive] td:not([data-label]) {
-    justify-content: flex-start;
-    border-bottom: 1px solid var(--color-ivory);
-  }
+table[data-responsive] {
+  min-width: max-content;
 }
 
 /*
@@ -524,6 +459,9 @@ tr[data-focused="true"] {
 @media (prefers-reduced-motion: reduce) {
   .reveal-right {
     animation: none;
+  }
+  html {
+    scroll-behavior: auto;
   }
 }
 

@@ -25,10 +25,10 @@ export default async function Page({
     <AuditLogManager
       entries={entries}
       filters={
-        // The name box filters by user, since "who did this" is the question this
-        // page gets opened with. Entity and action narrow it from there, and the
-        // date range is what reaches past the 200-row cap.
-        <ListFilters key="filters" nameParam="user" namePlaceholder="User name">
+        // Entity and action narrow the list, and the date range is what reaches
+        // past the 200-row cap. Finding a row that's already on screen is the
+        // table's own search box.
+        <ListFilters key="filters">
           <StockFilter
             param="entity"
             allLabel="All records"

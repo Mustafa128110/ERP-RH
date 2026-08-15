@@ -50,6 +50,7 @@ export function InterCompanyFormPage({
   locationOptions,
   saleId,
   defaults,
+  onDone,
 }: {
   companyOptions: Option[];
   itemOptions: ItemOption[];
@@ -57,6 +58,9 @@ export function InterCompanyFormPage({
   locationOptions: Option[];
   saleId?: string;
   defaults?: InterCompanyDefaults;
+  // When the form lives in a popup (the list page's add dialog), a successful
+  // save closes it instead of clearing for the next entry.
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const isEdit = !!saleId;
@@ -128,10 +132,11 @@ export function InterCompanyFormPage({
   // you're looking at.
   const [state, action, pending] = useActionState(async (prev: InterCompanyResult | undefined, formData: FormData) => {
     const result = isEdit ? await updateInterCompanySale(saleId!, prev, formData) : await createInterCompanySale(prev, formData);
-    if (!isEdit && result?.success) {
+    if (result?.success) {
       // Saved — the local copy has nothing left to protect.
       clearDraft(INTERCOMPANY_DRAFT_KEY);
-      resetForm();
+      if (onDone) onDone();
+      else if (!isEdit) resetForm();
     }
     return result;
   }, undefined);
@@ -387,13 +392,16 @@ export function InterCompanyFormPage({
         >
           {pending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save Changes" : "Create Sale + Purchase"}
         </button>
-        <button
-          type="button"
-          onClick={() => router.push("/inventory/inter-company")}
-          className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
-        >
-          Back to Inter-Company Sales
-        </button>
+        {/* The popup's own ✕ is the way out when this form sits in a dialog. */}
+        {!onDone && (
+          <button
+            type="button"
+            onClick={() => router.push("/inventory/inter-company")}
+            className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
+          >
+            Back to Inter-Company Sales
+          </button>
+        )}
       </div>
     </form>
   );
