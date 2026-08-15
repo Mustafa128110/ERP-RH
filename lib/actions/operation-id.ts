@@ -51,17 +51,27 @@ export function readOperationId(formData: FormData): string {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-// One round trip: prune yesterday's keys, then try to claim. Returns true when
+// One round trip: sweep yesterday's keys, then try to claim. Returns true when
 // the id is new (the caller should proceed), false when it was already claimed
 // (the caller must abort). Runs on the transaction handle so the claim commits
 // or rolls back with the operation it guards.
+//
+// The sweep is a data-modifying CTE, which runs concurrently with the main
+// statement against the same snapshot — the INSERT can't see what the DELETE
+// removes, so a stale key can't be reclaimed by a plain ON CONFLICT DO NOTHING.
+// That's what the DO UPDATE arm is for: on a conflict it refreshes the row only
+// when the existing claim is older than the retention window (a re-claim of a
+// stale key is a genuinely new operation), and refuses when the claim is fresh
+// (a replay). One statement, so a claim costs the same single round trip it
+// always did.
 export async function claimOperation(tx: Tx, operationId: string): Promise<boolean> {
   const [row] = await tx.execute<{ key: string }>(sql`
     WITH pruned AS (
       DELETE FROM submitted_operations WHERE created_at < now() - interval '24 hours'
     )
     INSERT INTO submitted_operations (key) VALUES (${operationId})
-    ON CONFLICT (key) DO NOTHING
+    ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key, created_at = now()
+    WHERE submitted_operations.created_at < now() - interval '24 hours'
     RETURNING key
   `);
   return Boolean(row);
