@@ -246,6 +246,10 @@ export const contacts = pgTable(
     isActive: boolean("is_active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
+  (table) => [
+    // The contacts list and every picker scope by company.
+    index("idx_contacts_company").on(table.companyId),
+  ],
 );
 
 // Global — categories are shared across companies. slug unique on its own.
@@ -329,6 +333,10 @@ export const expenses = pgTable(
   (table) => [
     check("expenses_amount_check", sql`${table.amount} > 0`),
     unique().on(table.chequeId),
+    // The expenses list scopes by company; the stock-purchase edit reads an
+    // expense back by the document it was created from.
+    index("idx_expenses_company").on(table.companyId),
+    index("idx_expenses_document").on(table.documentId),
   ],  );
 
 // --- Items & Locations ---
@@ -565,6 +573,10 @@ export const inventoryTransactions = pgTable(
   },
   (table) => [
     index("idx_inventory_document_line").on(table.documentLineId),
+    // Every stock figure — dashboard valuation, the stock report, exports — is
+    // scoped by company, and inventory_transactions is the fastest-growing
+    // table in the schema (one row per document line per posting).
+    index("idx_inventory_company").on(table.companyId),
     check("inventory_transactions_movement_check", sql`${table.movement} IN (-1, 1)`),
     check("inventory_transactions_quantity_check", sql`${table.quantity} >= 0`),
     check("inventory_transactions_base_quantity_check", sql`${table.baseQuantity} >= 0`),
@@ -583,6 +595,10 @@ export const ledgerEntries = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
+    // Payments and purchases drop and re-read a document's entries on every
+    // edit and delete, and the receivables/payables reports scan by company.
+    index("idx_ledger_document").on(table.documentId),
+    index("idx_ledger_company").on(table.companyId),
     check(
       "ledger_entries_debit_credit_check",
       sql`(${table.debit} = 0 AND ${table.credit} > 0) OR (${table.credit} = 0 AND ${table.debit} > 0)`,
@@ -683,6 +699,9 @@ export const auditLogs = pgTable(
     // touched one record.
     index("idx_audit_created").on(table.createdAt),
     index("idx_audit_entity").on(table.entity, table.entityId),
+    // The audit screen also filters by who and under which company.
+    index("idx_audit_user").on(table.userId),
+    index("idx_audit_company").on(table.companyId),
   ],
 );
 
@@ -747,4 +766,6 @@ export const chequeRegister = pgTable(
   (table) => [
     unique().on(table.bankAccountId, table.chequeNumber),
     check("cheque_register_amount_check", sql`${table.amount} > 0`),
+    // Payments link and settle a cheque by its document.
+    index("idx_cheque_document").on(table.documentId),
   ],  );
