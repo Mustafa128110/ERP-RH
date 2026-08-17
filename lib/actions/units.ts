@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { units } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
@@ -39,7 +39,7 @@ export interface UnitBatchRow {
 // new unit immediately.
 export async function createUnitsBatch(rows: UnitBatchRow[]): Promise<CreateResult<{ id: string; name: string; symbol: string | null }>> {
   return guard("Couldn't save the units.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "units", "create");
 
     const valid = rows.filter((r) => r.name.trim());
@@ -58,7 +58,7 @@ export async function createUnitsBatch(rows: UnitBatchRow[]): Promise<CreateResu
 
 export async function updateUnit(unitId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the unit.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "units", "edit");
 
     const values = readUnitForm(formData);
@@ -74,7 +74,7 @@ export async function updateUnit(unitId: string, _prevState: ActionResult | unde
 
 export async function deleteUnit(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this unit is still referenced by items or unit conversions.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "units", "delete");
 
     const unitId = String(formData.get("unitId") ?? "");

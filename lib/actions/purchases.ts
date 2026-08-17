@@ -20,7 +20,7 @@ import {
   inventoryTransactions,
   expenses,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
@@ -45,6 +45,7 @@ import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 
 export interface StockPurchaseItemRow {
   itemName: string;
@@ -285,14 +286,17 @@ async function recordShippingExpense(tx: PurchaseTx, args: ShippingExpenseArgs) 
 }
 
 export async function createStockPurchase(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
-  requirePermission(session, "purchases", "create");
+  const session = await getLiveSession();
 
   const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
+  // Scoped to the submitted company: membership + purchases.create there, so a
+  // permission held in another company, or a company access revoked since the
+  // form was filled, is refused rather than written into.
+  requirePermission(session, "purchases", "create", { companyId });
 
   let lines: PurchaseLineInput[];
   try {
@@ -490,7 +494,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
         }
       } else {
         if (chequeId) {
-          await tx.update(chequeRegister).set({ documentId: doc.id }).where(eq(chequeRegister.id, chequeId));
+          await linkCheque(tx, chequeId, doc.id, "out");
         }
         if (goodsTotal > 0) {
           await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1);
@@ -515,6 +519,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
+    if (e instanceof ChequeUnavailableError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -539,13 +544,14 @@ export async function updateStockPurchase(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ) {
-  const session = await getSession();
-  requirePermission(session, "purchases", "edit");
+  const session = await getLiveSession();
 
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
+  // Scoped to the submitted company; the record itself is also read scoped below.
+  requirePermission(session, "purchases", "edit", { companyId });
 
   let lines: PurchaseLineInput[];
   try {
@@ -586,6 +592,8 @@ export async function updateStockPurchase(
     return { error: "Shipping needs a cash account — add one for this company first." };
   }
 
+  // Read scoped: a guessed id must never resolve to a document in a company
+  // the user can't act on — outside the scope it simply doesn't exist.
   const [existingDoc] = await db
     .select({
       number: documents.number,
@@ -596,7 +604,7 @@ export async function updateStockPurchase(
       cashAccountId: documents.cashAccountId,
     })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
   const [documentType] = await db.select().from(documentTypes).where(eq(documentTypes.id, existingDoc.documentTypeId)).limit(1);
@@ -674,7 +682,7 @@ export async function updateStockPurchase(
 
     if (isPaid) {
       if (chequeId) {
-        await tx.update(chequeRegister).set({ documentId }).where(eq(chequeRegister.id, chequeId));
+        await linkCheque(tx, chequeId, documentId, "out");
       }
       // The goods portion only — the shipping is covered by the expense below.
       await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1);
@@ -755,11 +763,13 @@ export async function updateStockPurchase(
 }
 
 export async function deleteStockPurchase(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "purchases", "delete");
 
   const documentId = String(formData.get("documentId") ?? "");
 
+  // Read scoped: a guessed id from an unauthorized company is "not found", and
+  // the delete permission is then checked against the row's own company.
   const [existingDoc] = await db
     .select({
       number: documents.number,
@@ -770,9 +780,10 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
       cashAccountId: documents.cashAccountId,
     })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
+  requirePermission(session, "purchases", "delete", { companyId: existingDoc.companyId });
   const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
 
   try {
@@ -910,8 +921,10 @@ export async function mergeStockPurchases(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
-  const session = await getSession();
-  // Rewrites one purchase and destroys the others, so it needs both.
+  const session = await getLiveSession();
+  // Rewrites one purchase and destroys the others, so it needs both. The read
+  // below is scoped, so the merged set can only come from companies the user
+  // can act on; the permission is then re-checked against the merged company.
   requirePermission(session, "purchases", "edit");
   requirePermission(session, "purchases", "delete");
 
@@ -974,6 +987,8 @@ export async function mergeStockPurchases(
 
   const loserIds = documentIds.filter((id) => id !== survivorId);
   const companyId = docs[0].companyId;
+  requirePermission(session, "purchases", "edit", { companyId });
+  requirePermission(session, "purchases", "delete", { companyId });
   // The charges are per document, so the merged invoice carries their sum — the
   // shipping on two deliveries really was paid twice.
   const discountTotal = docs.reduce((sum, d) => sum + Number(d.discountTotal), 0);
@@ -1191,7 +1206,7 @@ export async function importStockPurchasesCsv(
   rows: Record<string, string>[],
 ): Promise<{ error?: string; created?: number }> {
   return guard("Couldn't import the purchases.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "purchases", "create");
     if (rows.length === 0) return { error: "That file has no rows." };
 

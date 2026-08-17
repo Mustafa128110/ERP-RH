@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, contacts, documentLines, documentNumberLedger, documentTypes, documents, items, units } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -274,11 +274,17 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
   return guard(
     "Couldn't save the quotation.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "quotations", "create");
+      const session = await getLiveSession();
 
       const f = readForm(formData);
       if (f.error) return { error: f.error };
+      // Scoped to the submitted company — the user must both belong to it and
+      // hold quotations.create THERE. A queued submission was filled against
+      // the offline cache, which can list a company access or permission was
+      // revoked from since; the cache prepares work, it never grants it. A
+      // permission held in some other company, or an access revoked since the
+      // form was filled, is refused here rather than written into.
+      requirePermission(session, "quotations", "create", { companyId: f.companyId });
       const operationId = readOperationId(formData);
 
       const documentType = await quotationType(f.companyId);
@@ -337,11 +343,14 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
 
 export async function updateQuotation(documentId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the quotation.", async () => {
-    const session = await getSession();
-    requirePermission(session, "quotations", "edit");
+    const session = await getLiveSession();
 
     const f = readForm(formData);
     if (f.error) return { error: f.error };
+    // Scoped to the submitted company: membership and per-company permission,
+    // so a forged or stale companyId can't steer an edit into (or out of) a set
+    // of books the user can't act on.
+    requirePermission(session, "quotations", "edit", { companyId: f.companyId });
 
     const [existing] = await db
       .select({ number: documents.number })
@@ -392,7 +401,7 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
 
 export async function deleteQuotation(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this quotation is still referenced elsewhere.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "quotations", "delete");
 
     const documentId = String(formData.get("documentId") ?? "");
@@ -402,6 +411,10 @@ export async function deleteQuotation(_prevState: ActionResult | undefined, form
       .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
       .limit(1);
     if (!doomed) return { error: "Quotation not found." };
+    // The delete permission is checked against the row's own company — a
+    // guessed id from a company the user can't delete in is refused even when
+    // they hold the permission somewhere else.
+    requirePermission(session, "quotations", "delete", { companyId: doomed.companyId });
 
     // The invoices raised from it keep their own lines and stock; they just stop
     // pointing back (source_document_id is ON DELETE SET NULL).
@@ -433,12 +446,15 @@ export async function convertQuotation(
   formData: FormData,
 ): Promise<ActionResult & { invoiceId?: string }> {
   return guard("Couldn't convert the quotation.", async () => {
-    const session = await getSession();
-    requirePermission(session, "quotations", "edit");
-    requirePermission(session, "sales", "create");
+    const session = await getLiveSession();
 
     const quotation = await getQuotation(documentId);
     if (!quotation) return { error: "Quotation not found." };
+    // Both sides scoped to the quotation's company: editing the quotation (the
+    // converted quantities are written below) and raising the invoice from it
+    // both require the permission in THAT company, not merely somewhere.
+    requirePermission(session, "quotations", "edit", { companyId: quotation.companyId });
+    requirePermission(session, "sales", "create", { companyId: quotation.companyId });
 
     let requested: Record<number, string> = {};
     try {

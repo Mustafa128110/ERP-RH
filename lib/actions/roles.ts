@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { roles, permissions, rolePermissions, userRoles } from "@/lib/db/schema";
-import { getSession, invalidateSessions } from "@/lib/auth/session";
+import { getLiveSession, getSession, invalidateSessions } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -117,7 +117,7 @@ export async function createRole(_prevState: ActionResult | undefined, formData:
   return guard(
     "Couldn't create the role.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "roles", "create");
 
       const name = String(formData.get("name") ?? "").trim();
@@ -149,7 +149,7 @@ export async function updateRole(roleId: string, _prevState: ActionResult | unde
   return guard(
     "Couldn't save the role.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "roles", "edit");
 
       const name = String(formData.get("name") ?? "").trim();
@@ -182,7 +182,7 @@ export async function updateRole(roleId: string, _prevState: ActionResult | unde
 
 export async function deleteRole(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't delete the role.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "roles", "edit");
 
     const roleId = String(formData.get("roleId") ?? "");

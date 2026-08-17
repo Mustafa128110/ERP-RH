@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { unitConversions, units, items } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
@@ -51,7 +51,7 @@ export async function createUnitConversion(_prevState: ActionResult | undefined,
   return guard(
     "Couldn't save the unit conversion.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "unit_conversions", "create");
 
       const values = readForm(formData);
@@ -82,7 +82,7 @@ export async function createUnitConversionsBatch(rows: UnitConversionBatchRow[])
   return guard(
     "Couldn't save the unit conversions.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "unit_conversions", "create");
 
       const valid = rows.filter((r) => r.itemId && r.fromUnitId && r.toUnitId && r.fromUnitId !== r.toUnitId && Number(r.multiplier) > 0);
@@ -103,7 +103,7 @@ export async function updateUnitConversion(id: string, _prevState: ActionResult 
   return guard(
     "Couldn't save the unit conversion.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "unit_conversions", "edit");
 
       const values = readForm(formData);
@@ -124,7 +124,7 @@ export async function updateUnitConversion(id: string, _prevState: ActionResult 
 
 export async function deleteUnitConversion(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't delete this conversion.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "unit_conversions", "delete");
 
     const id = String(formData.get("id") ?? "");

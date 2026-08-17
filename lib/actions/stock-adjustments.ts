@@ -14,7 +14,7 @@ import {
   locations,
   inventoryTransactions,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -180,8 +180,7 @@ export async function createStockAdjustment(
   _prevState: (ActionResult & { id?: string }) | undefined,
   formData: FormData,
 ) {
-  const session = await getSession();
-  requirePermission(session, "stock_adjustments", "create");
+  const session = await getLiveSession();
 
   const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
@@ -190,6 +189,8 @@ export async function createStockAdjustment(
   const reason = String(formData.get("reason") ?? "");
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
+  // Scoped to the submitted company: membership + stock_adjustments.create there.
+  requirePermission(session, "stock_adjustments", "create", { companyId });
   // Checked before the sentinel is collapsed, so "nothing picked" and
   // "Unassigned picked" stay distinguishable. Adjusting at Unassigned is how
   // stock booked without a location gets written off or counted where it sits.
@@ -286,7 +287,7 @@ export async function createStockAdjustment(
 }
 
 export async function deleteStockAdjustment(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+  const session = await getLiveSession();
   // No stock_adjustments.delete in the permission catalog — undoing a posted
   // adjustment is an approve-level act, so it reuses that.
   requirePermission(session, "stock_adjustments", "approve");
@@ -296,12 +297,14 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
 
   // Read before the delete, because afterwards there is nothing left to name it
   // by — an audit entry saying a uuid was deleted answers nobody.
+  // Read scoped: a guessed id from an unauthorized company is "not found".
   const [doomed] = await db
     .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Adjustment not found." };
+  requirePermission(session, "stock_adjustments", "approve", { companyId: doomed.companyId });
 
   try {
     await db.transaction(async (tx) => {

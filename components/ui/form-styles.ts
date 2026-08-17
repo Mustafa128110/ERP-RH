@@ -1,6 +1,14 @@
 // Shared style tokens. One source of truth instead of the same literal class
 // strings copy-pasted into every form and list page.
 
+// What a form says when the request may or may not have reached the server —
+// a dropped response after a committed save is the one case where claiming
+// success is a lie and claiming failure is a trap. Saying exactly that, and
+// keeping the form (and its operation id) alive, is what lets the retry be
+// refused server-side as a duplicate if the first one landed.
+export const TRANSPORT_ERROR_MESSAGE =
+  "Couldn't reach the server — the save may or may not have gone through. Check the list, then Save again if it didn't.";
+
 // --- Form fields -------------------------------------------------------------
 // w-full so a field fills whatever column it is dropped into — on a phone
 // every form is one column, and a field that sizes to its content leaves a

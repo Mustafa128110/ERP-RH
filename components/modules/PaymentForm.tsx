@@ -23,8 +23,10 @@ import {
   successTextClass,
 } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
-import { todayISO } from "@/lib/format";
+import { todayISO, money } from "@/lib/format";
 import { inCompany } from "@/lib/contact-scope";
+import { useClientUserId } from "@/lib/client-user";
+import { useSync } from "@/components/layout/SyncProvider";
 import { ChequeQuickAddButton } from "@/components/modules/AccountForms";
 import { settlingCompanyId, type ContactBalanceHint } from "@/lib/payment-constants";
 
@@ -75,6 +77,27 @@ type PaymentBatchRowLocal = {
   settlementId: string;
   amount: string;
 };
+
+// The one mapping from an editable row to what the server action accepts, used
+// by both the live submit and the offline queue — the queued payload must be
+// byte-for-byte the same shape createPaymentsBatch reads.
+function toServerRows(rows: PaymentBatchRowLocal[], batchDate: string): PaymentBatchRow[] {
+  return rows.map((r) => ({
+    direction: r.direction,
+    companyId: r.companyId,
+    contactId: r.contactId || null,
+    contactName: r.contactText.trim() || null,
+    settlementType: r.settlementType,
+    bankAccountId: r.settlementType === "account" ? r.settlementId || null : null,
+    cashAccountId: r.settlementType === "cash" ? r.settlementId || null : null,
+    chequeId: r.settlementType === "cheque" ? r.settlementId || null : null,
+    // Left blank rather than defaulted to "0" — that's how the server tells
+    // an untouched spare row from one someone actually typed a number into.
+    amount: r.amount.trim(),
+    // One date at the top of the dialog, saved on every row.
+    paymentDate: batchDate,
+  }));
+}
 
 export function PaymentBatchAddDialog({
   companyOptions,
@@ -128,7 +151,11 @@ export function PaymentBatchAddDialog({
   // the same id, so a response lost after a successful save can't post the batch
   // a second time when the user clicks Save again. Fresh mount = fresh id = a
   // genuinely new batch.
+  // The batch draft is scoped per user (payment-batch:<uid>) so a shared
+  // browser never offers one user's half-typed rows to another.
+  const userId = useClientUserId();
   const [operationId] = useState(() => crypto.randomUUID());
+  const { enqueue } = useSync();
   // An account belongs to one company (or to none, which means all of them), and
   // money moves within one set of books — so a row offers that company's
   // accounts and the global ones, nothing else.
@@ -172,7 +199,7 @@ export function PaymentBatchAddDialog({
       emptyRow={emptyRow}
       initialRows={1}
       autoAppend
-      draftKey="payment-batch"
+      draftKey={userId ? `payment-batch:${userId}` : "payment-batch"}
       headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount"]}
       toolbar={
         <label className="flex items-center gap-2">
@@ -183,22 +210,16 @@ export function PaymentBatchAddDialog({
         </label>
       }
       onSubmit={async (rows) => {
-        const values: PaymentBatchRow[] = rows.map((r) => ({
-          direction: r.direction,
-          companyId: r.companyId,
-          contactId: r.contactId || null,
-          contactName: r.contactText.trim() || null,
-          settlementType: r.settlementType,
-          bankAccountId: r.settlementType === "account" ? r.settlementId || null : null,
-          cashAccountId: r.settlementType === "cash" ? r.settlementId || null : null,
-          chequeId: r.settlementType === "cheque" ? r.settlementId || null : null,
-          // Left blank rather than defaulted to "0" — that's how the server tells
-          // an untouched spare row from one someone actually typed a number into.
-          amount: r.amount.trim(),
-          // One date at the top of the dialog, saved on every row.
-          paymentDate: batchDate,
-        }));
-        return createPaymentsBatch(values, operationId);
+        return createPaymentsBatch(toServerRows(rows, batchDate), operationId);
+      }}
+      onQueue={(rows) => {
+        const values = toServerRows(rows, batchDate);
+        // The stable operation id is minted here, inside the queue — a replayed
+        // sync after a lost response is refused server-side, never doubled.
+        // Returns whether the queue actually persisted: when the browser could
+        // not write it, the dialog stays open with its rows instead of closing
+        // as if the work were safe.
+        return enqueue("payment", `${values.length} payment(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values)?.persisted ?? false;
       }}
       renderRow={(row, i, update) => (
         <>

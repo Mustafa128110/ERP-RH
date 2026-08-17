@@ -11,6 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { formatDate, money, qty } from "@/lib/format";
 import { statusColumn, type ColumnDef, type Row } from "@/lib/table";
+import { useCachedOptions } from "@/lib/client-cache";
 import type { QuotationListRow } from "@/lib/actions/quotations";
 import { QuotationForm } from "@/components/modules/QuotationForm";
 
@@ -62,6 +63,16 @@ export function QuotationManager({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+
+  // Seed the client reference cache from the live options (so an offline form
+  // can still fill its pickers) and fall back to the cached copy when the page
+  // rendered empty — e.g. a shell served with no data. Live always wins when
+  // present, so an online visit is unaffected.
+  const cachedCompany = useCachedOptions("companies", companyOptions);
+  const cachedCustomers = useCachedOptions("customers", customerOptions);
+  const cachedItems = useCachedOptions("items", itemOptions);
+  const cachedUnits = useCachedOptions("units", unitOptions);
+
   const rows: Row[] = quotations.map((q) => ({
     id: q.id,
     number: q.number,
@@ -111,10 +122,10 @@ export function QuotationManager({
       {open && (
         <Dialog title="New Quotation" onClose={close} size="xwide">
           <QuotationForm
-            companyOptions={companyOptions}
-            customerOptions={customerOptions}
-            itemOptions={itemOptions}
-            unitOptions={unitOptions}
+            companyOptions={cachedCompany.value}
+            customerOptions={cachedCustomers.value}
+            itemOptions={cachedItems.value}
+            unitOptions={cachedUnits.value}
             onDone={close}
           />
         </Dialog>

@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
@@ -28,7 +28,7 @@ export interface BrandBatchRow {
 
 export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateResult<{ id: string; name: string }>> {
   return guard("Couldn't save the brands.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "brands", "create");
 
     const valid = rows.filter((r) => r.name.trim());
@@ -44,7 +44,7 @@ export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateRe
 
 export async function updateBrand(brandId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the brand.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "brands", "edit");
 
     const values = readBrandForm(formData);
@@ -60,7 +60,7 @@ export async function updateBrand(brandId: string, _prevState: ActionResult | un
 
 export async function deleteBrand(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this brand is still referenced by items.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "brands", "delete");
 
     const brandId = String(formData.get("brandId") ?? "");

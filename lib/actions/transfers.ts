@@ -3,9 +3,8 @@
 import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { bankAccounts, cashAccounts, chequeRegister, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
-import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
-import { getSession } from "@/lib/auth/session";
+import { bankAccounts, cashAccounts, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -15,6 +14,7 @@ import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { linkCheque } from "@/lib/actions/cheque-link";
 
 // Moving money between the company's own accounts — cash drawer to bank, bank to
 // cash, one drawer to another. No contact, nothing owed either way, so it writes
@@ -114,9 +114,7 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
   return guard(
     "Couldn't record the transfer.",
     async () => {
-      const session = await getSession();
-      // Moves money between accounts, so it needs the permission that edits them.
-      requirePermission(session, "accounts", "edit");
+      const session = await getLiveSession();
 
       const companyId = String(formData.get("companyId") ?? "");
       const documentDate = String(formData.get("documentDate") ?? "");
@@ -129,6 +127,10 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
 
       if (!companyId) return { error: "Company is required." };
       if (!documentDate) return { error: "Date is required." };
+      // Moves money between accounts, so it needs the permission that edits
+      // them — scoped to the submitted company (membership + per-company
+      // permission).
+      requirePermission(session, "accounts", "edit", { companyId });
       if (!fromValue || !toValue) return { error: "Pick the account the money leaves and the one it lands in." };
       if (fromValue === toValue) return { error: "Pick two different accounts." };
       if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter an amount greater than zero." };
@@ -181,12 +183,10 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
 
           // The cheque went out with the money: tied to the document it settled
           // and marked spent, so it leaves the register's working list and
-          // can't be picked again for something else.
+          // can't be picked again for something else. The guarded link refuses
+          // one another document already spent.
           if (side.account.chequeId) {
-            await tx
-              .update(chequeRegister)
-              .set({ documentId: doc.id, status: chequeStatusAfterSettling(side.direction) })
-              .where(eq(chequeRegister.id, side.account.chequeId));
+            await linkCheque(tx, side.account.chequeId, doc.id, side.direction);
           }
         }
       });
@@ -203,15 +203,25 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
 
 export async function deleteCashTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — one of these documents is still referenced elsewhere.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "accounts", "delete");
 
     const documentId = String(formData.get("documentId") ?? "");
-    const [outDoc] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1);
+    // Read scoped: a guessed id from an unauthorized company is "not found".
+    const [outDoc] = await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .limit(1);
     if (!outDoc?.reason?.startsWith(`${TRANSFER_REASON} `)) return { error: "Transfer not found." };
+    requirePermission(session, "accounts", "delete", { companyId: outDoc.companyId });
 
     const key = outDoc.reason.split(" ")[3];
-    const [inDoc] = await db.select().from(documents).where(eq(documents.reason, inReason(key))).limit(1);
+    const [inDoc] = await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.reason, inReason(key)), await companyInScope(documents.companyId)))
+      .limit(1);
     if (!inDoc) return { error: "The other half of this transfer is missing — delete each document on its own." };
 
     await db.transaction(async (tx) => {

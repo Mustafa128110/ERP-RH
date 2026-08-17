@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { locations, locationTypeEnum } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
@@ -34,7 +34,7 @@ export interface LocationBatchRow {
 
 export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<CreateResult<{ id: string; name: string }>> {
   return guard("Couldn't save the locations.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "locations", "create");
 
     const valid = rows.filter((r) => r.name.trim() && locationTypes.includes(r.locationType));
@@ -50,7 +50,7 @@ export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<Cr
 
 export async function updateLocation(locationId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the location.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "locations", "edit");
 
     const values = readLocationForm(formData);
@@ -67,7 +67,7 @@ export async function updateLocation(locationId: string, _prevState: ActionResul
 
 export async function deleteLocation(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this location is still referenced by stock, transactions, or user access.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "locations", "delete");
 
     const locationId = String(formData.get("locationId") ?? "");

@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, userCompanyAccess } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult } from "@/lib/actions/guard";
@@ -45,7 +45,7 @@ export interface CompanyBatchRow {
 
 export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<ActionResult> {
   return guard("Couldn't save the companies.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "companies", "create");
 
     const valid = rows.filter((r) => r.name.trim());
@@ -75,7 +75,7 @@ export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<Act
 
 export async function updateCompany(companyId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the company.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "companies", "edit");
 
     const values = readCompanyForm(formData);
@@ -91,7 +91,7 @@ export async function updateCompany(companyId: string, _prevState: ActionResult 
 
 export async function deleteCompany(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — other records (contacts, items, documents, …) still reference this company.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "companies", "delete");
 
     const companyId = String(formData.get("companyId") ?? "");

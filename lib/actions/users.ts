@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { users, userRoles, roles, companies } from "@/lib/db/schema";
-import { getSession, invalidateSessions } from "@/lib/auth/session";
+import { getLiveSession, getSession, invalidateSessions } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
@@ -74,7 +74,7 @@ export interface UserBatchRow {
 // rest of the batch.
 export async function createUsersBatch(rows: UserBatchRow[]): Promise<ActionResult> {
   return guard("Couldn't create the users.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "users", "create");
 
     const valid = rows.filter((r) => r.name.trim() && r.email.trim() && r.password && r.roleId);
@@ -123,7 +123,7 @@ export async function createUsersBatch(rows: UserBatchRow[]): Promise<ActionResu
 
 export async function updateUser(userId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the user.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "users", "edit");
 
     const name = String(formData.get("name") ?? "").trim();
@@ -142,7 +142,7 @@ export async function updateUser(userId: string, _prevState: ActionResult | unde
 
 export async function addUserRole(userId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't add that role.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "users", "edit");
 
     const roleId = String(formData.get("roleId") ?? "");
@@ -160,7 +160,7 @@ export async function addUserRole(userId: string, _prevState: ActionResult | und
 
 export async function removeUserRole(formData: FormData): Promise<ActionResult> {
   return guard("Couldn't remove that role.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "users", "edit");
 
     const assignmentId = String(formData.get("assignmentId") ?? "");
@@ -174,7 +174,7 @@ export async function removeUserRole(formData: FormData): Promise<ActionResult> 
 
 export async function deleteUser(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't delete this user — it may still be referenced elsewhere.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "users", "delete");
 
     const userId = String(formData.get("userId") ?? "");

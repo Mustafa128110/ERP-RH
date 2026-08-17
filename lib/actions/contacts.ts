@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { contacts, companies } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -14,14 +14,15 @@ import { recordAudit } from "@/lib/actions/audit";
 // Contacts are unified — no supplier/customer split. A write is allowed if the
 // user can create/edit in either the customers or suppliers module, so both a
 // Salesman (customers) and a purchaser (suppliers) can add contacts.
-function requireContactPermission(session: Parameters<typeof requirePermission>[0], action: string) {
+function requireContactPermission(session: Parameters<typeof requirePermission>[0], action: string, companyId?: string) {
+  const scope = companyId ? { companyId } : undefined;
   try {
-    requirePermission(session, "customers", action);
+    requirePermission(session, "customers", action, scope);
     return;
   } catch {
     // fall through — try suppliers, which throws if that's missing too
   }
-  requirePermission(session, "suppliers", action);
+  requirePermission(session, "suppliers", action, scope);
 }
 
 const contactColumns = {
@@ -140,11 +141,17 @@ export async function createContactsBatch(
   return guard(
     "Couldn't save the contacts.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       const valid = rows.filter((r) => r.displayName.trim());
       if (valid.length === 0) return { error: "Add at least one contact with a name." };
 
       requireContactPermission(session, "create");
+      // Every company the batch files under must be one the user belongs to and
+      // can create contacts in — a row carrying a forged or stale companyId is
+      // refused rather than silently filed there.
+      for (const companyId of new Set(valid.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requireContactPermission(session, "create", companyId);
+      }
 
       const created = await db
         .insert(contacts)
@@ -205,8 +212,13 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
   return guard(
     "Couldn't save the contacts.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requireContactPermission(session, "edit");
+      // Every company the batch moves rows into must be one the user can act
+      // on; the UPDATE below is also scoped, so an out-of-scope row never matches.
+      for (const companyId of new Set(rows.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requireContactPermission(session, "edit", companyId);
+      }
 
       const blank = rows.findIndex((r) => !r.displayName.trim());
       if (blank !== -1) return { error: `Row ${blank + 1}: a contact needs a name.` };
@@ -238,6 +250,9 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
         sql`, `,
       );
 
+      // The scope rides on the existing row's company, so a ticked id from a
+      // stale page can't reach a contact outside the user's companies.
+      const scope = await companyInScope(contacts.companyId);
       await db.execute(sql`
         UPDATE contacts AS c
         SET display_name = v.display_name,
@@ -251,7 +266,7 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
             credit_limit = v.credit_limit,
             is_active    = v.is_active
         FROM (VALUES ${values}) AS v(id, display_name, company_id, company_name, phone, email, address, city, tax_number, credit_limit, is_active)
-        WHERE c.id = v.id
+        WHERE c.id = v.id AND ${scope}
       `);
 
       invalidateLookups(CACHE.contacts);
@@ -265,12 +280,15 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
 
 export async function updateContact(contactId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the contact.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     const data = readContactForm(formData);
     requireContactPermission(session, "edit");
+    // A non-global company in the submission must be one the user can act on.
+    if (data.companyId) requireContactPermission(session, "edit", data.companyId);
     if (!data.displayName) return { error: "Name is required." };
 
-    await db.update(contacts).set(data).where(eq(contacts.id, contactId));
+    // Scoped so a guessed id can't reach a contact outside the user's companies.
+    await db.update(contacts).set(data).where(and(eq(contacts.id, contactId), await companyInScope(contacts.companyId)));
     invalidateLookups(CACHE.contacts);
     revalidatePath("/purchases/suppliers");
     await recordAudit({ action: "update", entity: "contact", entityId: contactId, summary: data.displayName, companyId: data.companyId });

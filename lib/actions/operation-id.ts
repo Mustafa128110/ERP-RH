@@ -1,6 +1,11 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { DUPLICATE_OPERATION_MESSAGE, OPERATION_ID_FIELD } from "@/lib/operation-constants";
+
+// Re-exported so existing importers (guard.check.ts) keep their single import
+// path; the values themselves now live in the client-safe module.
+export { DUPLICATE_OPERATION_MESSAGE, OPERATION_ID_FIELD } from "@/lib/operation-constants";
 
 // Duplicate-submission protection for the critical creates (sales, purchases,
 // payments, expenses, transfers, adjustments, quotations, ledger entries).
@@ -25,10 +30,6 @@ import { db } from "@/lib/db";
 // longest a double-click can lag a human), so the table stays small with no
 // cron and no cleanup pass to forget.
 
-export const OPERATION_ID_FIELD = "operationId";
-
-export const DUPLICATE_OPERATION_MESSAGE =
-  "This save was already recorded — the first click went through even if you never saw the confirmation. Check the list before saving again.";
 
 // Distinct from every database error so guard() and the actions' catch blocks
 // can name it: nothing was written, the user just needs to know the first one

@@ -14,7 +14,7 @@ import {
   locations,
   inventoryTransactions,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -292,11 +292,12 @@ export async function createStockTransfer(
   _prevState: (ActionResult & { id?: string }) | undefined,
   formData: FormData,
 ) {
-  const session = await getSession();
-  requirePermission(session, "stock_transfers", "create");
+  const session = await getLiveSession();
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
+  // Scoped to the submitted company: membership + stock_transfers.create there.
+  requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
   const operationId = readOperationId(formData);
 
   const documentType = await getOrCreateTransferDocumentType(header.companyId);
@@ -347,13 +348,18 @@ export async function updateStockTransfer(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ) {
-  const session = await getSession();
-  requirePermission(session, "stock_transfers", "create");
+  const session = await getLiveSession();
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
+  requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
 
-  const [existing] = await db.select({ id: documents.id, number: documents.number }).from(documents).where(eq(documents.id, documentId)).limit(1);
+  // Read scoped: a guessed id from an unauthorized company is "not found".
+  const [existing] = await db
+    .select({ id: documents.id, number: documents.number })
+    .from(documents)
+    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+    .limit(1);
   if (!existing) return { error: "Transfer not found." };
 
   try {
@@ -389,7 +395,7 @@ export async function updateStockTransfer(
 }
 
 export async function deleteStockTransfer(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+  const session = await getLiveSession();
   // No stock_transfers.delete in the permission catalog — reversing a posted
   // transfer is an approve-level act, so it reuses that.
   requirePermission(session, "stock_transfers", "approve");
@@ -399,12 +405,14 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
 
   // Read before the delete, because afterwards there is nothing left to name it
   // by — an audit entry saying a uuid was deleted answers nobody.
+  // Read scoped: a guessed id from an unauthorized company is "not found".
   const [doomed] = await db
     .select({ number: documents.number, companyId: documents.companyId })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Transfer not found." };
+  requirePermission(session, "stock_transfers", "approve", { companyId: doomed.companyId });
 
   try {
     await db.transaction(async (tx) => {

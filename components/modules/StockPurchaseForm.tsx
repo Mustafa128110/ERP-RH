@@ -10,9 +10,10 @@ import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { landedUnitCost, money, perUnitShare, resolveAdjustment, round1, todayISO } from "@/lib/format";
 
-import { fieldClass, labelClass, labelTextClass, errorTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -51,7 +52,9 @@ type Line = {
 // has to be selected and overwritten on every line. Blank shows a placeholder
 // and, since a line only counts once its quantity is above zero, a spare row
 // left untouched is simply ignored on save.
-// One draft per form: only one purchase is ever being typed.
+// One draft per form: only one purchase is ever being typed. The user id is
+// appended at the call site (purchase:<uid>) so a shared browser never offers
+// one user's half-typed purchase to another.
 const PURCHASE_DRAFT_KEY = "purchase";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", unitPrice: "", unitCost: "" });
@@ -111,10 +114,29 @@ export function StockPurchaseCreateForm({
   onDone: () => void;
 }) {
   const isEdit = !!purchaseId;
+  // The draft key is composed per render from the logged-in user — SessionSeed
+  // (in the layout) sets the id before children render, so the first render
+  // already carries the scoped key.
+  const userId = useClientUserId();
+  const purchaseDraftKey = userId ? `${PURCHASE_DRAFT_KEY}:${userId}` : PURCHASE_DRAFT_KEY;
   // One id per open form: sent with every submit, claimed by the server inside
   // the same transaction as the purchase, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
-  const [state, action, pending] = useActionState(isEdit ? updateStockPurchase.bind(null, purchaseId!) : createStockPurchase, undefined);
+  // Wrapped so a transport failure (response lost after the server committed)
+  // becomes an inline error instead of throwing into the error boundary — that
+  // would lose the form and its operation id, and a restored draft would mint a
+  // fresh id and post the purchase twice. The form survives; a replayed Save is
+  // refused server-side as a duplicate.
+  const [state, action, pending] = useActionState(
+    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
+      try {
+        return isEdit ? await updateStockPurchase(purchaseId!, prev, formData) : await createStockPurchase(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+    },
+    undefined,
+  );
   // The saved lines plus one blank row: the grid only grows when its last row is
   // edited, and on an existing purchase every row is already filled — so without
   // the spare there is nowhere to add an item.
@@ -166,7 +188,7 @@ export function StockPurchaseCreateForm({
   const draftState = { lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxTotal, shippingTotal, isPaid, settlementType };
   type PurchaseDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(PURCHASE_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(purchaseDraftKey, {
     state: draftState,
     enabled: !isEdit,
     hasContent: (d) => d.lines.some((l) => l.itemText?.trim() || l.quantity?.trim()),
@@ -214,7 +236,7 @@ export function StockPurchaseCreateForm({
   function resetForm() {
     // Cleared on purpose, so the draft goes with it rather than being offered
     // back on the next visit.
-    clearDraft(PURCHASE_DRAFT_KEY);
+    clearDraft(purchaseDraftKey);
     setLines([emptyLine()]);
     setContactId("");
     setSupplierText("");
@@ -233,7 +255,7 @@ export function StockPurchaseCreateForm({
   useEffect(() => {
     if (!state?.success) return;
     // Saved — the local copy has nothing left to protect.
-    clearDraft(PURCHASE_DRAFT_KEY);
+    clearDraft(purchaseDraftKey);
     if (startNext.current) {
       startNext.current = false;
       // The list behind the popup still has to learn about what was just saved;

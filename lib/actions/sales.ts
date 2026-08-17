@@ -17,7 +17,7 @@ import {
   inventoryTransactions,
   ledgerEntries,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
@@ -29,6 +29,7 @@ import { round1 } from "@/lib/format";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 
 export interface SaleItemRow {
   itemName: string;
@@ -403,13 +404,17 @@ async function resolveLineRows(tx: SaleTx, companyId: string, lines: SaleLineInp
 }
 
 export async function createSale(_prevState: (ActionResult & { id?: string }) | undefined, formData: FormData) {
-  const session = await getSession();
-  requirePermission(session, "sales", "create");
+  const session = await getLiveSession();
 
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
+  // Scoped to the submitted company: the user must both belong to it and hold
+  // sales.create there — a permission held in some other company, or a company
+  // access revoked since the form was filled, is refused rather than written
+  // into. (sales.create anywhere used to pass and the company was never checked.)
+  requirePermission(session, "sales", "create", { companyId });
 
   const validLines = readLines(formData);
   if (validLines.length === 0) return { error: "Add at least one item." };
@@ -505,7 +510,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
       // grand total.
       if (settles && paidAmount > 0) {
         if (chequeId) {
-          await tx.update(chequeRegister).set({ documentId: doc.id }).where(eq(chequeRegister.id, chequeId));
+          await linkCheque(tx, chequeId, doc.id, "in");
         }
         await adjustSettlementBalance(tx, "in", String(paidAmount), bankAccountId, cashAccountId, chequeId, 1);
       }
@@ -523,6 +528,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
+    if (e instanceof ChequeUnavailableError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -542,13 +548,16 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
 
 export async function updateSale(documentId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the sale.", async () => {
-    const session = await getSession();
-    requirePermission(session, "sales", "edit");
+    const session = await getLiveSession();
 
     const companyId = String(formData.get("companyId") ?? "");
     const documentDate = String(formData.get("documentDate") ?? "");
     if (!companyId) return { error: "Company is required." };
     if (!documentDate) return { error: "Document date is required." };
+    // Scoped to the submitted company — membership and per-company permission,
+    // so a forged or stale companyId can't steer an edit into another set of
+    // books. The record itself is also read scoped below.
+    requirePermission(session, "sales", "edit", { companyId });
 
     const validLines = readLines(formData);
     if (validLines.length === 0) return { error: "Add at least one item." };
@@ -575,6 +584,8 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     const balance = grandTotal - paidAmount;
     const shopLocationId = await getShopLocationId();
 
+    // Read scoped: a guessed id must never resolve to a document in a company
+    // the user can't act on — outside the scope it simply doesn't exist.
     const [existingDoc] = await db
       .select({
         number: documents.number,
@@ -583,7 +594,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         cashAccountId: documents.cashAccountId,
       })
       .from(documents)
-      .where(eq(documents.id, documentId))
+      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existingDoc) return { error: "Sale not found." };
     const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
@@ -632,7 +643,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
 
       if (settles && paidAmount > 0) {
         if (chequeId) {
-          await tx.update(chequeRegister).set({ documentId }).where(eq(chequeRegister.id, chequeId));
+          await linkCheque(tx, chequeId, documentId, "in");
         }
         await adjustSettlementBalance(tx, "in", String(paidAmount), bankAccountId, cashAccountId, chequeId, 1);
       }
@@ -689,11 +700,13 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
 }
 
 export async function deleteSale(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "sales", "delete");
 
   const documentId = String(formData.get("documentId") ?? "");
 
+  // Read scoped: a guessed id from an unauthorized company is "not found", and
+  // the delete permission is then checked against the row's own company.
   const [existingDoc] = await db
     .select({
       number: documents.number,
@@ -704,9 +717,10 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
       cashAccountId: documents.cashAccountId,
     })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Sale not found." };
+  requirePermission(session, "sales", "delete", { companyId: existingDoc.companyId });
   const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
 
   try {

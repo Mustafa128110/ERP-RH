@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/actions/sales";
 import type { SettlementType } from "@/lib/actions/settlement";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
@@ -13,6 +13,7 @@ import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { DEFAULT_SALE_TYPE, SALE_TYPES, type SaleType } from "@/lib/sale-constants";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -72,6 +73,8 @@ const DEFAULT_CUSTOMER = "Counter";
 const DEFAULT_CASH_ACCOUNT = "Cash on Hand";
 
 // One draft per form, not per sale: there is only ever one sale being typed.
+// The user id is appended at the call site (sale:<uid>) so a shared browser
+// never offers one user's half-typed sale to another.
 const SALE_DRAFT_KEY = "sale";
 
 // M52 doesn't sell over a counter — its sales go out on credit and are settled
@@ -143,6 +146,12 @@ export function SaleFormPage({
 }) {
   const router = useRouter();
   const isEdit = !!saleId;
+  // The draft key is composed per render from the logged-in user: SessionSeed
+  // (in the layout, above this form) sets the id before children render, so the
+  // first render already carries the scoped key and no write ever lands under
+  // an unscoped one. Reactive read so a late-arriving id re-keys the form.
+  const userId = useClientUserId();
+  const saleDraftKey = userId ? `${SALE_DRAFT_KEY}:${userId}` : SALE_DRAFT_KEY;
 
   // Grid refs first: the reset below focuses the first cell, and both the reset
   // and the action that calls it have to be declared before use.
@@ -223,7 +232,7 @@ export function SaleFormPage({
   const draftState = { lines, companyId, contactId, customerText, discountTotal, taxTotal, shippingTotal, isPaid, paidAmount, settlementType };
   type SaleDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(SALE_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(saleDraftKey, {
     state: draftState,
     enabled: !isEdit,
     // A draft of a form nobody typed into is noise; only an unfinished sale is
@@ -269,7 +278,7 @@ export function SaleFormPage({
     // nothing left to protect. Cleared before the state updates so a render that
     // throws on the way out can't leave the finished sale sitting there as an
     // unsaved draft.
-    clearDraft(SALE_DRAFT_KEY);
+    clearDraft(saleDraftKey);
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
     setContactId(counterId(companyId));
     setCustomerText(DEFAULT_CUSTOMER);
@@ -304,11 +313,20 @@ export function SaleFormPage({
   // the same transaction as the sale, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: SaleActionState, formData: FormData) => {
-    const result: SaleActionState = isEdit ? await updateSale(saleId!, prev, formData) : await createSale(prev, formData);
+    // A transport failure (response lost after the server committed) must not
+    // throw into the error boundary — that unmounts the form, and a restored
+    // draft would mint a fresh operation id and post the sale twice. Keep the
+    // form and its id alive; a replayed Save is then refused server-side.
+    let result: SaleActionState;
+    try {
+      result = isEdit ? await updateSale(saleId!, prev, formData) : await createSale(prev, formData);
+    } catch {
+      return { error: TRANSPORT_ERROR_MESSAGE };
+    }
     if (result?.success) {
       // Whatever happens next — a dialog closing, a route change, a page that
       // fails to re-render — this sale is saved, so its draft goes now.
-      clearDraft(SALE_DRAFT_KEY);
+      clearDraft(saleDraftKey);
       if (onDone) onDone();
       else if (isEdit) router.push("/sales/invoices");
       else resetForm();

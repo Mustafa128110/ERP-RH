@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -229,16 +229,18 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
   return guard(
     "Couldn't add the ledger entry.",
     async () => {
-      const session = await getSession();
-      // There is no `ledger` module in the permission catalog and no ledger.create.
-      // accounts.create is the nearest finance-write permission — Admin holds it,
-      // Salesman doesn't, which is the intended split.
-      requirePermission(session, "accounts", "create");
+      const session = await getLiveSession();
 
       const { companyId, documentDate, contactId, contactName, direction, amount, note, error } = readEntryForm(formData);
       if (!companyId) return { error: "Company is required." };
       if (!contactId && !contactName) return { error: "Pick a contact or type a new name." };
       if (error) return { error };
+      // There is no `ledger` module in the permission catalog and no ledger.create.
+      // accounts.create is the nearest finance-write permission — Admin holds it,
+      // Salesman doesn't, which is the intended split. Scoped to the submitted
+      // company, so a forged companyId can't post into a set of books the user
+      // can't act on.
+      requirePermission(session, "accounts", "create", { companyId });
 
       await writeJournalEntry(
         {
@@ -281,8 +283,11 @@ export async function setContactBalance(
   return guard(
     "Couldn't save the balance.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "accounts", "create");
+      const session = await getLiveSession();
+      // Scoped to the company this balance lives in — membership + per-company
+      // permission, so a stale or forged company id can't post a correction
+      // into another set of books.
+      requirePermission(session, "accounts", "create", { companyId });
 
       const { documentDate, direction, amount, note, error } = readEntryForm(formData);
       if (error) return { error };

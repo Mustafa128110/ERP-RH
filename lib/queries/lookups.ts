@@ -337,3 +337,38 @@ export async function getPurchaseFormOptions(documentId?: string) {
     chequeOptions,
   };
 }
+
+// The one bundle the offline-readiness prep (lib/actions/offline.ts) fetches
+// after login: the reference lists the three offline-supported workflows
+// (quotation, expense, payment) need, in the exact shapes the pages seed into
+// the client cache — so a cached option is byte-identical whether it came from
+// a page visit or from the prep. Deliberately NOT the whole database: no
+// documents, no balances, no stock — sales and stock stay server-required and
+// their data is not prepared. The set is enforced by lib/offline-readiness.
+// check.ts against the forms' useCachedOptions calls.
+export async function getOfflineReadinessData() {
+  const [companies, customers, itemRows, units, expenseCategories, contacts, bankAccounts, cashAccounts, cheques] =
+    await Promise.all([
+      getCompanies(),
+      getCustomers(),
+      getItemOptions(),
+      getUnits(),
+      getExpenseCategories(),
+      getContactOptions(),
+      getBankAccountOptions(),
+      getCashAccountOptions(),
+      getAvailableCheques(),
+    ]);
+
+  return {
+    companies,
+    customers: customers.map(labelled.contact),
+    items: itemRows.map(labelled.item),
+    units: units.map(labelled.unit),
+    expenseCategories: expenseCategories.map((c) => ({ id: c.id, name: c.name, companyId: c.companyId })),
+    contacts: contacts.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" })),
+    bankAccounts,
+    cashAccounts,
+    cheques,
+  };
+}

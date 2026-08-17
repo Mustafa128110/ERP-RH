@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, settings } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { guard, type ActionResult } from "@/lib/actions/guard";
@@ -48,7 +48,7 @@ export async function settingValue(companyId: string, key: string): Promise<stri
 
 export async function saveSettings(companyId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the settings.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "settings", "edit", { companyId });
 
     const accessible = await getScopeCompanyIds();

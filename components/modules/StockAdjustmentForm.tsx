@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
 import { todayISO } from "@/lib/format";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -23,7 +24,9 @@ type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string };
 
-// One draft per form: only one adjustment is ever being typed.
+// One draft per form: only one adjustment is ever being typed. The user id is
+// appended at the call site (adjustment:<uid>) so a shared browser never offers
+// one user's half-typed adjustment to another.
 const ADJUSTMENT_DRAFT_KEY = "adjustment";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "" });
@@ -59,6 +62,11 @@ export function StockAdjustmentFormPage({
   const [documentDate, setDocumentDate] = useState(todayISO());
   const [locationId, setLocationId] = useState("");
   const [reason, setReason] = useState("");
+  // The draft key is composed per render from the logged-in user — SessionSeed
+  // (in the layout) sets the id before children render, so the first render
+  // already carries the scoped key.
+  const userId = useClientUserId();
+  const adjustmentDraftKey = userId ? `${ADJUSTMENT_DRAFT_KEY}:${userId}` : ADJUSTMENT_DRAFT_KEY;
 
   // --- Draft ----------------------------------------------------------------
   // An adjustment is a shelf-count typed against live stock levels — the worst
@@ -68,7 +76,7 @@ export function StockAdjustmentFormPage({
   const draftState = { lines, companyId, documentDate, locationId, reason };
   type AdjustmentDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<AdjustmentDraft>(ADJUSTMENT_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<AdjustmentDraft>(adjustmentDraftKey, {
     state: draftState,
     enabled: true,
     hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
@@ -95,10 +103,19 @@ export function StockAdjustmentFormPage({
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(
     async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
-      const result = await createStockAdjustment(prev, formData);
+      // A transport failure must not throw into the error boundary — that would
+      // lose the form (and its operation id), and a restored draft would mint a
+      // fresh id and post the adjustment twice. Keep the form alive; a replayed
+      // Save is then refused server-side as a duplicate.
+      let result: { error?: string; success?: boolean; id?: string } | undefined;
+      try {
+        result = await createStockAdjustment(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
       if (result?.success) {
         // Saved — the local copy has nothing left to protect.
-        clearDraft(ADJUSTMENT_DRAFT_KEY);
+        clearDraft(adjustmentDraftKey);
         if (onDone) onDone();
         else resetForm();
       }

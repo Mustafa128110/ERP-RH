@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { taxes } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -38,7 +38,7 @@ export interface TaxBatchRow {
 
 export async function createTaxesBatch(rows: TaxBatchRow[]): Promise<ActionResult> {
   return guard("Couldn't save the taxes.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "taxes", "create");
 
     const valid = rows.filter((r) => r.name.trim() && !Number.isNaN(Number(r.rate)));
@@ -53,7 +53,7 @@ export async function createTaxesBatch(rows: TaxBatchRow[]): Promise<ActionResul
 
 export async function updateTax(taxId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the tax.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "taxes", "edit");
 
     const values = readTaxForm(formData);
@@ -69,7 +69,7 @@ export async function updateTax(taxId: string, _prevState: ActionResult | undefi
 
 export async function deleteTax(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this tax is still referenced by document lines.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "taxes", "delete");
 
     const taxId = String(formData.get("taxId") ?? "");

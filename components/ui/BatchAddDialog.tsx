@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/ui/Dialog";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { clearDraft, readDraft, saveDraft } from "@/lib/draft";
+import { TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 
 const ADD_ROWS = 2;
 
@@ -26,6 +27,7 @@ export function BatchAddDialog<T, C = unknown>({
   headers,
   renderRow,
   onSubmit,
+  onQueue,
   onDone,
   initialRows = 5,
   toolbar,
@@ -38,6 +40,14 @@ export function BatchAddDialog<T, C = unknown>({
   headers: string[];
   renderRow: (row: T, index: number, update: (patch: Partial<T>) => void) => React.ReactNode;
   onSubmit: (rows: T[]) => Promise<{ error?: string; created?: C[] }>;
+  // When set, a "Queue for later" button appears beside Save — the rows are
+  // kept locally and sent when the connection returns, instead of posted now.
+  // Only the flows whose server actions are safe to replay with a stable
+  // operation id pass this (expenses, payments); the master-data dialogs
+  // don't. The caller maps rows to its server payload and calls useSync().
+  // Must return true only when the work was DURABLY queued (written to local
+  // storage); false keeps the dialog open so the rows are not lost.
+  onQueue?: (rows: T[]) => boolean;
   onDone: (created?: C[]) => void;
   // Quick-add from inside another form usually means "I need one thing"; the
   // master-data pages mean "I'm entering a batch". Same dialog, different start.
@@ -75,6 +85,14 @@ export function BatchAddDialog<T, C = unknown>({
   const [restoredFromDraft, setRestoredFromDraft] = useState(initial !== null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True when the queue for later couldn't be written to local storage — the
+  // dialog stays open because the rows are only safe in this page, and the
+  // user must be told rather than believe the work is stored.
+  const [queueError, setQueueError] = useState<string | null>(null);
+  // True when the crash-draft (the copy that survives a reload) failed to
+  // save. The rows are still in the grid, so nothing is lost yet — but a
+  // reload would be. Say so.
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
 
   // The draft only starts once the user has actually touched a row — an
@@ -83,7 +101,12 @@ export function BatchAddDialog<T, C = unknown>({
   const [touched, setTouched] = useState(initial !== null);
   useEffect(() => {
     if (!draftKey || !touched) return;
-    saveDraft(draftKey, rows);
+    // saveDraft reports whether the write landed; a draft that couldn't be
+    // saved must not be silently presented as crash-proof. The warning update
+    // is deferred off the synchronous effect body (the lint rule against
+    // setState in effects); the value is stable, so a failed save warns once.
+    const ok = saveDraft(draftKey, rows);
+    queueMicrotask(() => setDraftSaveFailed(!ok));
   }, [draftKey, rows, touched]);
 
   function update(i: number, patch: Partial<T>) {
@@ -107,6 +130,7 @@ export function BatchAddDialog<T, C = unknown>({
   async function submit() {
     setPending(true);
     setError(null);
+    setQueueError(null);
     let result;
     try {
       result = await onSubmit(rows);
@@ -117,7 +141,7 @@ export function BatchAddDialog<T, C = unknown>({
       // grid (and in the draft), so Save stays available: a replayed click
       // after a save that did land is refused server-side by the operation id.
       setPending(false);
-      setError("Couldn't reach the server — the save may or may not have gone through. Check the list, then Save again if it didn't.");
+      setError(TRANSPORT_ERROR_MESSAGE);
       return;
     }
     setPending(false);
@@ -151,6 +175,27 @@ export function BatchAddDialog<T, C = unknown>({
           )}
           <div className="ml-auto flex items-center gap-3">
             {error && <p className="text-sm text-error">{error}</p>}
+            {queueError && <p className="text-sm text-error">{queueError}</p>}
+            {onQueue && (
+              <button
+                type="button"
+                onClick={() => {
+                  // The rows have moved out of this grid into the outbox — the
+                  // local draft would otherwise offer them back next time and a
+                  // restore could queue the same work twice. Only when the queue
+                  // actually took them: a queue that couldn't be written leaves
+                  // the dialog open, rows intact, and says so.
+                  if (onQueue(rows)) {
+                    if (draftKey) clearDraft(draftKey);
+                    onClose();
+                  }
+                }}
+                className="h-10 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory"
+                title="Keep this work locally and send it when the connection returns"
+              >
+                Queue for later
+              </button>
+            )}
             <button type="button" onClick={onClose} className="h-10 rounded px-4 text-sm text-steel hover:bg-ivory">
               Cancel
             </button>
@@ -170,6 +215,13 @@ export function BatchAddDialog<T, C = unknown>({
         </div>
       }
     >
+      {draftSaveFailed && draftKey && (
+        <p className="mb-3 rounded border border-red-600 bg-red-100 px-3 py-2 text-sm text-red-900">
+          This browser could not save a copy of this batch (storage is full or blocked). Keep this page open — the
+          rows are safe only while it is.
+        </p>
+      )}
+
       {restoredFromDraft && draftKey && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-brass-600 bg-brass-100 px-3 py-2 text-sm text-ink">
           <span>

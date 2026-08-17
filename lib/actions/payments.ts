@@ -14,8 +14,8 @@ import {
   cashAccounts,
   chequeRegister,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { getLiveSession, getSession } from "@/lib/auth/session";
+import { requirePermission, PermissionError } from "@/lib/auth/permissions";
 import { companyInScope } from "@/lib/auth/scope";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, type SettlementType } from "@/lib/actions/settlement";
@@ -24,7 +24,7 @@ import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/loo
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { paymentLedgerSide } from "@/lib/payment-constants";
-import { chequeStatusAfterSettling, UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
+import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
@@ -38,6 +38,14 @@ const DIRECTION_CODE = {
 const DIRECTION_SERIES = { made: "PM", received: "RC" } as const;
 const DIRECTION_NAME = { made: "Payment Made", received: "Payment Received" } as const;
 const SETTLE_DIRECTION = { made: "out", received: "in" } as const;
+
+// Settling with a cheque is the one settlement that consumes a shared,
+// exhaustible resource. The guarded link lives in lib/actions/cheque-link.ts
+// so sales, purchases and cash transfers settle through the same refusal — a
+// cheque already attached to another document aborts the whole payment (the
+// WHERE re-checks against the committed row, so exactly one of two racers
+// wins), and the operation id makes the retry safe — nothing was written.
+import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 
 // A cheque settles for its own registered amount — the form doesn't show an
 // Amount field when Cheque is picked, so the value comes from the cheque
@@ -178,11 +186,22 @@ export async function createPayment(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ) {
-  const session = await getSession();
-  requirePermission(session, "payments", "create");
+  const session = await getLiveSession();
 
   const values = readPaymentForm(formData);
   if (!values.companyId) return { error: "Company is required." };
+  // Scoped to the submitted company: membership and per-company permission, so
+  // a queued submission filled against a stale cache is refused rather than
+  // written into a company the user can no longer create in. This action is
+  // not guard-wrapped, so the PermissionError is caught here — a throw would
+  // reach the outbox's submit() as a "transient" network error and retry a
+  // permanent denial forever instead of marking it FAILED.
+  try {
+    requirePermission(session, "payments", "create", { companyId: values.companyId });
+  } catch (e) {
+    if (e instanceof PermissionError) return { error: e.message };
+    throw e;
+  }
   if (!values.paymentDate) return { error: "Date is required." };
   if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
 
@@ -229,7 +248,7 @@ export async function createPayment(
       });
 
       if (values.chequeId) {
-        await tx.update(chequeRegister).set({ documentId: doc.id, status: chequeStatusAfterSettling(SETTLE_DIRECTION[direction]) }).where(eq(chequeRegister.id, values.chequeId));
+        await linkCheque(tx, values.chequeId, doc.id, SETTLE_DIRECTION[direction]);
       }
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
 
@@ -244,6 +263,7 @@ export async function createPayment(
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
+    if (e instanceof ChequeUnavailableError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -316,7 +336,7 @@ export interface PaymentBatchRow {
 // batch shares one transaction: any bad row rolls all of them back rather than
 // leaving numbers issued and balances moved for a half-done batch.
 export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?: string): Promise<ActionResult> {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "payments", "create");
   // Minted by the batch dialog when it opened; a replayed submit of a committed
   // batch is refused rather than posting every row twice.
@@ -337,6 +357,21 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
   // -500 used to fail the filter above and vanish without a word.
   if (valid.some((r) => !r.chequeId && !(Number(r.amount) > 0))) {
     return { error: "Amount must be greater than zero." };
+  }
+  // Rows were filled against cached option lists; a company access or
+  // permission may have been revoked since. The cache prepares work, it never
+  // grants it — every distinct company in the batch needs the create
+  // permission THERE (membership is part of the scoped check), so a batch
+  // spanning a company the user can no longer act in is refused wholesale.
+  // Caught like createPayment: this action isn't guard-wrapped, and a throw
+  // would be misread by the outbox as a transient network error.
+  try {
+    for (const companyId of new Set(valid.map((r) => r.companyId))) {
+      requirePermission(session, "payments", "create", { companyId });
+    }
+  } catch (e) {
+    if (e instanceof PermissionError) return { error: e.message };
+    throw e;
   }
 
   // Document types are per company+direction; resolve each once up front (cached)
@@ -386,7 +421,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
         await tx.insert(documentNumberLedger).values({ companyId: r.companyId, documentTypeId: documentType.id, number, documentId: doc.id });
 
         if (r.chequeId) {
-          await tx.update(chequeRegister).set({ documentId: doc.id, status: chequeStatusAfterSettling(SETTLE_DIRECTION[r.direction]) }).where(eq(chequeRegister.id, r.chequeId));
+          await linkCheque(tx, r.chequeId, doc.id, SETTLE_DIRECTION[r.direction]);
         }
         await adjustSettlementBalance(tx, SETTLE_DIRECTION[r.direction], amount, r.bankAccountId, r.cashAccountId, r.chequeId, 1);
 
@@ -415,8 +450,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
 
 export async function updatePayment(paymentId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the payment.", async () => {
-    const session = await getSession();
-    requirePermission(session, "payments", "edit");
+    const session = await getLiveSession();
 
     const values = readPaymentForm(formData);
     if (!values.paymentDate) return { error: "Date is required." };
@@ -438,46 +472,55 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(eq(documents.id, paymentId))
+      .where(and(eq(documents.id, paymentId), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existing) return { error: "Payment not found." };
+    // The edit permission is checked against the row's own company — a guessed
+    // id from a company the user can't edit in is refused even when they hold
+    // the permission somewhere else.
+    requirePermission(session, "payments", "edit", { companyId: existing.companyId });
 
     const direction: PaymentDirection = existing.code === "PAYMENT_MADE" ? "made" : "received";
     const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, paymentId)).limit(1);
 
-    await db.transaction(async (tx) => {
-      // Reverse the old settlement before applying the new one — same
-      // drop-and-reapply approach as the ledger resync below.
-      await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], existing.amount, existing.bankAccountId, existing.cashAccountId, existingCheque?.id ?? null, -1);
-      if (existingCheque) {
-        await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
-      }
+    try {
+      await db.transaction(async (tx) => {
+        // Reverse the old settlement before applying the new one — same
+        // drop-and-reapply approach as the ledger resync below.
+        await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], existing.amount, existing.bankAccountId, existing.cashAccountId, existingCheque?.id ?? null, -1);
+        if (existingCheque) {
+          await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
+        }
 
-      const contactId = await resolveContactId(tx, existing.companyId, values.contactId, values.contactName);
-      await tx
-        .update(documents)
-        .set({
-          contactId,
-          subtotal: values.amount,
-          grandTotal: values.amount,
-          documentDate: values.paymentDate,
-          bankAccountId: values.bankAccountId,
-          cashAccountId: values.cashAccountId,
-        })
-        .where(eq(documents.id, paymentId));
+        const contactId = await resolveContactId(tx, existing.companyId, values.contactId, values.contactName);
+        await tx
+          .update(documents)
+          .set({
+            contactId,
+            subtotal: values.amount,
+            grandTotal: values.amount,
+            documentDate: values.paymentDate,
+            bankAccountId: values.bankAccountId,
+            cashAccountId: values.cashAccountId,
+          })
+          .where(eq(documents.id, paymentId));
 
-      if (values.chequeId) {
-        await tx.update(chequeRegister).set({ documentId: paymentId, status: chequeStatusAfterSettling(SETTLE_DIRECTION[direction]) }).where(eq(chequeRegister.id, values.chequeId));
-      }
-      await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
+        if (values.chequeId) {
+          await linkCheque(tx, values.chequeId, paymentId, SETTLE_DIRECTION[direction]);
+        }
+        await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
 
-      // Re-sync the entry exactly like create — drop and re-add so editing the
-      // amount/contact never leaves a stale ledger row behind.
-      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
-      if (contactId) {
-        await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
-      }
-    });
+        // Re-sync the entry exactly like create — drop and re-add so editing the
+        // amount/contact never leaves a stale ledger row behind.
+        await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
+        if (contactId) {
+          await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
+        }
+      });
+    } catch (e) {
+      if (e instanceof ChequeUnavailableError) return { error: e.message };
+      throw e;
+    }
 
     invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
     revalidatePath("/payments");
@@ -495,7 +538,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
 }
 
 export async function deletePayment(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "payments", "delete");
 
   const paymentId = String(formData.get("paymentId") ?? "");
@@ -511,9 +554,20 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
     })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(eq(documents.id, paymentId))
+    .where(and(eq(documents.id, paymentId), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existing) return { error: "Payment not found." };
+  // The delete permission is checked against the row's own company — a guessed
+  // id from a company the user can't delete in is refused even when they hold
+  // the permission somewhere else. Caught like createPayment: this action
+  // isn't guard-wrapped, and a throw would be misread by the form's transport
+  // wrapper as a network failure.
+  try {
+    requirePermission(session, "payments", "delete", { companyId: existing.companyId });
+  } catch (e) {
+    if (e instanceof PermissionError) return { error: e.message };
+    throw e;
+  }
 
   const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, paymentId)).limit(1);
   const direction: PaymentDirection = existing.code === "PAYMENT_MADE" ? "made" : "received";

@@ -13,9 +13,9 @@ import {
   items,
   ledgerEntries,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { getScopeCompanyIds } from "@/lib/auth/scope";
+import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId, resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
@@ -329,16 +329,19 @@ export interface InterCompanyResult {
 }
 
 export async function createInterCompanySale(_prevState: InterCompanyResult | undefined, formData: FormData): Promise<InterCompanyResult> {
-  const session = await getSession();
-  // Writes on both sides of the fence, so it needs the permission for both.
-  requirePermission(session, "sales", "create");
-  requirePermission(session, "purchases", "create");
+  const session = await getLiveSession();
 
   const header = readHeader(formData);
   const { sellerCompanyId, buyerCompanyId } = header;
   if (!sellerCompanyId || !buyerCompanyId) return { error: "Pick which company sells and which one buys." };
   if (sellerCompanyId === buyerCompanyId) return { error: "Seller and buyer must be different companies." };
   if (header.error) return { error: header.error };
+  // Writes on both sides of the fence, so it needs the permission for both —
+  // each scoped to its own company. A user must belong to both companies and
+  // hold sales.create in the seller and purchases.create in the buyer; one
+  // side outside the session's access refuses the whole pair.
+  requirePermission(session, "sales", "create", { companyId: sellerCompanyId });
+  requirePermission(session, "purchases", "create", { companyId: buyerCompanyId });
 
   const [[seller], [buyer]] = await Promise.all([
     db.select({ name: companies.name }).from(companies).where(eq(companies.id, sellerCompanyId)).limit(1),
@@ -462,17 +465,28 @@ export async function updateInterCompanySale(
   _prevState: InterCompanyResult | undefined,
   formData: FormData,
 ): Promise<InterCompanyResult> {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "sales", "edit");
   requirePermission(session, "purchases", "edit");
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
 
-  const [sale] = await db.select().from(documents).where(eq(documents.id, saleId)).limit(1);
+  // Read scoped: a guessed sale id from an unauthorized company is "not found",
+  // and so is a purchase half outside the scope — a pair can only be edited by
+  // someone who can act on both sides.
+  const [sale] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.id, saleId), await companyInScope(documents.companyId)))
+    .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return { error: "Inter-company sale not found." };
-  const [purchase] = (await db.select().from(documents).where(eq(documents.reason, sale.reason))).filter((d) => d.id !== sale.id);
+  const [purchase] = (await db.select().from(documents).where(and(eq(documents.reason, sale.reason), await companyInScope(documents.companyId)))).filter(
+    (d) => d.id !== sale.id,
+  );
   if (!purchase) return { error: "The matching purchase is missing — edit each document from its own page." };
+  requirePermission(session, "sales", "edit", { companyId: sale.companyId });
+  requirePermission(session, "purchases", "edit", { companyId: purchase.companyId });
 
   const total = linesTotal(header.lines);
 
@@ -526,14 +540,27 @@ export async function updateInterCompanySale(
 }
 
 export async function deleteInterCompanySale(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "sales", "delete");
   requirePermission(session, "purchases", "delete");
 
   const saleId = String(formData.get("documentId") ?? "");
-  const [sale] = await db.select().from(documents).where(eq(documents.id, saleId)).limit(1);
+  // Read scoped: a guessed sale id from an unauthorized company is "not found".
+  const [sale] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.id, saleId), await companyInScope(documents.companyId)))
+    .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return { error: "Inter-company sale not found." };
-  const [purchase] = (await db.select().from(documents).where(eq(documents.reason, sale.reason))).filter((d) => d.id !== sale.id);
+  const [purchase] = (await db.select().from(documents).where(and(eq(documents.reason, sale.reason), await companyInScope(documents.companyId)))).filter(
+    (d) => d.id !== sale.id,
+  );
+  if (purchase) {
+    requirePermission(session, "sales", "delete", { companyId: sale.companyId });
+    requirePermission(session, "purchases", "delete", { companyId: purchase.companyId });
+  } else {
+    requirePermission(session, "sales", "delete", { companyId: sale.companyId });
+  }
 
   const sides = purchase ? [sale, purchase] : [sale];
   // Money that's already moved through a bank or cash account is reversed by the

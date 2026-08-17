@@ -15,6 +15,7 @@ import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
 import type { ContactBalanceHint } from "@/lib/payment-constants";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
+import { useCachedOptions } from "@/lib/client-cache";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
@@ -111,6 +112,15 @@ export function PaymentManager({
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
 }) {
+  // Seed the client reference cache from the live options (so an offline batch
+  // dialog can still fill its pickers) and fall back to the cached copy when the
+  // page rendered empty. Live always wins when present.
+  const cachedCompany = useCachedOptions("companies", companyOptions);
+  const cachedContacts = useCachedOptions("contacts", contactOptions);
+  const cachedBank = useCachedOptions("bankAccounts", bankAccountOptions);
+  const cachedCash = useCachedOptions("cashAccounts", cashAccountOptions);
+  const cachedCheques = useCachedOptions("cheques", chequeOptions);
+
   const [batchOpen, setBatchOpen] = useState(false);
   const [editing, setEditing] = useState<PaymentDetail | null>(null);
   const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
@@ -217,12 +227,12 @@ export function PaymentManager({
 
       {batchOpen && (
         <PaymentBatchAddDialog
-          companyOptions={companyOptions}
-          contactOptions={contactOptions}
+          companyOptions={cachedCompany.value}
+          contactOptions={cachedContacts.value}
           contactBalances={contactBalances}
-          bankAccountOptions={bankAccountOptions}
-          cashAccountOptions={cashAccountOptions}
-          chequeOptions={chequeOptions}
+          bankAccountOptions={cachedBank.value}
+          cashAccountOptions={cachedCash.value}
+          chequeOptions={cachedCheques.value}
           onClose={() => setBatchOpen(false)}
           onDone={close}
         />

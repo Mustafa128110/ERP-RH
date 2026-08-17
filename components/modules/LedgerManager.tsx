@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { ContactPaymentsHover } from "@/components/modules/ContactPaymentsHover";
 import { DateField } from "@/components/ui/DateField";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import { money, todayISO } from "@/lib/format";
@@ -230,8 +230,17 @@ function LedgerEntryForm({
   // One id per open form: sent with every submit, claimed by the server inside
   // the same transaction as the entry, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
+  // Wrapped so a transport failure (response lost after the server committed)
+  // becomes an inline error instead of throwing into the error boundary — the
+  // form stays, and a replayed Save is refused server-side as a duplicate.
   const [state, action, pending] = useActionState(
-    isEdit ? setContactBalance.bind(null, balance.companyId, balance.contactId) : createLedgerEntry,
+    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
+      try {
+        return isEdit ? await setContactBalance(balance.companyId, balance.contactId, prev, formData) : await createLedgerEntry(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+    },
     undefined,
   );
   const [companyId, setCompanyId] = useState(

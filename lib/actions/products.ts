@@ -15,7 +15,7 @@ import {
   unitConversions,
   units,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, getBrands, getCategories, getCompanies, getLocations, getSuppliers, getUnits, invalidateLookups } from "@/lib/queries/lookups";
@@ -78,13 +78,19 @@ export async function createProductsBatch(
   return guard(
     "Couldn't save the products.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "products", "create");
 
       // SKU is no longer required to submit a row — a blank one gets the next RH-
       // number, so a batch can be pasted in with just names.
       const valid = rows.filter((r) => r.name.trim() && r.companyId);
       if (valid.length === 0) return { error: "Add at least one product with a name and company." };
+      // Every company the batch files under must be one the user belongs to and
+      // can create products in — a row carrying a forged or stale companyId is
+      // refused rather than filed into another set of books.
+      for (const companyId of new Set(valid.map((r) => r.companyId))) {
+        requirePermission(session, "products", "create", { companyId });
+      }
 
       const created = await db.transaction(async (tx) => {
         // Distinct typed names resolved once each, not once per row: a price
@@ -375,7 +381,7 @@ export async function updateProductsBatch(
   rows: ProductEditInput[],
 ): Promise<ActionResult> {
   return guard("Couldn't save the products.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "products", "edit");
     // Rows added in the dialog create products, which is a different permission
     // from editing the ones already there.
@@ -418,10 +424,16 @@ export async function updateProductsBatch(
       (shared.mode === "purchase" && rows.some(recordsQty)) || (shared.mode === "adjust" && rows.some((r) => r.targetQty.trim() !== ""));
     if (movesStock && !shared.locationId) {
       return { error: shared.mode === "adjust" ? "Pick the location whose stock levels you're setting." : "Pick the location the goods arrived at." };
-    }
-    if (shared.mode === "adjust" && writesDocuments) {
-      if (!ADJUSTMENT_REASONS.includes(shared.reason as AdjustmentReason)) return { error: "Pick a reason for the stock adjustments." };
-    }
+    }      if (shared.mode === "adjust" && writesDocuments) {
+        if (!ADJUSTMENT_REASONS.includes(shared.reason as AdjustmentReason)) return { error: "Pick a reason for the stock adjustments." };
+      }
+
+      // Rows added in the dialog create products — products.create in each new
+      // product's company. Existing rows are already covered: saveProductRow
+      // updates only rows inside the user's company scope.
+      for (const companyId of new Set(rows.filter((r) => !r.id).map((r) => r.companyId).filter(Boolean))) {
+        requirePermission(session, "products", "create", { companyId });
+      }
 
     // The catalogue half, all rows in one transaction. Each row used to save in
     // two transactions of its own, which broke the promise made four paragraphs
@@ -743,7 +755,7 @@ export async function mergeProducts(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
-  const session = await getSession();
+  const session = await getLiveSession();
   // Rewrites one product and destroys the others, so it needs both.
   requirePermission(session, "products", "edit");
   requirePermission(session, "products", "delete");
@@ -762,11 +774,20 @@ export async function mergeProducts(
   if (!survivorId || !itemIds.includes(survivorId)) return { error: "Pick which product survives the merge." };
   if (!name || !sku) return { error: "The surviving product needs a name and a SKU." };
 
-  const rows = await db.select({ id: items.id, companyId: items.companyId }).from(items).where(inArray(items.id, itemIds));
-  if (rows.length !== itemIds.length) return { error: "One of these products no longer exists." };
+  // Read scoped: a guessed id from an unauthorized company is "not found", and
+  // the merge permission is checked against the merged company below.
+  const rows = await db
+    .select({ id: items.id, companyId: items.companyId })
+    .from(items)
+    .where(and(inArray(items.id, itemIds), await companyInScope(items.companyId)));
+  if (rows.length !== itemIds.length) return { error: "One of these products no longer exists, or isn't in your company scope." };
   // Catalogs are per company and so is stock. Folding an M52 row into a Royal
   // one would move stock between two sets of books without a document saying so.
   if (new Set(rows.map((r) => r.companyId)).size > 1) return { error: "These products belong to different companies — merge within one company." };
+  // The scoped read already proved membership; re-check both permissions for
+  // the company the merged product will live in.
+  requirePermission(session, "products", "edit", { companyId: rows[0].companyId });
+  requirePermission(session, "products", "delete", { companyId: rows[0].companyId });
 
   const loserIds = itemIds.filter((id) => id !== survivorId);
 
@@ -892,7 +913,7 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
 export async function importProductsCsv(
   rows: Record<string, string>[],
 ): Promise<{ error?: string; created?: number }> {
-  const session = await getSession();
+  const session = await getLiveSession();
   requirePermission(session, "products", "create");
   if (rows.length === 0) return { error: "That file has no rows." };
 

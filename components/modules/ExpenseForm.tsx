@@ -7,7 +7,9 @@ import { ComboBox } from "@/components/ui/ComboBox";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
-import { todayISO } from "@/lib/format";
+import { todayISO, money } from "@/lib/format";
+import { useClientUserId } from "@/lib/client-user";
+import { useSync } from "@/components/layout/SyncProvider";
 import { ChequeQuickAddButton } from "@/components/modules/AccountForms";
 
 type Option = { id: string; name: string };
@@ -59,6 +61,26 @@ type BatchRow = {
   notes: string;
 };
 
+// The one mapping from an editable row to what the server action accepts, used
+// by both the live submit and the offline queue — the queued payload must be
+// byte-for-byte the same shape createExpensesBatch reads, or a queued expense
+// would arrive different from one typed online.
+function toServerRows(rows: BatchRow[], batchDate: string): ExpenseBatchRow[] {
+  return rows.map((r) => ({
+    companyId: r.companyId,
+    expenseCategoryId: r.expenseCategoryId,
+    expenseCategoryName: r.expenseCategoryText,
+    settlementType: r.settlementType,
+    bankAccountId: r.settlementType === "account" ? r.settlementId || null : null,
+    cashAccountId: r.settlementType === "cash" ? r.settlementId || null : null,
+    chequeId: r.settlementType === "cheque" ? r.settlementId || null : null,
+    amount: r.amount.trim() || "0",
+    // One date at the top of the dialog, saved on every row.
+    expenseDate: batchDate,
+    notes: r.notes.trim() || null,
+  }));
+}
+
 export function ExpenseBatchAddDialog({
   companyOptions,
   categoryOptions,
@@ -91,7 +113,11 @@ export function ExpenseBatchAddDialog({
   // the same id, so a response lost after a successful save can't post the batch
   // a second time when the user clicks Save again. Fresh mount = fresh id = a
   // genuinely new batch.
+  // The batch draft is scoped per user (expense-batch:<uid>) so a shared
+  // browser never offers one user's half-typed rows to another.
+  const userId = useClientUserId();
   const [operationId] = useState(() => crypto.randomUUID());
+  const { enqueue } = useSync();
 
   // Expenses are almost always entered the day they happen, so one date at the
   // top covers the whole batch — there is no per-row date to retype. en-CA is
@@ -128,7 +154,7 @@ export function ExpenseBatchAddDialog({
       emptyRow={emptyRow}
       initialRows={1}
       autoAppend
-      draftKey="expense-batch"
+      draftKey={userId ? `expense-batch:${userId}` : "expense-batch"}
       headers={["Company", "Category", "Amount", "Settle via", "Account", "Note"]}
       toolbar={
         <label className="flex items-center gap-2">
@@ -139,20 +165,16 @@ export function ExpenseBatchAddDialog({
         </label>
       }
       onSubmit={async (rows) => {
-        const values: ExpenseBatchRow[] = rows.map((r) => ({
-          companyId: r.companyId,
-          expenseCategoryId: r.expenseCategoryId,
-          expenseCategoryName: r.expenseCategoryText,
-          settlementType: r.settlementType,
-          bankAccountId: r.settlementType === "account" ? r.settlementId || null : null,
-          cashAccountId: r.settlementType === "cash" ? r.settlementId || null : null,
-          chequeId: r.settlementType === "cheque" ? r.settlementId || null : null,
-          amount: r.amount.trim() || "0",
-          // One date at the top of the dialog, saved on every row.
-          expenseDate: batchDate,
-          notes: r.notes.trim() || null,
-        }));
-        return createExpensesBatch(values, operationId);
+        return createExpensesBatch(toServerRows(rows, batchDate), operationId);
+      }}
+      onQueue={(rows) => {
+        const values = toServerRows(rows, batchDate);
+        // The stable operation id is minted here, inside the queue — a replayed
+        // sync after a lost response is refused server-side, never doubled.
+        // Returns whether the queue actually persisted: when the browser could
+        // not write it, the dialog stays open with its rows instead of closing
+        // as if the work were safe.
+        return enqueue("expense", `${values.length} expense(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values)?.persisted ?? false;
       }}
       renderRow={(row, i, update) => (
         <>

@@ -1,6 +1,6 @@
 "use server";
 
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, MINUTE } from "@/lib/cache";
@@ -55,7 +55,9 @@ export async function runReport(slug: ReportSlug, filters: ReportFilters): Promi
 // The same rows the table shows, as strings a spreadsheet will read. Formatted
 // here rather than in the browser so the file matches the screen exactly.
 export async function exportReportCsv(slug: ReportSlug, filters: ReportFilters): Promise<Record<string, string>[]> {
-  const session = await getSession();
+  // The CSV hands over the whole financial picture, so the gate is read live —
+  // a revoked user must not keep downloading it from a stale instance cache.
+  const session = await getLiveSession();
   requirePermission(session, "reports", "export");
 
   const report = await runReport(slug, filters);
