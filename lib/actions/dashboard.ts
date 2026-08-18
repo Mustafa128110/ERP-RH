@@ -122,7 +122,7 @@ async function loadDashboard(
     db
       .select({ total: sql<string>`coalesce(sum(${expenses.amount}), 0)` })
       .from(expenses)
-      .where(and(eq(expenses.expenseDate, today), idsInScope(expenses.companyId, scopes.expenses))),
+      .where(and(eq(expenses.expenseDate, today), eq(expenses.status, "posted"), idsInScope(expenses.companyId, scopes.expenses))),
 
     db
       .select({ total: sql<string>`coalesce(sum(${bankAccounts.currentBalance}), 0)` })

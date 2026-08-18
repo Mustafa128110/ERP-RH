@@ -142,10 +142,10 @@ export function DeleteCashTransferButton({ transferId, onDone }: { transferId: s
   }, [state?.success]);
 
   return (
-    <form action={action} onSubmit={(e) => { if (!confirm("Delete this transfer? The money goes back to the account it left.")) e.preventDefault(); }}>
+    <form action={action} onSubmit={(e) => { if (!confirm("Cancel this transfer? The money goes back to the account it left.")) e.preventDefault(); }}>
       <input type="hidden" name="documentId" value={transferId} />
       <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Deleting…" : "Delete this transfer"}
+        {pending ? "Cancelling…" : "Cancel this transfer"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

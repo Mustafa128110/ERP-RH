@@ -31,13 +31,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             {formatDate(sale.documentDate)} · {sale.sellerName} → {sale.buyerName} · {sale.status}
           </p>
         </div>
-        <DeleteInterCompanySaleButton saleId={sale.id} />
+        {sale.status === "posted" && <DeleteInterCompanySaleButton saleId={sale.id} />}
       </div>
 
       {/* Editable: saving replays both documents — the old lines, movements and
           receivable/payable rows are dropped and rewritten, so everything ends up
           matching what's on screen. */}
-      <InterCompanyFormPage
+      {sale.status === "cancelled" ? (
+        <div className="rounded-lg border border-sand bg-white p-5 text-sm text-steel">
+          This inter-company sale and its matching purchase are preserved as cancelled records. They can no longer be edited.
+        </div>
+      ) : <InterCompanyFormPage
         saleId={sale.id}
         defaults={{
           sellerCompanyId: sale.sellerCompanyId,
@@ -59,7 +63,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         }))}
         unitOptions={unitRows.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name }))}
         locationOptions={locationRows.map((l) => ({ id: l.id, name: l.name }))}
-      />
+      />}
     </div>
   );
 }

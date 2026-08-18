@@ -197,6 +197,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN expense_categories ec ON ec.id = e.expense_category_id
         JOIN companies c ON c.id = e.company_id
        WHERE e.company_id IN (${s.companies})
+         AND e.status = 'posted'
          AND e.expense_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY ec.name, c.name
        ORDER BY amount DESC`),

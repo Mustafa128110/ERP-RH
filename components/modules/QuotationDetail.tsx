@@ -19,6 +19,7 @@ export function QuotationDetail({
   defaults,
   lines,
   convertible,
+  cancelled,
   companyOptions,
   customerOptions,
   itemOptions,
@@ -32,6 +33,7 @@ export function QuotationDetail({
   lines: QuotationLine[];
   // False once every line is fully invoiced — there is nothing left to convert.
   convertible: boolean;
+  cancelled: boolean;
   companyOptions: Option[];
   customerOptions: ScopedOption[];
   itemOptions: ItemOption[];
@@ -46,21 +48,27 @@ export function QuotationDetail({
     <>
       <div className="flex shrink-0 justify-end">
         <button type="button" onClick={() => setConverting(true)} disabled={!convertible} className={primaryActionClass}>
-          {convertible ? "Convert to Invoice" : "Fully invoiced"}
+          {cancelled ? "Cancelled" : convertible ? "Convert to Invoice" : "Fully invoiced"}
         </button>
       </div>
 
-      <QuotationForm
-        quotationId={quotationId}
-        defaults={defaults}
-        companyOptions={companyOptions}
-        customerOptions={customerOptions}
-        itemOptions={itemOptions}
-        unitOptions={unitOptions}
-        taxOptions={taxOptions}
-        conversionOptions={conversionOptions}
-        taxSettings={taxSettings}
-      />
+      {cancelled ? (
+        <div className="rounded-lg border border-sand bg-white p-5 text-sm text-steel">
+          This quotation is preserved as a cancelled record. It can no longer be edited or converted.
+        </div>
+      ) : (
+        <QuotationForm
+          quotationId={quotationId}
+          defaults={defaults}
+          companyOptions={companyOptions}
+          customerOptions={customerOptions}
+          itemOptions={itemOptions}
+          unitOptions={unitOptions}
+          taxOptions={taxOptions}
+          conversionOptions={conversionOptions}
+          taxSettings={taxSettings}
+        />
+      )}
 
       {converting && <ConvertQuotationDialog quotationId={quotationId} lines={lines} onClose={() => setConverting(false)} />}
     </>

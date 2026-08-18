@@ -59,6 +59,8 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
       expenseDate: expenses.expenseDate,
       notes: expenses.notes,
       attachmentUrl: expenses.attachmentUrl,
+      documentId: expenses.documentId,
+      status: expenses.status,
       createdByName: users.name,
     })
     .from(expenses)
@@ -292,7 +294,7 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
         // Scoped to the session's current companies: an edit form opened
         // before access was revoked must not be able to write into a company
         // the user can no longer reach.
-        .where(and(eq(expenses.id, expenseId), await companyInScope(expenses.companyId)))
+        .where(and(eq(expenses.id, expenseId), eq(expenses.status, "posted"), sql`${expenses.documentId} IS NULL`, await companyInScope(expenses.companyId)))
         .limit(1)
         .for("update");
       // Nothing has been written yet, so returning here commits an empty
@@ -313,7 +315,7 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 
-    if (missing) return { error: "Expense not found — it may already have been deleted." };
+    if (missing) return { error: "Expense not found — it may already be cancelled." };
     if (companyChanged) return { error: "An expense can't be moved to another company. Delete it and enter it in the correct company." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
@@ -325,7 +327,7 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
 }
 
 export async function deleteExpense(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete this expense.", async () => {
+  return guard("Can't cancel this expense.", async () => {
     const session = await getLiveSession();
     requirePermission(session, "expenses", "delete");
 
@@ -338,7 +340,7 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
         .from(expenses)
         // Same scope rule as updateExpense: a delete is a write, and a write
         // into a company the user no longer has access to is refused.
-        .where(and(eq(expenses.id, expenseId), await companyInScope(expenses.companyId)))
+        .where(and(eq(expenses.id, expenseId), eq(expenses.status, "posted"), sql`${expenses.documentId} IS NULL`, await companyInScope(expenses.companyId)))
         .limit(1)
         .for("update");
       if (!existing) {
@@ -350,15 +352,15 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
       // when they hold the permission somewhere else.
       requirePermission(session, "expenses", "delete", { companyId: existing.companyId });
       await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
-      await tx.delete(expenses).where(eq(expenses.id, expenseId));
+      await tx.update(expenses).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date() }).where(eq(expenses.id, expenseId));
     });
 
-    if (missing) return { error: "Expense not found — it may already have been deleted." };
+    if (missing) return { error: "Expense not found — it may already be cancelled." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
-    await recordAudit({ action: "delete", entity: "expense", entityId: expenseId, summary: expenseId });
+    await recordAudit({ action: "cancel", entity: "expense", entityId: expenseId, summary: expenseId });
     return { success: true };
   });
 }

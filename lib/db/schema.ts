@@ -85,6 +85,7 @@ export const documentTypeCodeEnum = pgEnum("document_type_code", [
   "EXPENSE",
   "DELIVERY_NOTE",
   "GOODS_RECEIPT",
+  "MARKET_PURCHASE",
   "CREDIT_NOTE",
   "DEBIT_NOTE",
 ]);
@@ -106,6 +107,7 @@ export const documentSeriesEnum = pgEnum("document_series", [
   "EX",
   "DN",
   "GR",
+  "MP",
   "CN",
   "DB",
 ]);
@@ -328,6 +330,9 @@ export const expenses = pgTable(
     documentId: uuid("document_id").references(() => documents.id, { onDelete: "cascade" }),
     notes: text("notes"),
     attachmentUrl: text("attachment_url"),
+    status: documentStatusEnum("status").notNull().default("posted"),
+    cancelledBy: uuid("cancelled_by"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -571,6 +576,10 @@ export const documentLines = pgTable(
     // Used by approval-gated stock adjustments. Pending adjustments have no
     // inventory_transaction yet, so the intended sign has to live on the line.
     stockMovement: smallint("stock_movement"),
+    // A sale line can be fulfilled by buying the item specifically from the
+    // market. It still posts the outbound sale immediately; confirmation of the
+    // linked request posts the matching inbound movement and the actual cost.
+    marketPurchase: boolean("market_purchase").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     // Quotation lines only: how much of this line has already been turned into
     // an invoice. A quotation is converted in parts — half the tiles now, the
@@ -606,6 +615,36 @@ export const paymentAllocations = pgTable(
     index("idx_payment_allocations_invoice").on(table.invoiceDocumentId),
     index("idx_payment_allocations_company").on(table.companyId),
     check("payment_allocations_amount_check", sql`${table.amount} > 0`),
+  ],
+);
+
+export const marketPurchaseStatusEnum = pgEnum("market_purchase_status", ["pending", "confirmed", "cancelled"]);
+
+export const marketPurchaseRequests = pgTable(
+  "market_purchase_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id),
+    saleDocumentId: uuid("sale_document_id").notNull().references(() => documents.id, { onDelete: "restrict" }),
+    saleLineId: uuid("sale_line_id").notNull().references(() => documentLines.id, { onDelete: "restrict" }),
+    itemId: uuid("item_id").notNull().references(() => items.id),
+    unitId: uuid("unit_id").references(() => units.id),
+    quantity: numeric("quantity", { precision: 18, scale: 3 }).notNull(),
+    baseQuantity: numeric("base_quantity", { precision: 18, scale: 3 }).notNull(),
+    status: marketPurchaseStatusEnum("status").notNull().default("pending"),
+    confirmationDocumentId: uuid("confirmation_document_id").references(() => documents.id, { onDelete: "restrict" }),
+    expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "restrict" }),
+    purchaseCost: numeric("purchase_cost", { precision: 18, scale: 4 }),
+    confirmedBy: uuid("confirmed_by"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique().on(table.saleLineId),
+    index("idx_market_purchase_status_company").on(table.status, table.companyId),
+    index("idx_market_purchase_confirmation").on(table.confirmationDocumentId),
+    check("market_purchase_quantity_check", sql`${table.quantity} > 0 AND ${table.baseQuantity} > 0`),
+    check("market_purchase_cost_check", sql`${table.purchaseCost} IS NULL OR ${table.purchaseCost} >= 0`),
   ],
 );
 

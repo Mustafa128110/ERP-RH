@@ -42,8 +42,19 @@ function IntentLink({ onPointerEnter, onFocus, onTouchStart, ...props }: Compone
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ permissions }: { permissions: string[] }) {
   const pathname = usePathname();
+  const allowed = new Set(permissions);
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!item.permission) return true;
+        const required = Array.isArray(item.permission) ? item.permission : [item.permission];
+        return required.some((permission) => allowed.has(permission));
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   // Exactly one link lights up: the most specific one whose path we're under.
   //
@@ -52,7 +63,7 @@ export function Sidebar() {
   // matched /sales, and both lit up. Taking the longest match resolves the
   // nesting: /sales/invoices beats /sales, and /sales/abc123 (an edit page,
   // which has no nav entry of its own) still falls back to /sales.
-  const activeHref = navSections
+  const activeHref = visibleSections
     .flatMap((section) => section.items.map((item) => item.href))
     .filter((href) => pathname === href || pathname.startsWith(href + "/"))
     .sort((a, b) => b.length - a.length)[0];
@@ -91,7 +102,7 @@ export function Sidebar() {
 
   // The full list of links, shared by the drawer and the expanded desktop rail
   // so the two can never offer different navigation.
-  const sections = navSections.map((section) => (
+  const sections = visibleSections.map((section) => (
     <div key={section.label}>
       <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-brass-600">{section.label}</p>
       <div className="flex flex-col gap-0.5">
@@ -164,7 +175,7 @@ export function Sidebar() {
           </button>
 
           <nav className="scroll-thin flex flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
-            {navSections.map((section, i) => (
+            {visibleSections.map((section, i) => (
               <div key={section.label} className="flex w-full flex-col items-center gap-1">
                 {i > 0 && <hr className="my-1 w-6 border-t border-sand" />}
                 {section.items.map((item) => {

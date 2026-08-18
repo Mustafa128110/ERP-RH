@@ -245,10 +245,11 @@ const chequeSource = (scope: SQL | undefined) =>
         chequeNumber: chequeRegister.chequeNumber,
         amount: chequeRegister.amount,
         documentId: chequeRegister.documentId,
+        companyId: chequeRegister.companyId,
       })
       .from(chequeRegister)
       .where(scope),
-    db.select({ id: expenses.id, chequeId: expenses.chequeId }).from(expenses).where(isNotNull(expenses.chequeId)),
+    db.select({ id: expenses.id, chequeId: expenses.chequeId }).from(expenses).where(and(isNotNull(expenses.chequeId), eq(expenses.status, "posted"))),
   ]);
 
 export async function getAvailableCheques(documentId?: string, expenseId?: string) {
@@ -260,7 +261,7 @@ export async function getAvailableCheques(documentId?: string, expenseId?: strin
 
   return allCheques
     .filter((c) => !(c.documentId && c.documentId !== documentId) && !usedByExpense.has(c.id))
-    .map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` }));
+    .map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})`, companyId: c.companyId }));
 }
 
 const labelled = {

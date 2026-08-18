@@ -477,10 +477,10 @@ export function DeleteExpenseButton({ expenseId, onDone }: { expenseId: string; 
   }, [state?.success]);
 
   return (
-    <form action={action} onSubmit={(e) => { if (!confirm("Delete this expense?")) e.preventDefault(); }}>
+    <form action={action} onSubmit={(e) => { if (!confirm("Cancel this expense? Its payment will be reversed and the record will remain in history.")) e.preventDefault(); }}>
       <input type="hidden" name="expenseId" value={expenseId} />
       <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Deleting…" : "Delete this expense"}
+        {pending ? "Cancelling…" : "Cancel this expense"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

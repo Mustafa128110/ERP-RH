@@ -54,6 +54,7 @@ type Line = {
   // unitPrice (what it sold for).
   listPrice: string;
   unitPrice: string;
+  marketPurchase: boolean;
 };
 
 const emptyLine = (): Line => ({
@@ -65,6 +66,7 @@ const emptyLine = (): Line => ({
   quantity: "",
   listPrice: "",
   unitPrice: "",
+  marketPurchase: false,
 });
 
 // A walk-in is the normal sale: rung up against the Counter contact, paid then
@@ -113,7 +115,7 @@ export type SaleDefaults = {
   saleType: SaleType;
   // Server lines carry ids, not combobox text; unit_cost is what the rate column
   // was saved as. The text and a missing rate are filled in client-side on load.
-  lines: { itemId: string; locationId: string; unitId: string; quantity: string; unitPrice: string; unitCost: string }[];
+  lines: { itemId: string; locationId: string; unitId: string; quantity: string; unitPrice: string; unitCost: string; marketPurchase?: boolean }[];
 };
 
 // Used as a page by /sales (a new sale, which is what that route now opens
@@ -200,6 +202,7 @@ export function SaleFormPage({
             unitText: unitOptions.find((u) => u.id === l.unitId)?.name ?? "",
             // What was typed on this line wins over the item's current rate list price.
             listPrice: rate1(unitCost || itemOptions.find((it) => it.id === l.itemId)?.rate),
+            marketPurchase: Boolean(l.marketPurchase),
           })),
           emptyLine(),
         ]
@@ -252,7 +255,7 @@ export function SaleFormPage({
     // repopulating a form is worse than losing it: the shop would post a sale
     // it believed it had typed fresh.
     apply: (d) => {
-      setLines(d.lines);
+      setLines(d.lines.map((line) => ({ ...line, marketPurchase: Boolean(line.marketPurchase) })));
       setCompanyId(d.companyId);
       setContactId(d.contactId);
       setCustomerText(d.customerText);
@@ -600,6 +603,7 @@ export function SaleFormPage({
                   </th>
                   <th className={`${thClass} w-28`}>Unit Price</th>
                   <th className={`${thClass} w-28 text-right`}>Total</th>
+                  <th className={`${thClass} w-24 text-center`} title="Buy specifically from the market to fulfil this sale">Market Buy</th>
                   <th className="w-8 border border-sand" />
                 </tr>
               </thead>
@@ -673,6 +677,15 @@ export function SaleFormPage({
                       {/* Blank on an untouched row rather than 0.00 — the empty
                           rows are just spare space to type into. */}
                       {line.quantity && line.unitPrice ? money((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) : ""}
+                    </td>
+                    <td className="border border-sand text-center">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(line.marketPurchase)}
+                        onChange={(event) => updateLine(r, { marketPurchase: event.target.checked })}
+                        aria-label={`Market purchase for line ${r + 1}`}
+                        className="h-4 w-4 accent-navy-800"
+                      />
                     </td>
                     <td className="border border-sand text-center">
                       <button

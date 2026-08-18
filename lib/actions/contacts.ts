@@ -183,6 +183,7 @@ export async function createContactsBatch(
         .returning({ id: contacts.id, name: contacts.displayName, companyId: contacts.companyId });
       invalidateLookups(CACHE.contacts);
       revalidatePath("/purchases/suppliers");
+      revalidatePath("/contacts");
       await recordAudit({ action: "create", entity: "contact", summary: created.map((c) => c.name).slice(0, 5).join(", ") });
       return { created };
     },
@@ -295,6 +296,7 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
 
       invalidateLookups(CACHE.contacts);
       revalidatePath("/purchases/suppliers");
+      revalidatePath("/contacts");
       await recordAudit({ action: "update", entity: "contact", summary: `${rows.length} contact(s) edited` });
       return { saved: rows.length };
     },
@@ -315,6 +317,7 @@ export async function updateContact(contactId: string, _prevState: ActionResult 
     await db.update(contacts).set(data).where(and(eq(contacts.id, contactId), await companyInScope(contacts.companyId)));
     invalidateLookups(CACHE.contacts);
     revalidatePath("/purchases/suppliers");
+    revalidatePath("/contacts");
     await recordAudit({ action: "update", entity: "contact", entityId: contactId, summary: data.displayName, companyId: data.companyId });
     return { success: true };
   });

@@ -73,7 +73,7 @@ export type QuotationListRow = {
   grandTotal: string;
   // Derived, not stored: a quotation's state is a fact about its lines, and a
   // stored copy is a second version of the truth waiting to disagree.
-  status: "Open" | "Partly converted" | "Converted" | "Expired";
+  status: "Open" | "Partly converted" | "Converted" | "Expired" | "Cancelled";
   // What was quoted, for the hover panel — name, how much, how much of it has
   // been invoiced already.
   lines: { name: string; quantity: string; converted: string }[];
@@ -81,7 +81,8 @@ export type QuotationListRow = {
 
 // Open / partly converted / converted, plus expiry. Expiry loses to conversion:
 // something already invoiced is converted, whatever its validity date says.
-function statusOf(quoted: number, converted: number, validUntil: string | null): QuotationListRow["status"] {
+function statusOf(quoted: number, converted: number, validUntil: string | null, documentStatus?: string): QuotationListRow["status"] {
+  if (documentStatus === "cancelled") return "Cancelled";
   if (converted > 0 && converted >= quoted) return "Converted";
   if (validUntil && validUntil < todayISO()) return "Expired";
   if (converted > 0) return "Partly converted";
@@ -106,6 +107,7 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
       documentDate: documents.documentDate,
       validUntil: documents.validUntil,
       grandTotal: documents.grandTotal,
+      documentStatus: documents.status,
       quoted: sql<string>`coalesce(sum(${documentLines.quantity}), 0)`,
       converted: sql<string>`coalesce(sum(${documentLines.convertedQuantity}), 0)`,
       // The lines, for the hover panel on the number. Aggregated in the same
@@ -140,7 +142,7 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
     documentDate: r.documentDate,
     validUntil: r.validUntil,
     grandTotal: r.grandTotal,
-    status: statusOf(Number(r.quoted), Number(r.converted), r.validUntil),
+    status: statusOf(Number(r.quoted), Number(r.converted), r.validUntil, r.documentStatus),
     lines: (r.lines ?? []).map((l) => ({
       name: l.name ?? "—",
       quantity: l.quantity,
@@ -195,7 +197,8 @@ export async function getQuotation(documentId: string) {
     taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     grandTotal: doc.grandTotal,
-    status: statusOf(quoted, converted, doc.validUntil),
+    documentStatus: doc.status,
+    status: statusOf(quoted, converted, doc.validUntil, doc.status),
     lines: lineRows.map(
       (l): QuotationLine => ({
         itemId: l.itemId ?? "",
@@ -388,12 +391,13 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
     );
 
     const [existing] = await db
-      .select({ number: documents.number, companyId: documents.companyId })
+      .select({ number: documents.number, companyId: documents.companyId, status: documents.status })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existing) return { error: "Quotation not found." };
+    if (existing.status !== "pending") return { error: "A cancelled quotation cannot be edited." };
     if (existing.companyId !== f.companyId) return { error: "A quotation can't be moved to another company. Delete it and enter it in the correct company." };
 
     // Refused rather than silently dropping the converted quantities: the lines
@@ -440,7 +444,7 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
 }
 
 export async function deleteQuotation(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete — this quotation is still referenced elsewhere.", async () => {
+  return guard("Can't cancel this quotation.", async () => {
     const session = await getLiveSession();
     requirePermission(session, "quotations", "delete");
 
@@ -449,7 +453,7 @@ export async function deleteQuotation(_prevState: ActionResult | undefined, form
       .select({ number: documents.number, companyId: documents.companyId })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "pending"), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!doomed) return { error: "Quotation not found." };
     // The delete permission is checked against the row's own company — a
@@ -457,16 +461,11 @@ export async function deleteQuotation(_prevState: ActionResult | undefined, form
     // they hold the permission somewhere else.
     requirePermission(session, "quotations", "delete", { companyId: doomed.companyId });
 
-    // The invoices raised from it keep their own lines and stock; they just stop
-    // pointing back (source_document_id is ON DELETE SET NULL).
-    await db.transaction(async (tx) => {
-      await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-      await tx.delete(documents).where(eq(documents.id, documentId));
-    });
+    await db.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
 
     invalidateLookups(CACHE.cheques);
     revalidatePath("/sales/quotations");
-    await recordAudit({ action: "delete", entity: "quotation", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
+    await recordAudit({ action: "cancel", entity: "quotation", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
     return { success: true };
   });
 }
@@ -491,6 +490,7 @@ export async function convertQuotation(
 
     const quotation = await getQuotation(documentId);
     if (!quotation) return { error: "Quotation not found." };
+    if (quotation.documentStatus !== "pending") return { error: "A cancelled quotation cannot be converted." };
     // Both sides scoped to the quotation's company: editing the quotation (the
     // converted quantities are written below) and raising the invoice from it
     // both require the permission in THAT company, not merely somewhere.

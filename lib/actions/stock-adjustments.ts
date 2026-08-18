@@ -354,7 +354,7 @@ export async function approveStockAdjustment(_prevState: ActionResult | undefine
 export async function deleteStockAdjustment(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't cancel the stock adjustment.", async () => {
   const session = await getLiveSession();
-  requirePermission(session, "stock_adjustments", "approve");
+  requirePermission(session, "stock_adjustments", "delete");
 
   const documentId = String(formData.get("documentId") ?? "");
   if (!documentId) return { error: "Adjustment not found." };
@@ -366,7 +366,7 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
     .where(and(eq(documents.id, documentId), inArray(documents.status, ["pending", "posted"]), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Adjustment not found." };
-  requirePermission(session, "stock_adjustments", "approve", { companyId: doomed.companyId });
+  requirePermission(session, "stock_adjustments", "delete", { companyId: doomed.companyId });
 
   try {
     await db.transaction(async (tx) => {

@@ -3,18 +3,19 @@
 import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { bankAccounts, cashAccounts, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
+import { bankAccounts, cashAccounts, chequeRegister, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
-import { adjustSettlementBalance, adjustSettlementBalancesBatch } from "@/lib/actions/settlement";
+import { adjustSettlementBalancesBatch } from "@/lib/actions/settlement";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { linkCheque } from "@/lib/actions/cheque-link";
+import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 
 // Moving money between the company's own accounts — cash drawer to bank, bank to
 // cash, one drawer to another. No contact, nothing owed either way, so it writes
@@ -78,7 +79,7 @@ export async function listCashTransfers(): Promise<CashTransferRow[]> {
     .innerJoin(companies, eq(companies.id, documents.companyId))
     .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
     .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), await companyInPermissionScope(documents.companyId, session, "accounts")))
+    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), eq(documents.status, "posted"), await companyInPermissionScope(documents.companyId, session, "accounts")))
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
   // "Cash Transfer <side> <key>" — the key pairs the two halves, the side says
@@ -213,7 +214,7 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
 }
 
 export async function deleteCashTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete — one of these documents is still referenced elsewhere.", async () => {
+  return guard("Couldn't cancel this transfer.", async () => {
     const session = await getLiveSession();
     requirePermission(session, "accounts", "delete");
 
@@ -222,7 +223,7 @@ export async function deleteCashTransfer(_prevState: ActionResult | undefined, f
     const [outDoc] = await db
       .select()
       .from(documents)
-      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!outDoc?.reason?.startsWith(`${TRANSFER_REASON} `)) return { error: "Transfer not found." };
     requirePermission(session, "accounts", "delete", { companyId: outDoc.companyId });
@@ -231,22 +232,31 @@ export async function deleteCashTransfer(_prevState: ActionResult | undefined, f
     const [inDoc] = await db
       .select()
       .from(documents)
-      .where(and(eq(documents.reason, inReason(key)), await companyInScope(documents.companyId)))
+      .where(and(eq(documents.reason, inReason(key)), eq(documents.status, "posted"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!inDoc) return { error: "The other half of this transfer is missing — delete each document on its own." };
 
+    let changed = false;
     await db.transaction(async (tx) => {
-      // Put the money back exactly where it was: the opposite sign on both sides.
-      await adjustSettlementBalance(tx, "out", outDoc.grandTotal, outDoc.bankAccountId, outDoc.cashAccountId, null, -1, outDoc.companyId);
-      await adjustSettlementBalance(tx, "in", inDoc.grandTotal, inDoc.bankAccountId, inDoc.cashAccountId, null, -1, inDoc.companyId);
-      // No lines and no ledger rows to clear — a transfer writes neither.
-      await tx.delete(documents).where(inArray(documents.id, [outDoc.id, inDoc.id]));
+      const ids = [outDoc.id, inDoc.id];
+      const locked = await tx.select({ id: documents.id }).from(documents).where(and(inArray(documents.id, ids), eq(documents.status, "posted"))).for("update");
+      if (locked.length !== 2) return;
+      const [linkedCheque] = await tx.select({ id: chequeRegister.id }).from(chequeRegister).where(inArray(chequeRegister.documentId, ids)).limit(1).for("update");
+      // Put both sides back in one set-based settlement statement.
+      await adjustSettlementBalancesBatch(tx, [
+        { direction: "out", amount: outDoc.grandTotal, bankAccountId: outDoc.bankAccountId, cashAccountId: outDoc.cashAccountId, chequeId: linkedCheque?.id ?? null, sign: -1, companyId: outDoc.companyId },
+        { direction: "in", amount: inDoc.grandTotal, bankAccountId: inDoc.bankAccountId, cashAccountId: inDoc.cashAccountId, chequeId: null, sign: -1, companyId: inDoc.companyId },
+      ]);
+      if (linkedCheque) await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, linkedCheque.id));
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(inArray(documents.id, ids));
+      changed = true;
     });
+    if (!changed) return { error: "Transfer not found — it may already be cancelled." };
 
     invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
     revalidatePath("/accounts");
     revalidatePath("/dashboard");
-    await recordAudit({ action: "delete", entity: "cash transfer", entityId: outDoc.id, summary: outDoc.number, companyId: outDoc.companyId });
+    await recordAudit({ action: "cancel", entity: "cash transfer", entityId: outDoc.id, summary: outDoc.number, companyId: outDoc.companyId });
     return { success: true };
   });
 }

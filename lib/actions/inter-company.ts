@@ -521,7 +521,7 @@ export async function updateInterCompanySale(
     .select(getTableColumns(documents))
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, saleId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, saleId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return { error: "Inter-company sale not found." };
   const [purchase] = await db
@@ -610,7 +610,7 @@ export async function updateInterCompanySale(
 }
 
 export async function deleteInterCompanySale(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't delete the inter-company sale.", async () => {
+  return guard("Couldn't cancel the inter-company sale.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "sales", "delete");
   requirePermission(session, "purchases", "delete");
@@ -621,14 +621,14 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
     .select(getTableColumns(documents))
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, saleId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, saleId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return { error: "Inter-company sale not found." };
   const [purchase] = await db
     .select(getTableColumns(documents))
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.reason, sale.reason), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.reason, sale.reason), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (purchase) {
     requirePermission(session, "sales", "delete", { companyId: sale.companyId });
@@ -666,17 +666,25 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
         return;
       }
       await tx.delete(ledgerEntries).where(inArray(ledgerEntries.documentId, ids));
-      await clearLines(tx, ids);
-      await tx.delete(documents).where(inArray(documents.id, ids));
+      await tx.execute(sql`
+        INSERT INTO inventory_transactions
+          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+        SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
+               it.base_quantity, it.unit_cost, it.total_cost
+        FROM inventory_transactions it
+        JOIN document_lines dl ON dl.id = it.document_line_id
+        WHERE dl.document_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+      `);
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(inArray(documents.id, ids));
     });
   } catch (e) {
-    return { error: describeDbError(e, "Can't delete — one of these documents is still referenced elsewhere.") };
+    return { error: describeDbError(e, "Can't cancel this inter-company sale.") };
   }
   if (paidDuringDelete) return { error: "Something was paid against this while it was open — clear the payment first." };
-  if (vanishedDuringDelete) return { error: "Inter-company sale not found — it may already have been deleted." };
+  if (vanishedDuringDelete) return { error: "Inter-company sale not found — it may already be cancelled." };
 
   invalidateInterCompanyViews();
-  await recordAudit({ action: "delete", entity: "inter-company sale", entityId: saleId, summary: sale.number, companyId: sale.companyId });
+  await recordAudit({ action: "cancel", entity: "inter-company sale", entityId: saleId, summary: sale.number, companyId: sale.companyId });
   return { success: true };
   });
 }

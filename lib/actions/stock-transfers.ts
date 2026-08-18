@@ -372,9 +372,9 @@ export async function updateStockTransfer(
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
-  requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
-  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
-  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
+  requirePermission(session, "stock_transfers", "edit", { companyId: header.companyId });
+  if (header.fromLocationId) requirePermission(session, "stock_transfers", "edit", { companyId: header.companyId, warehouseId: header.fromLocationId });
+  if (header.toLocationId) requirePermission(session, "stock_transfers", "edit", { companyId: header.companyId, warehouseId: header.toLocationId });
 
   // Read scoped: a guessed id from an unauthorized company is "not found".
   const [existing] = await db
@@ -422,9 +422,7 @@ export async function updateStockTransfer(
 export async function deleteStockTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't cancel the stock transfer.", async () => {
   const session = await getLiveSession();
-  // No stock_transfers.delete in the permission catalog — reversing a posted
-  // transfer is an approve-level act, so it reuses that.
-  requirePermission(session, "stock_transfers", "approve");
+  requirePermission(session, "stock_transfers", "delete");
 
   const documentId = String(formData.get("documentId") ?? "");
   if (!documentId) return { error: "Transfer not found." };
@@ -439,7 +437,7 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
     .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Transfer not found." };
-  requirePermission(session, "stock_transfers", "approve", { companyId: doomed.companyId });
+  requirePermission(session, "stock_transfers", "delete", { companyId: doomed.companyId });
 
   try {
     await db.transaction(async (tx) => {

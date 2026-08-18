@@ -70,7 +70,13 @@ const SHAPES: Record<string, ReactNode> = {
       <circle cx="17" cy="19" r="1.5" />
     </>
   ),
-  "/purchases/suppliers": (
+  "/purchases/market": (
+    <>
+      <path d="M3 5h18v4H3zM5 9v11h14V9M8 13h8M8 17h5" />
+      <path d="M7 5V3m10 2V3" />
+    </>
+  ),
+  "/contacts": (
     <>
       <circle cx="9.5" cy="7" r="3.5" />
       <path d="M16 20v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2M17 4a3.5 3.5 0 010 7" />

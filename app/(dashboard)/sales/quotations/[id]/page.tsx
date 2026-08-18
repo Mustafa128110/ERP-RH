@@ -49,7 +49,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           lines: quotation.lines,
         }}
         lines={quotation.lines}
-        convertible={convertible}
+        convertible={quotation.documentStatus === "pending" && convertible}
+        cancelled={quotation.documentStatus === "cancelled"}
         companyOptions={options.companyOptions}
         customerOptions={options.customerOptions}
         itemOptions={options.itemOptions}

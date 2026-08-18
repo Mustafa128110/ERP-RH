@@ -18,6 +18,7 @@ import {
   ledgerEntries,
   settings,
   paymentAllocations,
+  marketPurchaseRequests,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -239,6 +240,7 @@ export async function getSale(documentId: string) {
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       unitCost: l.unitCost ?? "",
+      marketPurchase: l.marketPurchase,
     })),
   };
 }
@@ -315,6 +317,7 @@ interface SaleLineInput {
   quantity: string;
   unitPrice: string;
   unitCost: string;
+  marketPurchase?: boolean;
 }
 
 function num(formData: FormData, key: string, fallback: string) {
@@ -424,12 +427,37 @@ async function resolveLineRows(
       baseQuantity: String(baseQuantities[i]),
       unitPrice: String(unitPrice),
       unitCost: l.unitCost ? String(Number(l.unitCost)) : null,
+      marketPurchase: Boolean(l.marketPurchase),
       lineTotal: String(quantity * unitPrice),
       taxable: tax.taxable[i] ?? false,
       taxAmount: String(tax.lineTaxAmounts[i] ?? 0),
       stockMovement: -1,
     };
   });
+}
+
+async function createMarketPurchaseRequests(
+  tx: SaleTx,
+  companyId: string,
+  saleDocumentId: string,
+  lines: Awaited<ReturnType<typeof resolveLineRows>>,
+  insertedLines: { id: string }[],
+) {
+  const requests = lines
+    .map((line, index) => ({ line, lineId: insertedLines[index]?.id }))
+    .filter(({ line, lineId }) => line.marketPurchase && line.itemId && lineId);
+  if (requests.length === 0) return;
+  await tx.insert(marketPurchaseRequests).values(
+    requests.map(({ line, lineId }) => ({
+      companyId,
+      saleDocumentId,
+      saleLineId: lineId!,
+      itemId: line.itemId!,
+      unitId: line.unitId,
+      quantity: line.quantity,
+      baseQuantity: line.baseQuantity,
+    })),
+  );
 }
 
 export async function createSale(_prevState: (ActionResult & { id?: string }) | undefined, formData: FormData): Promise<ActionResult & { id?: string }> {
@@ -536,6 +564,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
         .insert(documentLines)
         .values(lineRows.map((l) => ({ ...l, companyId, documentId: doc.id })))
         .returning({ id: documentLines.id });
+      await createMarketPurchaseRequests(tx, companyId, doc.id, lineRows, insertedLines);
 
       // Sales reduce stock — one -1 inventory movement per line, skipping
       // lines with no catalog item (nothing to track stock of).
@@ -671,6 +700,12 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existingDoc) return { error: "Sale not found." };
+    const [confirmedMarketPurchase] = await db
+      .select({ id: marketPurchaseRequests.id })
+      .from(marketPurchaseRequests)
+      .where(and(eq(marketPurchaseRequests.saleDocumentId, documentId), eq(marketPurchaseRequests.status, "confirmed")))
+      .limit(1);
+    if (confirmedMarketPurchase) return { error: "This sale has a confirmed market purchase. Cancel that market purchase before editing the sale." };
     const [allocatedPayment] = await db.select({ id: paymentAllocations.id }).from(paymentAllocations).where(eq(paymentAllocations.invoiceDocumentId, documentId)).limit(1);
     if (allocatedPayment) return { error: "This invoice has FIFO receipts allocated to it. Edit the receipt instead of rewriting the settled invoice." };
     if (existingDoc.companyId !== companyId) return { error: "A posted sale can't be moved to another company. Delete it and enter it in the correct company." };
@@ -760,6 +795,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       // inventory_transactions.document_line_id is ON DELETE RESTRICT, so old
       // movements must go before the lines they point at can be replaced.
       const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
+      await tx.delete(marketPurchaseRequests).where(and(eq(marketPurchaseRequests.saleDocumentId, documentId), eq(marketPurchaseRequests.status, "pending")));
       if (oldLines.length > 0) {
         await tx.delete(inventoryTransactions).where(inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)));
       }
@@ -769,6 +805,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         .insert(documentLines)
         .values(lineRows.map((l) => ({ ...l, companyId, documentId })))
         .returning({ id: documentLines.id });
+      await createMarketPurchaseRequests(tx, companyId, documentId, lineRows, insertedLines);
 
       const stockLines = lineRows.map((l, i) => ({ l, lineId: insertedLines[i].id })).filter(({ l }) => l.itemId);
       if (stockLines.length > 0) {
@@ -824,6 +861,12 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Sale not found." };
+  const [confirmedMarketPurchase] = await db
+    .select({ id: marketPurchaseRequests.id })
+    .from(marketPurchaseRequests)
+    .where(and(eq(marketPurchaseRequests.saleDocumentId, documentId), eq(marketPurchaseRequests.status, "confirmed")))
+    .limit(1);
+  if (confirmedMarketPurchase) return { error: "Cancel the confirmed market purchase before cancelling this sale." };
   const [allocation] = await db.select({ id: paymentAllocations.id }).from(paymentAllocations).where(eq(paymentAllocations.invoiceDocumentId, documentId)).limit(1);
   if (allocation) return { error: "This invoice has FIFO payments allocated to it. Cancel or edit those receipts before cancelling the invoice." };
   requirePermission(session, "sales", "delete", { companyId: existingDoc.companyId });
@@ -880,6 +923,10 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
         JOIN document_lines dl ON dl.id = it.document_line_id
         WHERE dl.document_id = ${documentId}::uuid
       `);
+      await tx
+        .update(marketPurchaseRequests)
+        .set({ status: "cancelled" })
+        .where(and(eq(marketPurchaseRequests.saleDocumentId, documentId), eq(marketPurchaseRequests.status, "pending")));
       await tx.execute(sql`
         INSERT INTO ledger_entries (company_id, document_id, debit, credit)
         SELECT company_id, document_id, credit, debit

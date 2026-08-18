@@ -526,14 +526,14 @@ export function DeleteQuotationButton({ quotationId }: { quotationId: string }) 
         type="button"
         disabled={pending}
         onClick={() => {
-          if (!confirm("Delete this quotation? Invoices already raised from it are kept.")) return;
+          if (!confirm("Cancel this quotation? It will remain in history and invoices already raised from it are kept.")) return;
           const data = new FormData();
           data.set("documentId", quotationId);
           action(data);
         }}
         className={deleteButtonClass}
       >
-        {pending ? "Deleting…" : "Delete"}
+        {pending ? "Cancelling…" : "Cancel quotation"}
       </button>
       {state?.error && <p className={`mt-1 ${errorTextClass}`}>{state.error}</p>}
     </span>

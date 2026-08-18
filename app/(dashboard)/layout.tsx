@@ -11,6 +11,10 @@ import { OfflineReadiness } from "@/components/layout/OfflineReadiness";
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
   const [companies, selected] = await Promise.all([getAccessibleCompanies(), getSelectedScope()]);
+  const permissions = new Set(session.globalPermissions);
+  for (const companyPermissions of session.permissionsByCompany.values()) {
+    for (const permission of companyPermissions) permissions.add(permission);
+  }
 
   return (
     // Printing (the invoice's Download PDF) takes the page as it stands, so the
@@ -25,7 +29,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <OfflineReadiness />
       <KeyboardShortcuts />
       <div className="contents print:hidden">
-        <Sidebar />
+        <Sidebar permissions={[...permissions]} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:block print:overflow-visible">
         <div className="print:hidden">
