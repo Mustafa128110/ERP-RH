@@ -23,6 +23,7 @@ type RequestRow = {
   purchaseCost: string | null;
   status: "pending" | "confirmed" | "cancelled";
   confirmationDocumentId: string | null;
+  confirmationNumber: string | null;
 };
 
 type AccountOption = { id: string; name: string; companyId: string | null };
@@ -62,10 +63,10 @@ export function MarketPurchaseManager({
   }, undefined);
 
   const confirmedDocuments = useMemo(() => {
-    const map = new Map<string, { id: string; company: string; lines: number; total: number }>();
+    const map = new Map<string, { id: string; number: string; company: string; lines: number; total: number }>();
     for (const row of requests) {
       if (row.status !== "confirmed" || !row.confirmationDocumentId) continue;
-      const current = map.get(row.confirmationDocumentId) ?? { id: row.confirmationDocumentId, company: row.company, lines: 0, total: 0 };
+      const current = map.get(row.confirmationDocumentId) ?? { id: row.confirmationDocumentId, number: row.confirmationNumber ?? "Market Purchase", company: row.company, lines: 0, total: 0 };
       current.lines += 1;
       current.total += Number(row.quantity) * Number(row.purchaseCost ?? 0);
       map.set(row.confirmationDocumentId, current);
@@ -146,9 +147,9 @@ export function MarketPurchaseManager({
   );
 }
 
-function ConfirmedPurchase({ id, company, lines, total }: { id: string; company: string; lines: number; total: number }) {
+function ConfirmedPurchase({ id, number, company, lines, total }: { id: string; number: string; company: string; lines: number; total: number }) {
   const router = useRouter();
   const [state, action, pending] = useActionState(cancelMarketPurchase, undefined);
   useEffect(() => { if (state?.success) router.refresh(); }, [state?.success, router]);
-  return <form action={action} className="flex items-center gap-3 py-2 text-sm"><input type="hidden" name="documentId" value={id} /><StatusPill value="Confirmed" /><span className="flex-1">{company} · {lines} item(s)</span><span className="tabular-nums">{money(total)}</span><button type="submit" disabled={pending} onClick={(event) => { if (!confirm("Cancel this market purchase? Stock and the Item Purchase expense will be reversed, and its sales lines will return to Pending.")) event.preventDefault(); }} className="font-medium text-error hover:underline">{pending ? "Cancelling…" : "Cancel"}</button>{state?.error && <span className={errorTextClass}>{state.error}</span>}</form>;
+  return <form action={action} className="flex items-center gap-3 py-2 text-sm"><input type="hidden" name="documentId" value={id} /><StatusPill value="Confirmed" /><span className="font-medium text-navy-800">{number}</span><span className="flex-1">{company} · {lines} item(s)</span><span className="tabular-nums">{money(total)}</span><button type="submit" disabled={pending} onClick={(event) => { if (!confirm("Cancel this market purchase? Stock and the Item Purchase expense will be reversed, and its sales lines will return to Pending.")) event.preventDefault(); }} className="font-medium text-error hover:underline">{pending ? "Cancelling…" : "Cancel"}</button>{state?.error && <span className={errorTextClass}>{state.error}</span>}</form>;
 }

@@ -49,6 +49,11 @@ export async function listMarketPurchaseRequests() {
       purchaseCost: marketPurchaseRequests.purchaseCost,
       status: marketPurchaseRequests.status,
       confirmationDocumentId: marketPurchaseRequests.confirmationDocumentId,
+      confirmationNumber: sql<string | null>`(
+        SELECT confirmation.number
+        FROM documents confirmation
+        WHERE confirmation.id = ${marketPurchaseRequests.confirmationDocumentId}
+      )`,
     })
     .from(marketPurchaseRequests)
     .innerJoin(documents, eq(documents.id, marketPurchaseRequests.saleDocumentId))
