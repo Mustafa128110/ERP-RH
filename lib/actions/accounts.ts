@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { bankAccounts, cashAccounts, chequeRegister } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { CHEQUE_TYPES, CHEQUE_STATUSES } from "@/lib/cheque-constants";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
@@ -14,6 +14,7 @@ import { bankAccountLabel } from "@/lib/account-label";
 import { recordAudit } from "@/lib/actions/audit";
 import { resolveContactIds } from "@/lib/actions/resolve-refs";
 import { claimOperation, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { cachedPageRead } from "@/lib/read-cache";
 
 // Every account and cheque write goes through guard(): the hand-written messages
 // below are what a duplicate key should say, and guard adds the cases nobody can
@@ -27,19 +28,28 @@ const invalidateAccounts = () => invalidateLookups(CACHE.bankAccounts, CACHE.cas
 export async function listBankAccounts() {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
-  return db.select().from(bankAccounts).where(await companyInScope(bankAccounts.companyId));
+  const scope = (await getScopeCompanyIds()).sort().join(",");
+  return cachedPageRead(`${session.userId}:accounts:bank:${scope}`, async () =>
+    db.select().from(bankAccounts).where(await companyInPermissionScope(bankAccounts.companyId, session, "accounts")),
+  );
 }
 
 export async function listCashAccounts() {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
-  return db.select().from(cashAccounts).where(await companyInScope(cashAccounts.companyId));
+  const scope = (await getScopeCompanyIds()).sort().join(",");
+  return cachedPageRead(`${session.userId}:accounts:cash:${scope}`, async () =>
+    db.select().from(cashAccounts).where(await companyInPermissionScope(cashAccounts.companyId, session, "accounts")),
+  );
 }
 
 export async function listCheques() {
   const session = await getSession();
   requirePermission(session, "cheques", "view");
-  return db.select().from(chequeRegister).where(await companyInScope(chequeRegister.companyId));
+  const scope = (await getScopeCompanyIds()).sort().join(",");
+  return cachedPageRead(`${session.userId}:accounts:cheques:${scope}`, async () =>
+    db.select().from(chequeRegister).where(await companyInPermissionScope(chequeRegister.companyId, session, "cheques")),
+  );
 }
 
 // --- Bank accounts ---

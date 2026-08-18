@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -16,14 +16,14 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
-import { averageCost } from "@/lib/queries/stock-cost";
+import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
+import { averageCosts } from "@/lib/queries/stock-cost";
 import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-constants";
 import { UNASSIGNED_LABEL, locationIdOrNull } from "@/lib/location-constants";
-import { describeDbError, type ActionResult } from "@/lib/actions/guard";
+import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
@@ -44,7 +44,7 @@ export interface AdjustmentItemRow {
 export async function listStockAdjustments(companyId?: string) {
   const session = await getSession();
   requirePermission(session, "stock_adjustments", "view");
-  const scope = and(await companyInScope(documents.companyId), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "stock_adjustments"), companyId ? eq(documents.companyId, companyId) : undefined);
 
   const [docs, lineRows] = await Promise.all([
     db
@@ -107,7 +107,12 @@ export async function getStockAdjustment(documentId: string) {
   requirePermission(session, "stock_adjustments", "view");
 
   const [[doc], lineRows] = await Promise.all([
-    db.select().from(documents).where(eq(documents.id, documentId)).limit(1),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInPermissionScope(documents.companyId, session, "stock_adjustments")))
+      .limit(1),
     db
       .select({
         itemName: items.name,
@@ -179,7 +184,8 @@ function getOrCreateAdjustmentDocumentType(companyId: string) {
 export async function createStockAdjustment(
   _prevState: (ActionResult & { id?: string }) | undefined,
   formData: FormData,
-) {
+): Promise<ActionResult & { id?: string }> {
+  return guard("Couldn't create the stock adjustment.", async () => {
   const session = await getLiveSession();
 
   const operationId = readOperationId(formData);
@@ -196,6 +202,7 @@ export async function createStockAdjustment(
   // stock booked without a location gets written off or counted where it sits.
   if (!locationRaw) return { error: "Location is required." };
   const locationId = locationIdOrNull(locationRaw);
+  if (locationId) requirePermission(session, "stock_adjustments", "create", { companyId, warehouseId: locationId });
   if (!ADJUSTMENT_REASONS.includes(reason as AdjustmentReason)) return { error: "Pick a reason for the adjustment." };
 
   const validLines = readLines(formData);
@@ -224,29 +231,34 @@ export async function createStockAdjustment(
         })
         .returning();
 
-      const rows = [];
-      for (const l of validLines) {
+      const itemIds = await resolveItemIds(
+        tx,
+        validLines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
+      );
+      const unitIds = await resolveUnitIds(tx, validLines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+      const costs = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId })));
+      const rows = validLines.map((l, index) => {
         const entered = Number(l.quantity);
-        const itemId = await resolveItemId(tx, companyId, l.itemId || null, l.itemName || null);
-        rows.push({
+        const itemId = itemIds[index] ?? null;
+        return {
           movement: (entered < 0 ? -1 : 1) as -1 | 1,
           // An adjustment has no price of its own either — found or lost stock is
           // valued at what the location already holds it at. Left unpriced, an
           // increase would drag that location's average cost toward zero.
-          unitCost: itemId ? await averageCost(tx, itemId, locationId) : 0,
+          unitCost: costs[index] ?? 0,
           line: {
             companyId,
             documentId: doc.id,
-            lineNo: rows.length + 1,
-            sortOrder: rows.length,
+            lineNo: index + 1,
+            sortOrder: index,
             itemId,
             locationId,
-            unitId: await resolveUnitId(tx, l.unitId || null, l.unitName || null),
+            unitId: unitIds[index] ?? null,
             quantity: String(Math.abs(entered)),
             baseQuantity: String(Math.abs(entered)),
           } satisfies typeof documentLines.$inferInsert,
-        });
-      }
+        };
+      });
 
       const insertedLines = await tx
         .insert(documentLines)
@@ -284,9 +296,11 @@ export async function createStockAdjustment(
   revalidatePath("/inventory/products");
   await recordAudit({ action: "create", entity: "stock adjustment", entityId: createdId, summary: createdNumber, companyId, detail: reason });
   return { success: true, id: createdId };
+  });
 }
 
-export async function deleteStockAdjustment(_prevState: ActionResult | undefined, formData: FormData) {
+export async function deleteStockAdjustment(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't delete the stock adjustment.", async () => {
   const session = await getLiveSession();
   // No stock_adjustments.delete in the permission catalog — undoing a posted
   // adjustment is an approve-level act, so it reuses that.
@@ -301,7 +315,8 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
   const [doomed] = await db
     .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason })
     .from(documents)
-    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Adjustment not found." };
   requirePermission(session, "stock_adjustments", "approve", { companyId: doomed.companyId });
@@ -330,4 +345,5 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
   revalidatePath("/inventory/stock");
   await recordAudit({ action: "delete", entity: "stock adjustment", entityId: documentId, summary: doomed.number, companyId: doomed.companyId, detail: doomed.reason });
   return { success: true };
+  });
 }

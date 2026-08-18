@@ -170,7 +170,6 @@ try {
 
   for (const [name, form] of Object.entries(forms)) {
     const itemName = `TI-draft-${name}-${MARKER}`;
-    const contactName = `TQ-draft-${name}-${MARKER}`;
     console.log(`\n=== draft: ${name} ===`);
 
     // --- 1. type into the form → a draft lands in localStorage ---------------

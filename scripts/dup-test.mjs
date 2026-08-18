@@ -10,8 +10,6 @@
 // Drives headless Chrome over CDP (same plumbing as scripts/ui-test.mjs).
 // Requires UI_TEST_EMAIL / UI_TEST_PASSWORD (a throwaway admin) and the dev
 // server on :3050 with Chrome on :9222.
-import os from "node:os";
-
 const CDP = "http://127.0.0.1:9222";
 const APP = "http://localhost:3050";
 const EMAIL = process.env.UI_TEST_EMAIL ?? "";

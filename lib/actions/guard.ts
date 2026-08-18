@@ -2,6 +2,7 @@ import "server-only";
 import { PermissionError } from "@/lib/auth/permissions";
 import { DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError } from "@/lib/actions/cheque-link";
+import { SettlementScopeError } from "@/lib/actions/settlement";
 
 // Every write in this app used to be one unhandled database error away from
 // losing typed work. A server action that throws doesn't return a value the form
@@ -123,6 +124,7 @@ export async function guard<T extends object>(
     // the message says which resource is contested rather than falling back to
     // the operation's generic sentence.
     if (e instanceof ChequeUnavailableError) return { error: e.message };
+    if (e instanceof SettlementScopeError) return { error: e.message };
     // Next's redirect() and notFound() work by throwing; swallowing those would
     // turn a redirect into an error message.
     if (e && typeof e === "object" && "digest" in e && typeof (e as { digest: unknown }).digest === "string") throw e;

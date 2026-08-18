@@ -22,6 +22,8 @@ import { PermissionError } from "@/lib/auth/permissions";
 import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, invalidate, MINUTE } from "@/lib/cache";
 import { bankAccountLabel } from "@/lib/account-label";
+import { CACHE } from "@/lib/cache-keys";
+export { CACHE } from "@/lib/cache-keys";
 
 // Dropdown option lists. Nearly forty near-identical copies of these were spread
 // across lib/actions/* — nine separate functions selected the full companies
@@ -52,28 +54,6 @@ const TTL = 5 * MINUTE;
 // Key names match the table they read, so invalidation reads as itself. Grouped
 // here rather than inlined as strings so a typo is a type error, not a cache
 // entry that never clears.
-export const CACHE = {
-  companies: "companies",
-  categories: "categories",
-  brands: "brands",
-  locations: "locations",
-  units: "units",
-  documentTypes: "document_types",
-  expenseCategories: "expense_categories",
-  roles: "roles",
-  items: "items",
-  contacts: "contacts",
-  bankAccounts: "bank_accounts",
-  cashAccounts: "cash_accounts",
-  cheques: "cheques",
-  // Not lookup tables, but they belong in the same namespace: the dashboard
-  // figures and every report are aggregates of the tables above, cached per
-  // company scope exactly like the lookups, and invalidateLookups() clears
-  // them on every write (see below).
-  dashboard: "dashboard",
-  reports: "reports",
-} as const;
-
 export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][]) {
   // Every dashboard figure and every report row is derived from tables the
   // keys above guard, so any write that busts a lookup busts the aggregates
@@ -83,7 +63,7 @@ export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][])
   // here safe to rely on. The one writer this misses is settlement.ts (it
   // takes a transaction handle, not a request); its callers all invalidate
   // after commit, which lands here.
-  invalidate(...keys, CACHE.dashboard, CACHE.reports);
+  invalidate(...keys, CACHE.dashboard, CACHE.reports, CACHE.pageReads);
 }
 
 async function requireAuth() {

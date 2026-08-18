@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { StockPurchaseCreateForm, DeleteStockPurchaseButton } from "@/components/modules/StockPurchaseForm";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
@@ -94,13 +93,11 @@ export function StockPurchaseManager({
   const [editing, setEditing] = useState<PurchaseDetail | null>(null);
   const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const router = useRouter();
 
   function close() {
     setOpen(false);
     setEditing(null);
     setMergeOpen(false);
-    router.refresh();
   }
 
   async function openEdit(id: string) {
@@ -207,7 +204,7 @@ export function StockPurchaseManager({
           name="stock-purchases"
           onImport={importStockPurchasesCsv}
           onExport={() => exportStockPurchasesCsv(companyId)}
-          onDone={() => router.refresh()}
+          onDone={() => undefined}
         />
         <button
           type="button"

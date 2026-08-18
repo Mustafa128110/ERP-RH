@@ -14,6 +14,7 @@ import {
   index,
   check,
   primaryKey,
+  foreignKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -429,6 +430,9 @@ export const documentTypes = pgTable(
     // second company (M52) failed on that constraint. Each company gets its own
     // SI-0001 series now, matching the company+code rule above.
     unique().on(table.companyId, table.series),
+    // Supports the composite documents FK below: a document type is not merely
+    // an id, it belongs to the same company as the document using it.
+    unique().on(table.companyId, table.id),
   ],  );
 
 export const documents = pgTable(
@@ -484,6 +488,11 @@ export const documents = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    foreignKey({
+      columns: [table.companyId, table.documentTypeId],
+      foreignColumns: [documentTypes.companyId, documentTypes.id],
+      name: "documents_company_document_type_fk",
+    }),
     unique().on(table.companyId, table.documentTypeId, table.number),
     index("idx_documents_date").on(table.documentDate),
     index("idx_documents_contact").on(table.contactId),

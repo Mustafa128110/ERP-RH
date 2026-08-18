@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { getInvoice, getSale, listChequesForSales, type SaleItemRow } from "@/lib/actions/sales";
 import { SaleFormPage } from "@/components/modules/SaleForm";
 import { SaleItemsHover } from "@/components/modules/SaleItemsHover";
@@ -75,7 +74,6 @@ export function InvoiceManager({
   // reads them from here rather than off the row.
   itemsById: Record<string, SaleItemRow[]>;
 }) {
-  const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<SaleDetail | null>(null);
   const [chequeOptions, setChequeOptions] = useState(formOptions.chequeOptions);
@@ -89,7 +87,6 @@ export function InvoiceManager({
 
   function close() {
     setEditing(null);
-    router.refresh();
   }
 
   async function openEdit(id: string) {

@@ -1,20 +1,21 @@
 "use server";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { contacts, companies } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import type { AuthSession } from "@/lib/auth/session";
 
 // Contacts are unified — no supplier/customer split. A write is allowed if the
 // user can create/edit in either the customers or suppliers module, so both a
 // Salesman (customers) and a purchaser (suppliers) can add contacts.
-function requireContactPermission(session: Parameters<typeof requirePermission>[0], action: string, companyId?: string) {
+function requireContactPermission(session: AuthSession | null, action: string, companyId?: string): asserts session is AuthSession {
   const scope = companyId ? { companyId } : undefined;
   try {
     requirePermission(session, "customers", action, scope);
@@ -43,6 +44,15 @@ const contactColumns = {
 export async function listSuppliers() {
   const session = await getSession();
   requireContactPermission(session, "view");
+  const scopeIds = await getScopeCompanyIds();
+  const permittedIds = scopeIds.filter((companyId) =>
+    ["customers.view", "suppliers.view"].some(
+      (key) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+    ),
+  );
+  const documentScope = permittedIds.length > 0
+    ? sql`d.company_id IN (${sql.join(permittedIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+    : sql`false`;
 
   // Two queries, run together rather than one after the other. The activity
   // summary is a grouped pass over documents keyed by contact — joining it into
@@ -54,7 +64,12 @@ export async function listSuppliers() {
       .select(contactColumns)
       .from(contacts)
       .leftJoin(companies, eq(contacts.companyId, companies.id))
-      .where(await companyInScope(contacts.companyId)),
+      .where(
+        or(
+          await companyInPermissionScope(contacts.companyId, session, "customers"),
+          await companyInPermissionScope(contacts.companyId, session, "suppliers"),
+        ),
+      ),
     // The two balances come off ledger_entries, the same rows the Ledger screen
     // reads, so a contact's figure here and there is one number arrived at once.
     // Summing (grand_total - paid_amount) over the invoices instead — which is
@@ -77,6 +92,7 @@ export async function listSuppliers() {
         JOIN document_types dt ON dt.id = d.document_type_id
         LEFT JOIN ledger_entries l ON l.document_id = d.id
        WHERE d.contact_id IS NOT NULL
+         AND ${documentScope}
        GROUP BY d.contact_id`),
   ]);
 
@@ -100,7 +116,15 @@ export async function getContact(id: string) {
     .select(contactColumns)
     .from(contacts)
     .leftJoin(companies, eq(contacts.companyId, companies.id))
-    .where(eq(contacts.id, id));
+    .where(
+      and(
+        eq(contacts.id, id),
+        or(
+          await companyInPermissionScope(contacts.companyId, session, "customers"),
+          await companyInPermissionScope(contacts.companyId, session, "suppliers"),
+        ),
+      ),
+    );
   return row ?? null;
 }
 

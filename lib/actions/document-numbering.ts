@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { documentTypes } from "@/lib/db/schema";
-import { documentScope, nextSequenceValue } from "@/lib/db/sequences";
+import { documentScope, nextSequenceRange, nextSequenceValue } from "@/lib/db/sequences";
 import { CACHE, getDocumentTypes, invalidateLookups } from "@/lib/queries/lookups";
 
 // Numbers come from the counter in number_sequences, one per series and shared by
@@ -20,6 +20,11 @@ import { CACHE, getDocumentTypes, invalidateLookups } from "@/lib/queries/lookup
 export async function nextDocumentNumber(series: string, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]) {
   const value = await nextSequenceValue(documentScope(series), tx ?? db);
   return `${series}-${String(value).padStart(4, "0")}`;
+}
+
+export async function nextDocumentNumberRange(series: string, count: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]) {
+  const values = await nextSequenceRange(documentScope(series), count, tx ?? db);
+  return values.map((value) => `${series}-${String(value).padStart(4, "0")}`);
 }
 
 // Sales invoices and payments use fixed, never-user-configured document types,

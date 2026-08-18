@@ -14,14 +14,15 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
-import { adjustSettlementBalance, type SettlementType } from "@/lib/actions/settlement";
-import { resolveExpenseCategoryId } from "@/lib/actions/resolve-refs";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { adjustSettlementBalance, adjustSettlementBalancesBatch, type SettlementType } from "@/lib/actions/settlement";
+import { resolveExpenseCategoryId, resolveExpenseCategoryIds } from "@/lib/actions/resolve-refs";
 import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 
 export interface ExpenseFilters {
   company?: string;
@@ -35,6 +36,9 @@ export interface ExpenseFilters {
 export async function listExpenses(filters: ExpenseFilters = {}) {
   const session = await getSession();
   requirePermission(session, "expenses", "view");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:expenses:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   const rows = await db
     .select({
@@ -66,7 +70,7 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
     .leftJoin(users, eq(users.id, expenses.createdBy))
     .where(
       and(
-        await companyInScope(expenses.companyId),
+        await companyInPermissionScope(expenses.companyId, session, "expenses"),
         // Narrows within the scope, never widens it — companyInScope still gates
         // every row.
         filters.company ? eq(expenses.companyId, filters.company) : undefined,
@@ -89,6 +93,7 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
           ? `Cheque: ${chequeNumber}`
           : null,
   }));
+  });
 }
 
 // Cheques available to settle an expense: unlinked everywhere, plus (when
@@ -157,20 +162,19 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
     await db.transaction(async (tx) => {
       // First statement: claim the operation id, or abort as a duplicate.
       if (!(await claimOperation(tx, opId))) throw new DuplicateOperationError();
-      // Distinct typed category names, resolved once each. A name repeated down
-      // the grid is the same category, and creating it twice is what the
-      // per-row loop did until the unique constraint stopped it.
-      const categoryIds = new Map<string, string>();
-      for (const r of valid) {
-        const key = `${r.companyId}:${r.expenseCategoryId || r.expenseCategoryName.trim()}`;
-        if (categoryIds.has(key)) continue;
-        categoryIds.set(key, (await resolveExpenseCategoryId(tx, r.companyId, r.expenseCategoryId || null, r.expenseCategoryName))!);
-      }
+      const categoryIds = await resolveExpenseCategoryIds(
+        tx,
+        valid.map((row) => ({
+          companyId: row.companyId,
+          expenseCategoryId: row.expenseCategoryId || null,
+          expenseCategoryName: row.expenseCategoryName,
+        })),
+      );
 
       await tx.insert(expenses).values(
-        valid.map((r) => ({
+        valid.map((r, index) => ({
           companyId: r.companyId,
-          expenseCategoryId: categoryIds.get(`${r.companyId}:${r.expenseCategoryId || r.expenseCategoryName.trim()}`)!,
+          expenseCategoryId: categoryIds[index]!,
           bankAccountId: r.bankAccountId,
           cashAccountId: r.cashAccountId,
           chequeId: r.chequeId,
@@ -181,18 +185,18 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
         })),
       );
 
-      // Ten rows drawn on the same drawer are one balance movement, not ten.
-      // Cheques stay ungrouped — each settles through its own bank account.
-      const totals = new Map<string, { bankAccountId: string | null; cashAccountId: string | null; chequeId: string | null; amount: number }>();
-      for (const r of valid) {
-        const key = `${r.bankAccountId ?? ""}|${r.cashAccountId ?? ""}|${r.chequeId ?? ""}`;
-        const at = totals.get(key) ?? { bankAccountId: r.bankAccountId, cashAccountId: r.cashAccountId, chequeId: r.chequeId, amount: 0 };
-        at.amount += Number(r.amount);
-        totals.set(key, at);
-      }
-      for (const t of totals.values()) {
-        await adjustSettlementBalance(tx, "out", String(t.amount), t.bankAccountId, t.cashAccountId, t.chequeId, 1);
-      }
+      await adjustSettlementBalancesBatch(
+        tx,
+        valid.map((r) => ({
+          direction: "out",
+          amount: r.amount,
+          bankAccountId: r.bankAccountId,
+          cashAccountId: r.cashAccountId,
+          chequeId: r.chequeId,
+          sign: 1,
+          companyId: r.companyId,
+        })),
+      );
     });
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
@@ -248,7 +252,7 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
       if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId });
-      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
+      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
@@ -274,6 +278,7 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
     if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
 
     let missing = false;
+    let companyChanged = false;
 
     await db.transaction(async (tx) => {
       // Read the old settlement inside the transaction, not before it. Read
@@ -296,15 +301,20 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
         missing = true;
         return;
       }
+      if (existing.companyId !== values.companyId) {
+        companyChanged = true;
+        return;
+      }
 
       // Reverse the old settlement before applying the new one, same as Payments.
-      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1);
+      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.update(expenses).set({ ...values, expenseCategoryId: categoryId }).where(eq(expenses.id, expenseId));
-      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
+      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 
     if (missing) return { error: "Expense not found — it may already have been deleted." };
+    if (companyChanged) return { error: "An expense can't be moved to another company. Delete it and enter it in the correct company." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     revalidatePath("/expenses");
@@ -339,7 +349,7 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
       // guessed id from a company the user can't delete in is refused even
       // when they hold the permission somewhere else.
       requirePermission(session, "expenses", "delete", { companyId: existing.companyId });
-      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1);
+      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
       await tx.delete(expenses).where(eq(expenses.id, expenseId));
     });
 

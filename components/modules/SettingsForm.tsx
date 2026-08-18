@@ -1,7 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState } from "react";
 import { saveSettings } from "@/lib/actions/settings";
 import type { SettingDef } from "@/lib/setting-constants";
 import { errorTextClass, inputClass, labelClass, labelTextClass, submitClass, successTextClass } from "@/components/ui/form-styles";
@@ -18,13 +17,7 @@ export function SettingsForm({
   defs: SettingDef[];
   values: Record<string, string>;
 }) {
-  const router = useRouter();
   const [state, action, pending] = useActionState(saveSettings.bind(null, companyId), undefined);
-
-  useEffect(() => {
-    if (state?.success) router.refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
 
   return (
     // key on companyId: switching company has to re-seed every defaultValue,

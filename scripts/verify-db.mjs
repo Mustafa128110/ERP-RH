@@ -183,7 +183,7 @@ async function verifyPayment(marker) {
   check("payment: audit entry recorded", audit[0].n >= 1, `found ${audit[0].n}`);
 }
 
-async function verifyCashTransfer(marker) {
+async function verifyCashTransfer() {
   // No marker lands in the DB — the two documents are found by their shared
   // random key, so the before/after counts from the flow run are the anchor.
   const before = out.transferOutBefore ?? 0;

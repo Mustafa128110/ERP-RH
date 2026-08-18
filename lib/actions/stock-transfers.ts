@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -16,13 +16,13 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
-import { averageCost } from "@/lib/queries/stock-cost";
+import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
+import { averageCosts } from "@/lib/queries/stock-cost";
 import { UNASSIGNED_LABEL, locationFormValue, locationIdOrNull } from "@/lib/location-constants";
-import { describeDbError, type ActionResult } from "@/lib/actions/guard";
+import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 
@@ -41,7 +41,7 @@ export interface TransferItemRow {
 export async function listStockTransfers() {
   const session = await getSession();
   requirePermission(session, "stock_transfers", "view");
-  const scope = await companyInScope(documents.companyId);
+  const scope = await companyInPermissionScope(documents.companyId, session, "stock_transfers");
 
   // Both queries only need the document type, not ids from the first, so they run
   // concurrently — same reasoning as listSales.
@@ -111,7 +111,12 @@ export async function getStockTransfer(documentId: string) {
   // Ids, not names — this feeds the edit form, which resolves its own labels from
   // the option lists. from/to are read back off the -1 and +1 sides of each pair.
   const [[doc], lineRows] = await Promise.all([
-    db.select().from(documents).where(eq(documents.id, documentId)).limit(1),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInPermissionScope(documents.companyId, session, "stock_transfers")))
+      .limit(1),
     db
       .select({
         itemId: documentLines.itemId,
@@ -223,18 +228,24 @@ async function writeTransferLines(
   tx: TransferTx,
   documentId: string,
   header: { companyId: string; fromLocationId: string | null; toLocationId: string | null; lines: TransferLineInput[] },
-) {
+): Promise<void> {
   const { companyId, fromLocationId, toLocationId } = header;
   const pairs: { line: typeof documentLines.$inferInsert; movement: 1 | -1; unitCost: number }[] = [];
+  const itemIds = await resolveItemIds(
+    tx,
+    header.lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
+  );
+  const unitIds = await resolveUnitIds(tx, header.lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const costs = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId: fromLocationId })));
 
-  for (const l of header.lines) {
+  for (const [index, l] of header.lines.entries()) {
     const quantity = String(Number(l.quantity));
-    const itemId = await resolveItemId(tx, companyId, l.itemId || null, l.itemName || null);
-    const unitId = await resolveUnitId(tx, l.unitId || null, l.unitName || null);
+    const itemId = itemIds[index] ?? null;
+    const unitId = unitIds[index] ?? null;
     // A transfer carries no price of its own, so it moves at cost — the source
     // location's average. Without this the receiving location valued the stock at
     // zero (see lib/queries/stock-cost.ts).
-    const unitCost = itemId ? await averageCost(tx, itemId, fromLocationId) : 0;
+    const unitCost = costs[index] ?? 0;
     for (const [locationId, movement] of [
       [fromLocationId, -1],
       [toLocationId, 1],
@@ -291,13 +302,18 @@ function invalidateTransferViews() {
 export async function createStockTransfer(
   _prevState: (ActionResult & { id?: string }) | undefined,
   formData: FormData,
-) {
+): Promise<ActionResult & { id?: string }> {
+  return guard("Couldn't create the stock transfer.", async () => {
   const session = await getLiveSession();
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
   // Scoped to the submitted company: membership + stock_transfers.create there.
   requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
+  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
+  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
+  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
+  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
   const operationId = readOperationId(formData);
 
   const documentType = await getOrCreateTransferDocumentType(header.companyId);
@@ -337,6 +353,7 @@ export async function createStockTransfer(
   invalidateTransferViews();
   await recordAudit({ action: "create", entity: "stock transfer", entityId: createdId, summary: createdNumber, companyId: header.companyId });
   return { success: true, id: createdId };
+  });
 }
 
 // Editing replays the whole transfer: the old movements and lines go, the new ones
@@ -347,20 +364,27 @@ export async function updateStockTransfer(
   documentId: string,
   _prevState: ActionResult | undefined,
   formData: FormData,
-) {
+): Promise<ActionResult> {
+  return guard("Couldn't save the stock transfer.", async () => {
   const session = await getLiveSession();
 
   const header = readHeader(formData);
   if (header.error) return { error: header.error };
   requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
+  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
+  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
+  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
+  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
 
   // Read scoped: a guessed id from an unauthorized company is "not found".
   const [existing] = await db
-    .select({ id: documents.id, number: documents.number })
+    .select({ id: documents.id, number: documents.number, companyId: documents.companyId })
     .from(documents)
-    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existing) return { error: "Transfer not found." };
+  if (existing.companyId !== header.companyId) return { error: "A posted transfer can't be moved to another company. Delete it and enter it in the correct company." };
 
   try {
     await db.transaction(async (tx) => {
@@ -392,9 +416,11 @@ export async function updateStockTransfer(
   revalidatePath(`/inventory/stock-transfers/${documentId}`);
   await recordAudit({ action: "update", entity: "stock transfer", entityId: documentId, summary: existing.number, companyId: header.companyId });
   return { success: true };
+  });
 }
 
-export async function deleteStockTransfer(_prevState: ActionResult | undefined, formData: FormData) {
+export async function deleteStockTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't delete the stock transfer.", async () => {
   const session = await getLiveSession();
   // No stock_transfers.delete in the permission catalog — reversing a posted
   // transfer is an approve-level act, so it reuses that.
@@ -409,7 +435,8 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
   const [doomed] = await db
     .select({ number: documents.number, companyId: documents.companyId })
     .from(documents)
-    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Transfer not found." };
   requirePermission(session, "stock_transfers", "approve", { companyId: doomed.companyId });
@@ -436,4 +463,5 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
   invalidateTransferViews();
   await recordAudit({ action: "delete", entity: "stock transfer", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
   return { success: true };
+  });
 }

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { locations, locationTypeEnum } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -14,7 +14,7 @@ const locationTypes = locationTypeEnum.enumValues;
 
 export async function listLocations() {
   const session = await getSession();
-  requirePermission(session, "locations", "view");
+  requireGlobalPermission(session, "locations", "view");
   return db.select().from(locations);
 }
 
@@ -35,7 +35,7 @@ export interface LocationBatchRow {
 export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<CreateResult<{ id: string; name: string }>> {
   return guard("Couldn't save the locations.", async () => {
     const session = await getLiveSession();
-    requirePermission(session, "locations", "create");
+    requireGlobalPermission(session, "locations", "create");
 
     const valid = rows.filter((r) => r.name.trim() && locationTypes.includes(r.locationType));
     if (valid.length === 0) return { error: "Add at least one location with a name and type." };
@@ -51,7 +51,7 @@ export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<Cr
 export async function updateLocation(locationId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the location.", async () => {
     const session = await getLiveSession();
-    requirePermission(session, "locations", "edit");
+    requireGlobalPermission(session, "locations", "edit");
 
     const values = readLocationForm(formData);
     if (!values.name) return { error: "Name is required." };
@@ -68,7 +68,7 @@ export async function updateLocation(locationId: string, _prevState: ActionResul
 export async function deleteLocation(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this location is still referenced by stock, transactions, or user access.", async () => {
     const session = await getLiveSession();
-    requirePermission(session, "locations", "delete");
+    requireGlobalPermission(session, "locations", "delete");
 
     const locationId = String(formData.get("locationId") ?? "");
     await db.delete(locations).where(eq(locations.id, locationId));

@@ -117,7 +117,9 @@ export async function exportSnapshot(key: string): Promise<{ error?: string; row
   const query = QUERIES[key];
   if (!query) return { error: "Unknown export." };
 
-  const ids = await getScopeCompanyIds();
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("backups.create") || session.permissionsByCompany.get(companyId)?.has("backups.create"),
+  );
   if (ids.length === 0) return { error: "You don't have access to any company." };
   // Interpolated as literals rather than parameters because it sits inside an
   // IN list built with sql.raw; the ids come from the session, never from input.
@@ -137,7 +139,9 @@ export async function snapshotSizes(): Promise<Record<string, number>> {
   const session = await getSession();
   requirePermission(session, "backups", "view");
 
-  const ids = await getScopeCompanyIds();
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("backups.view") || session.permissionsByCompany.get(companyId)?.has("backups.view"),
+  );
   if (ids.length === 0) return {};
   const list = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
 

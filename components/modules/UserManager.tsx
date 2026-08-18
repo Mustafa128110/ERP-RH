@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { getUserDetail, type UserListItem } from "@/lib/actions/users";
 import { UserBatchAddDialog } from "@/components/modules/UserForm";
@@ -34,12 +33,10 @@ export function UserManager({
 }) {
   const [modal, setModal] = useState<ModalState>(null);
   const [detail, setDetail] = useState<Detail>(null);
-  const router = useRouter();
 
   function close() {
     setModal(null);
     setDetail(null);
-    router.refresh();
   }
 
   async function openEdit(id: string) {

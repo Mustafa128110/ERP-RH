@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ProductBatchAddDialog, ProductsBatchEditDialog } from "@/components/modules/ProductForm";
 import { MergeProductsDialog } from "@/components/modules/MergeProductsDialog";
@@ -69,16 +68,13 @@ export function ProductsManager({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
-  const router = useRouter();
 
   function closeBatch() {
     setBatchOpen(false);
-    router.refresh();
   }
 
   function closeMerge() {
     setMergeOpen(false);
-    router.refresh();
   }
 
   function closeEdit() {
@@ -86,7 +82,6 @@ export function ProductsManager({
     // The saved rows are no longer the ones that needed fixing, so leaving them
     // ticked invites a second pass over work already done.
     setSelected([]);
-    router.refresh();
   }
 
   useNewEntry(() => setBatchOpen(true));
@@ -118,7 +113,7 @@ export function ProductsManager({
           name="products"
           onImport={importProductsCsv}
           onExport={exportProductsCsv}
-          onDone={() => router.refresh()}
+          onDone={() => undefined}
         />
         <button
           type="button"

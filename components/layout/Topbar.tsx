@@ -51,6 +51,7 @@ function LogoutButton({ className }: { className: string }) {
           // no post-logout render composes drafts/outbox keys under the old
           // user.
           setClientUserId(null);
+          navigator.serviceWorker?.controller?.postMessage({ type: "erp:clear-cache" });
         }}
         title={waiting > 0 ? `${waiting} operation(s) waiting to sync — they stay on this browser and sync after you log back in.` : undefined}
         className={className}

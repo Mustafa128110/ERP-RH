@@ -17,10 +17,10 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, getBrands, getCategories, getCompanies, getLocations, getSuppliers, getUnits, invalidateLookups } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
-import { SKU_SCOPE, formatSku, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
+import { SKU_SCOPE, formatSku, nextSequenceRange, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
 import { ensureDocumentType } from "@/lib/actions/document-numbering";
 import { createStockPurchase } from "@/lib/actions/purchases";
 import { createStockAdjustment } from "@/lib/actions/stock-adjustments";
@@ -31,6 +31,7 @@ import { purchaseRowError, recordsQty, writesDocument } from "@/lib/product-edit
 import { queryProductRates, type ProductRateRow } from "@/lib/queries/products";
 import { guard, describeDbError, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { cachedPageRead } from "@/lib/read-cache";
 
 export type { ProductRateRow } from "@/lib/queries/products";
 
@@ -40,7 +41,10 @@ export type { ProductRateRow } from "@/lib/queries/products";
 export async function listProductsWithRates(): Promise<ProductRateRow[]> {
   const session = await getSession();
   requirePermission(session, "products", "view");
-  return queryProductRates(await getScopeCompanyIds());
+  const companyIds = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("products.view") || session.permissionsByCompany.get(companyId)?.has("products.view"),
+  );
+  return cachedPageRead(`${session.userId}:products:${[...companyIds].sort().join(",")}`, () => queryProductRates(companyIds));
 }
 
 // The SKU the batch dialog shows as each row's placeholder before you save. A
@@ -93,31 +97,38 @@ export async function createProductsBatch(
       }
 
       const created = await db.transaction(async (tx) => {
-        // Distinct typed names resolved once each, not once per row: a price
-        // list with four hundred rows under one brand used to do four hundred
-        // lookups for that brand, each its own round trip inside the
-        // transaction. That is what made a long CSV import crawl.
-        const categoryIds = new Map<string, string | null>();
-        const brandIds = new Map<string, string | null>();
-
-        const withSkus = [];
-        for (const r of valid) {
-          // A typed-but-unmatched category or brand becomes the record, inside
-          // the same transaction as the product — a failed batch leaves no
-          // orphan category behind.
-          const { categoryName, brandName, ...fields } = r;
-          const categoryKey = r.categoryId ?? `name:${(categoryName ?? "").trim()}`;
-          const brandKey = r.brandId ?? `name:${(brandName ?? "").trim()}`;
-          if (!categoryIds.has(categoryKey)) categoryIds.set(categoryKey, await resolveCategoryId(tx, r.categoryId, categoryName ?? ""));
-          if (!brandIds.has(brandKey)) brandIds.set(brandKey, await resolveBrandId(tx, r.brandId, brandName ?? ""));
-
-          withSkus.push({
-            ...fields,
-            categoryId: categoryIds.get(categoryKey)!,
-            brandId: brandIds.get(brandKey)!,
-            sku: r.sku.trim() || formatSku(await nextSequenceValue(SKU_SCOPE, tx)),
-          });
-        }
+        // Resolve every distinct typed category/brand and reserve every blank
+        // SKU in a fixed number of statements. A 400-row paste now has the same
+        // round-trip count as a two-row batch.
+        const categoryNames = [...new Set(valid.filter((row) => !row.categoryId).map((row) => row.categoryName?.trim()).filter((name): name is string => Boolean(name)))];
+        const brandNames = [...new Set(valid.filter((row) => !row.brandId).map((row) => row.brandName?.trim()).filter((name): name is string => Boolean(name)))];
+        const blankSkuCount = valid.filter((row) => !row.sku.trim()).length;
+        const [knownCategories, knownBrands, skuValues] = await Promise.all([
+          categoryNames.length ? tx.select({ id: categories.id, name: categories.name }).from(categories).where(inArray(categories.name, categoryNames)) : Promise.resolve([]),
+          brandNames.length ? tx.select({ id: brands.id, name: brands.name }).from(brands).where(inArray(brands.name, brandNames)) : Promise.resolve([]),
+          nextSequenceRange(SKU_SCOPE, blankSkuCount, tx),
+        ]);
+        const categoryByName = new Map(knownCategories.map((row) => [row.name, row.id]));
+        const brandByName = new Map(knownBrands.map((row) => [row.name, row.id]));
+        const missingCategories = categoryNames.filter((name) => !categoryByName.has(name));
+        const missingBrands = brandNames.filter((name) => !brandByName.has(name));
+        const [insertedCategories, insertedBrands] = await Promise.all([
+          missingCategories.length
+            ? tx.insert(categories).values(missingCategories.map((name) => ({ name }))).onConflictDoUpdate({ target: categories.name, set: { name: sql`excluded.name` } }).returning({ id: categories.id, name: categories.name })
+            : Promise.resolve([]),
+          missingBrands.length
+            ? tx.insert(brands).values(missingBrands.map((name) => ({ name }))).onConflictDoUpdate({ target: brands.name, set: { name: sql`excluded.name` } }).returning({ id: brands.id, name: brands.name })
+            : Promise.resolve([]),
+        ]);
+        for (const row of insertedCategories) categoryByName.set(row.name, row.id);
+        for (const row of insertedBrands) brandByName.set(row.name, row.id);
+        let skuIndex = 0;
+        const withSkus = valid.map(({ categoryName, brandName, ...fields }) => ({
+          ...fields,
+          categoryId: fields.categoryId ?? categoryByName.get(categoryName?.trim() ?? "") ?? null,
+          brandId: fields.brandId ?? brandByName.get(brandName?.trim() ?? "") ?? null,
+          sku: fields.sku.trim() || formatSku(skuValues[skuIndex++]),
+        }));
         return tx.insert(items).values(withSkus).returning({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId });
       });
 
@@ -209,7 +220,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     .innerJoin(companies, eq(companies.id, items.companyId))
     .leftJoin(categories, eq(categories.id, items.categoryId))
     .leftJoin(brands, eq(brands.id, items.brandId))
-    .where(and(inArray(items.id, itemIds), await companyInScope(items.companyId)))
+    .where(and(inArray(items.id, itemIds), await companyInPermissionScope(items.companyId, session, "products")))
     .orderBy(items.name);
   if (rows.length === 0) return empty;
 
@@ -441,7 +452,7 @@ export async function updateProductsBatch(
     // and the user had no way to tell which. One transaction means the grid either
     // lands whole or not at all, and the twenty rows cost one commit instead of
     // forty.
-    const scope = await companyInScope(items.companyId);
+    const scope = await companyInPermissionScope(items.companyId, session, "products", "edit");
     const saved: SavedProductRow[] = [];
     const rowFailure = await db
       .transaction(async (tx) => {
@@ -745,7 +756,7 @@ export async function listMergeCandidates(): Promise<MergeCandidate[]> {
     })
     .from(items)
     .innerJoin(companies, eq(companies.id, items.companyId))
-    .where(await companyInScope(items.companyId))
+    .where(await companyInPermissionScope(items.companyId, session, "products"))
     .orderBy(items.name);
 
   return rows.map((r) => ({ ...r, lines: Number(r.lines), movements: Number(r.movements) }));
@@ -755,6 +766,7 @@ export async function mergeProducts(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
+  return guard("Couldn't merge the products.", async () => {
   const session = await getLiveSession();
   // Rewrites one product and destroys the others, so it needs both.
   requirePermission(session, "products", "edit");
@@ -844,6 +856,7 @@ export async function mergeProducts(
     detail: `${loserIds.length} duplicate(s) folded in`,
   });
   return { success: true };
+  });
 }
 
 // --- CSV import / export ---------------------------------------------------
@@ -879,7 +892,7 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
       .innerJoin(companies, eq(companies.id, items.companyId))
       .leftJoin(categories, eq(categories.id, items.categoryId))
       .leftJoin(brands, eq(brands.id, items.brandId))
-      .where(await companyInScope(items.companyId))
+      .where(await companyInPermissionScope(items.companyId, session, "products"))
       .orderBy(items.name),
     // The four rate columns are derived, so they come from the same place the
     // products list reads them from rather than being recomputed here.
@@ -913,6 +926,7 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
 export async function importProductsCsv(
   rows: Record<string, string>[],
 ): Promise<{ error?: string; created?: number }> {
+  return guard("Couldn't import the products.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "products", "create");
   if (rows.length === 0) return { error: "That file has no rows." };
@@ -962,4 +976,5 @@ export async function importProductsCsv(
   const result = await createProductsBatch(batch);
   if (result.error) return { error: result.error };
   return { created: result.created?.length ?? 0 };
+  });
 }

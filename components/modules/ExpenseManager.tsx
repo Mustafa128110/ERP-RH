@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -132,11 +131,9 @@ export function ExpenseManager({
 
   const [modal, setModal] = useState<ModalState>(null);
   const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
-  const router = useRouter();
 
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   // A day's several expenses under one category read as one line, so the list

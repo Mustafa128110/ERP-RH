@@ -2,6 +2,8 @@ import "server-only";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { chequeRegister } from "@/lib/db/schema";
 import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
+import { invalidate } from "@/lib/cache";
+import { CACHE } from "@/lib/cache-keys";
 
 // Settling with a cheque is the one settlement that consumes a shared,
 // exhaustible resource: the register's cheques are offered unlinked, but the
@@ -31,11 +33,18 @@ type Tx = Parameters<Parameters<typeof import("@/lib/db").db.transaction>[0]>[0]
 // direction is the settlement direction ("in" = money received, "out" = money
 // paid), which decides the status the cheque lands in — RECEIVED when it came
 // to us, ISSUED when it left — matching what the register means by each.
-export async function linkCheque(tx: Tx, chequeId: string, documentId: string, direction: "in" | "out") {
+export async function linkCheque(tx: Tx, chequeId: string, documentId: string, direction: "in" | "out", companyId: string) {
   const linked = await tx
     .update(chequeRegister)
     .set({ documentId, status: chequeStatusAfterSettling(direction) })
-    .where(and(eq(chequeRegister.id, chequeId), or(isNull(chequeRegister.documentId), eq(chequeRegister.documentId, documentId))))
+    .where(
+      and(
+        eq(chequeRegister.id, chequeId),
+        eq(chequeRegister.companyId, companyId),
+        or(isNull(chequeRegister.documentId), eq(chequeRegister.documentId, documentId)),
+      ),
+    )
     .returning({ id: chequeRegister.id });
   if (linked.length === 0) throw new ChequeUnavailableError();
+  invalidate(CACHE.cheques);
 }

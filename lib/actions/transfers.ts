@@ -6,10 +6,10 @@ import { db } from "@/lib/db";
 import { bankAccounts, cashAccounts, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
-import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { adjustSettlementBalance } from "@/lib/actions/settlement";
+import { ensureDocumentType, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
+import { adjustSettlementBalance, adjustSettlementBalancesBatch } from "@/lib/actions/settlement";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -78,7 +78,7 @@ export async function listCashTransfers(): Promise<CashTransferRow[]> {
     .innerJoin(companies, eq(companies.id, documents.companyId))
     .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
     .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), await companyInScope(documents.companyId)))
+    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), await companyInPermissionScope(documents.companyId, session, "accounts")))
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
   // "Cash Transfer <side> <key>" — the key pairs the two halves, the side says
@@ -156,38 +156,49 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       await db.transaction(async (tx) => {
         // First statement: claim the operation id, or abort as a duplicate.
         if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
-        for (const side of [
+        const numbers = await nextDocumentNumberRange(documentType.series, 2, tx);
+        const sides = [
           { reason: outReason(key), account: from, direction: "out" as const },
           { reason: inReason(key), account: to, direction: "in" as const },
-        ]) {
-          const number = await nextDocumentNumber(documentType.series, tx);
-          const [doc] = await tx
-            .insert(documents)
-            .values({
-              companyId,
-              documentTypeId: documentType.id,
-              number,
-              status: "posted",
-              documentDate,
-              subtotal: total,
-              grandTotal: total,
-              reason: side.reason,
-              bankAccountId: side.account.bankAccountId,
-              cashAccountId: side.account.cashAccountId,
-              createdBy: session.userId,
-            })
-            .returning({ id: documents.id });
+        ].map((side, index) => ({ ...side, number: numbers[index]!, documentId: crypto.randomUUID() }));
 
-          await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
-          await adjustSettlementBalance(tx, side.direction, total, side.account.bankAccountId, side.account.cashAccountId, side.account.chequeId, 1);
+        await tx.insert(documents).values(
+          sides.map((side) => ({
+            id: side.documentId,
+            companyId,
+            documentTypeId: documentType.id,
+            number: side.number,
+            status: "posted" as const,
+            documentDate,
+            subtotal: total,
+            grandTotal: total,
+            reason: side.reason,
+            bankAccountId: side.account.bankAccountId,
+            cashAccountId: side.account.cashAccountId,
+            createdBy: session.userId,
+          })),
+        );
+        await tx.insert(documentNumberLedger).values(
+          sides.map((side) => ({ companyId, documentTypeId: documentType.id, number: side.number, documentId: side.documentId })),
+        );
+        await adjustSettlementBalancesBatch(
+          tx,
+          sides.map((side) => ({
+            direction: side.direction,
+            amount: total,
+            bankAccountId: side.account.bankAccountId,
+            cashAccountId: side.account.cashAccountId,
+            chequeId: side.account.chequeId,
+            sign: 1,
+            companyId,
+          })),
+        );
 
-          // The cheque went out with the money: tied to the document it settled
-          // and marked spent, so it leaves the register's working list and
-          // can't be picked again for something else. The guarded link refuses
-          // one another document already spent.
-          if (side.account.chequeId) {
-            await linkCheque(tx, side.account.chequeId, doc.id, side.direction);
-          }
+        // Only the outgoing side can be a cheque. The guarded link consumes it
+        // after both documents and balance movements have been prepared.
+        const chequeSide = sides.find((side) => side.account.chequeId);
+        if (chequeSide?.account.chequeId) {
+          await linkCheque(tx, chequeSide.account.chequeId, chequeSide.documentId, chequeSide.direction, companyId);
         }
       });
 
@@ -226,8 +237,8 @@ export async function deleteCashTransfer(_prevState: ActionResult | undefined, f
 
     await db.transaction(async (tx) => {
       // Put the money back exactly where it was: the opposite sign on both sides.
-      await adjustSettlementBalance(tx, "out", outDoc.grandTotal, outDoc.bankAccountId, outDoc.cashAccountId, null, -1);
-      await adjustSettlementBalance(tx, "in", inDoc.grandTotal, inDoc.bankAccountId, inDoc.cashAccountId, null, -1);
+      await adjustSettlementBalance(tx, "out", outDoc.grandTotal, outDoc.bankAccountId, outDoc.cashAccountId, null, -1, outDoc.companyId);
+      await adjustSettlementBalance(tx, "in", inDoc.grandTotal, inDoc.bankAccountId, inDoc.cashAccountId, null, -1, inDoc.companyId);
       // No lines and no ledger rows to clear — a transfer writes neither.
       await tx.delete(documents).where(inArray(documents.id, [outDoc.id, inDoc.id]));
     });

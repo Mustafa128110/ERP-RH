@@ -7,6 +7,7 @@ import { cached, MINUTE } from "@/lib/cache";
 import { money, qty } from "@/lib/format";
 import { REPORT_TYPES, type ReportSlug } from "@/lib/report-constants";
 import { queryReport, reportScope, type ReportFilters, type ReportResult } from "@/lib/queries/reports";
+import type { AuthSession } from "@/lib/auth/session";
 
 // Same reasoning as the dashboard cache (lib/actions/dashboard.ts): a report
 // is a live aggregate, so the write-invalidation in invalidateLookups() is the
@@ -26,9 +27,15 @@ const AGGREGATE_TTL = MINUTE;
 export async function runReport(slug: ReportSlug, filters: ReportFilters): Promise<ReportResult> {
   const session = await getSession();
   requirePermission(session, "reports", "view");
+  return runScopedReport(session, slug, filters, "view");
+}
 
+async function runScopedReport(session: AuthSession, slug: ReportSlug, filters: ReportFilters, action: "view" | "export"): Promise<ReportResult> {
   const meta = REPORT_TYPES.find((r) => r.slug === slug)!;
-  const ids = await getScopeCompanyIds();
+  const key = `reports.${action}`;
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+  );
   const scope = reportScope(ids, filters);
   if (!scope) {
     return {
@@ -60,7 +67,7 @@ export async function exportReportCsv(slug: ReportSlug, filters: ReportFilters):
   const session = await getLiveSession();
   requirePermission(session, "reports", "export");
 
-  const report = await runReport(slug, filters);
+  const report = await runScopedReport(session, slug, filters, "export");
   return report.rows.map((row) => {
     const out: Record<string, string> = {};
     for (const column of report.columns) {

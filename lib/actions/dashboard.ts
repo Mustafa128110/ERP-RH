@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type Column, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   bankAccounts,
@@ -17,9 +17,8 @@ import {
 } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, MINUTE } from "@/lib/cache";
-import { scopeSuffix } from "@/lib/queries/lookups";
 
 // Every number on the dashboard is derived here, in SQL, from the same rows the
 // list pages read. Nothing is stored as a running total, so a figure can't drift
@@ -69,17 +68,38 @@ export async function getDashboardData(): Promise<DashboardData> {
   // keeps two views — Royal Hardware vs M52 — from sharing a figure. The auth
   // check above runs on every request; only the query is cached.
   const today = businessToday();
-  return cached(`dashboard:${today}:${await scopeSuffix()}`, AGGREGATE_TTL, () => loadDashboard(today));
+  const selected = await getScopeCompanyIds();
+  const idsFor = (key: string) => selected.filter(
+    (companyId) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+  );
+  const scopes = {
+    sales: idsFor("sales.view"),
+    purchases: idsFor("purchases.view"),
+    expenses: idsFor("expenses.view"),
+    accounts: idsFor("accounts.view"),
+    products: idsFor("products.view"),
+  };
+  const cacheScope = Object.values(scopes).map((ids) => ids.join(",")).join("|");
+  return cached(`dashboard:${today}:${cacheScope}`, AGGREGATE_TTL, () => loadDashboard(today, scopes));
 }
 
-async function loadDashboard(today: string): Promise<DashboardData> {
-  const documentScope = await companyInScope(documents.companyId);
+function idsInScope(column: Column, ids: string[], includeGlobal = false): SQL {
+  if (ids.length === 0) return includeGlobal ? isNull(column) : sql`false`;
+  return (includeGlobal ? or(isNull(column), inArray(column, ids)) : inArray(column, ids))!;
+}
+
+async function loadDashboard(
+  today: string,
+  scopes: { sales: string[]; purchases: string[]; expenses: string[]; accounts: string[]; products: string[] },
+): Promise<DashboardData> {
+  const saleScope = idsInScope(documents.companyId, scopes.sales);
+  const purchaseScope = idsInScope(documents.companyId, scopes.purchases);
 
   // One pass over documents for the four money figures — four separate scans of
   // the same table would cost four round trips for numbers that share a filter.
   // greatest(...,0) keeps an overpaid invoice from subtracting from what's owed.
-  const isSale = sql`${documentTypes.code} = 'SALES_INVOICE'`;
-  const isPurchase = sql`${documentTypes.code} = 'PURCHASE_INVOICE'`;
+  const isSale = and(sql`${documentTypes.code} = 'SALES_INVOICE'`, saleScope)!;
+  const isPurchase = and(sql`${documentTypes.code} = 'PURCHASE_INVOICE'`, purchaseScope)!;
   const isToday = sql`${documents.documentDate} = ${today}`;
   const stillOwed = sql`greatest(${documents.grandTotal} - ${documents.paidAmount}, 0)`;
 
@@ -100,22 +120,22 @@ async function loadDashboard(today: string): Promise<DashboardData> {
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(inArray(documentTypes.code, ["SALES_INVOICE", "PURCHASE_INVOICE"]), documentScope)),
+      .where(or(isSale, isPurchase)),
 
     db
       .select({ total: sql<string>`coalesce(sum(${expenses.amount}), 0)` })
       .from(expenses)
-      .where(and(eq(expenses.expenseDate, today), await companyInScope(expenses.companyId))),
+      .where(and(eq(expenses.expenseDate, today), idsInScope(expenses.companyId, scopes.expenses))),
 
     db
       .select({ total: sql<string>`coalesce(sum(${bankAccounts.currentBalance}), 0)` })
       .from(bankAccounts)
-      .where(and(eq(bankAccounts.isActive, true), await companyInScope(bankAccounts.companyId))),
+      .where(and(eq(bankAccounts.isActive, true), idsInScope(bankAccounts.companyId, scopes.accounts, true))),
 
     db
       .select({ total: sql<string>`coalesce(sum(${cashAccounts.currentBalance}), 0)` })
       .from(cashAccounts)
-      .where(and(eq(cashAccounts.isActive, true), await companyInScope(cashAccounts.companyId))),
+      .where(and(eq(cashAccounts.isActive, true), idsInScope(cashAccounts.companyId, scopes.accounts))),
 
     // On-hand is derived (SUM of signed movements) and so is cost: the average of
     // what came in. Grouped per item and location so the same rows answer the
@@ -132,7 +152,7 @@ async function loadDashboard(today: string): Promise<DashboardData> {
       .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
       .innerJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
-      .where(await companyInScope(items.companyId))
+      .where(idsInScope(items.companyId, scopes.products))
       .groupBy(items.id, locations.name),
 
     // What actually moved off the shelves, by quantity sold.
@@ -147,7 +167,7 @@ async function loadDashboard(today: string): Promise<DashboardData> {
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
-      .where(and(eq(documentTypes.code, "SALES_INVOICE"), documentScope))
+      .where(isSale)
       .groupBy(items.name)
       .orderBy(desc(sql`sum(${documentLines.baseQuantity})`))
       .limit(5),
@@ -199,7 +219,10 @@ async function loadDashboard(today: string): Promise<DashboardData> {
 export async function getDashboardCompanies() {
   const session = await getSession();
   requirePermission(session, "sales", "view");
-  return cached(`dashboard:companies:${await scopeSuffix()}`, AGGREGATE_TTL, async () =>
-    db.select({ name: companies.name }).from(companies).where(await companyInScope(companies.id)),
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("sales.view") || session.permissionsByCompany.get(companyId)?.has("sales.view"),
+  );
+  return cached(`dashboard:companies:${ids.join(",")}`, AGGREGATE_TTL, async () =>
+    ids.length > 0 ? db.select({ name: companies.name }).from(companies).where(inArray(companies.id, ids)) : [],
   );
 }

@@ -1,20 +1,21 @@
 "use server";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, contacts, documentLines, documentNumberLedger, documentTypes, documents, items, units } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { resolveContactId, resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
+import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { round1, todayISO } from "@/lib/format";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { createSale } from "@/lib/actions/sales";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { financialDocumentError } from "@/lib/financial-input";
 
 // A quotation is an ordinary document of type QUOTATION — the universal model
 // already had the type and the QT series, so this needed three nullable columns
@@ -88,7 +89,7 @@ function statusOf(quoted: number, converted: number, validUntil: string | null):
 export async function listQuotations(): Promise<QuotationListRow[]> {
   const session = await getSession();
   requirePermission(session, "quotations", "view");
-  const scope = await companyInScope(documents.companyId);
+  const scope = await companyInPermissionScope(documents.companyId, session, "quotations");
 
   // The line totals come back as an aggregate rather than as rows: the list only
   // needs "how much of this is converted", and pulling every line of every
@@ -152,7 +153,12 @@ export async function getQuotation(documentId: string) {
 
   // Both only need the id we were handed, so they share one round trip.
   const [[doc], lineRows] = await Promise.all([
-    db.select().from(documents).where(and(eq(documents.id, documentId), await companyInScope(documents.companyId))).limit(1),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInPermissionScope(documents.companyId, session, "quotations")))
+      .limit(1),
     db
       .select({
         itemId: documentLines.itemId,
@@ -223,6 +229,12 @@ function readForm(formData: FormData) {
   }
   const validLines = lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
 
+  const financialError = financialDocumentError(validLines, [
+    { label: "Discount", value: discountTotal },
+    { label: "Tax", value: taxTotal },
+    { label: "Shipping", value: shippingTotal },
+  ]);
+
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
 
@@ -234,6 +246,8 @@ function readForm(formData: FormData) {
         ? "Customer is required."
         : validLines.length === 0
           ? "Add at least one item."
+          : financialError
+            ? financialError
           : // A quotation that expired before it was written helps nobody, and is
             // almost always a mistyped year.
             validUntil && validUntil < documentDate
@@ -246,27 +260,27 @@ function readForm(formData: FormData) {
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function writeLines(tx: Tx, companyId: string, documentId: string, lines: LineInput[]) {
-  const rows = [];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
+  const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
+  const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const rows = lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
-    rows.push({
+    return {
       companyId,
       documentId,
       lineNo: i + 1,
       sortOrder: i,
       // A name typed over the dropdown creates the record, the same rule the
       // sale and purchase grids follow.
-      itemId: await resolveItemId(tx, companyId, l.itemId || null, l.itemName || null),
-      unitId: await resolveUnitId(tx, l.unitId || null, l.unitName || null),
+      itemId: itemIds[i] ?? null,
+      unitId: unitIds[i] ?? null,
       quantity: String(quantity),
       baseQuantity: String(quantity),
       unitPrice: String(unitPrice),
       lineTotal: String(round1(quantity * unitPrice)),
       convertedQuantity: "0",
-    });
-  }
+    };
+  });
   if (rows.length > 0) await tx.insert(documentLines).values(rows);
 }
 
@@ -353,11 +367,13 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
     requirePermission(session, "quotations", "edit", { companyId: f.companyId });
 
     const [existing] = await db
-      .select({ number: documents.number })
+      .select({ number: documents.number, companyId: documents.companyId })
       .from(documents)
-      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existing) return { error: "Quotation not found." };
+    if (existing.companyId !== f.companyId) return { error: "A quotation can't be moved to another company. Delete it and enter it in the correct company." };
 
     // Refused rather than silently dropping the converted quantities: the lines
     // are being replaced wholesale below, and rewriting a quotation that already
@@ -408,7 +424,8 @@ export async function deleteQuotation(_prevState: ActionResult | undefined, form
     const [doomed] = await db
       .select({ number: documents.number, companyId: documents.companyId })
       .from(documents)
-      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!doomed) return { error: "Quotation not found." };
     // The delete permission is checked against the row's own company — a
@@ -521,12 +538,14 @@ export async function convertQuotation(
     // above this line changed, and the same conversion can simply be retried.
     await db.transaction(async (tx) => {
       await tx.update(documents).set({ sourceDocumentId: documentId }).where(eq(documents.id, sale.id!));
-      for (const { index, quantity } of converting) {
-        await tx
-          .update(documentLines)
-          .set({ convertedQuantity: sql`coalesce(${documentLines.convertedQuantity}, 0) + ${String(quantity)}` })
-          .where(and(eq(documentLines.documentId, documentId), eq(documentLines.lineNo, index + 1)));
-      }
+      const values = sql.join(converting.map(({ index, quantity }) => sql`(${index + 1}::int, ${String(quantity)}::numeric)`), sql`, `);
+      await tx.execute(sql`
+        UPDATE document_lines dl
+        SET converted_quantity = coalesce(dl.converted_quantity, 0) + v.quantity
+        FROM (VALUES ${values}) AS v(line_no, quantity)
+        WHERE dl.document_id = ${documentId}
+          AND dl.line_no = v.line_no
+      `);
     });
 
     revalidatePath("/sales/quotations");

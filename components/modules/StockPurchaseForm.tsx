@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createStockPurchase, updateStockPurchase, deleteStockPurchase } from "@/lib/actions/purchases";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import type { SettlementType } from "@/lib/actions/settlement";
@@ -216,7 +215,6 @@ export function StockPurchaseCreateForm({
   // must not be part of what re-renders the grid mid-typing.
   const startNext = useRef(false);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
-  const router = useRouter();
 
   // Alt+N from inside the popup is the button — clicked rather than submitted
   // directly, so the browser runs the same required-field checks it would on a
@@ -260,7 +258,6 @@ export function StockPurchaseCreateForm({
       startNext.current = false;
       // The list behind the popup still has to learn about what was just saved;
       // that's the half of onDone() worth keeping when the popup stays open.
-      router.refresh();
       resetForm();
       return;
     }

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, gte, ilike, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gte, ilike, inArray, lte, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -19,17 +19,19 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { adjustSettlementBalance, type SettlementType } from "@/lib/actions/settlement";
-import { resolveContactId, resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
+import { adjustSettlementBalance, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
+import { financialDocumentError } from "@/lib/financial-input";
+import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { DEFAULT_SALE_TYPE, isSaleType } from "@/lib/sale-constants";
 import { round1 } from "@/lib/format";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
+import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 
 export interface SaleItemRow {
   itemName: string;
@@ -57,11 +59,14 @@ export async function listSales(filters: SalesFilters = {}) {
   const session = await getSession();
   requirePermission(session, "sales", "view");
   const scope = and(
-    await companyInScope(documents.companyId),
+    await companyInPermissionScope(documents.companyId, session, "sales"),
     filters.from ? gte(documents.documentDate, filters.from) : undefined,
     filters.to ? lte(documents.documentDate, filters.to) : undefined,
     filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : undefined,
   );
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:sales:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   // The lines query used to wait on the document ids from the first query, which
   // made two ~170ms round trips where one would do. Selecting lines by the same
@@ -126,6 +131,7 @@ export async function listSales(filters: SalesFilters = {}) {
   }
 
   return docs.map((d) => ({ ...d, items: linesByDoc.get(d.id) ?? [] }));
+  });
 }
 
 // Cheques available to settle a sale: unlinked everywhere, plus (when editing)
@@ -174,7 +180,7 @@ export async function getCustomerOutstanding(contactId: string, excludeSaleId?: 
         // Editing an invoice must not count that invoice as part of what was
         // owed beforehand.
         excludeSaleId ? ne(documents.id, excludeSaleId) : undefined,
-        await companyInScope(ledgerEntries.companyId),
+        await companyInPermissionScope(ledgerEntries.companyId, session, "sales"),
       ),
     );
 
@@ -189,7 +195,12 @@ export async function getSale(documentId: string) {
   // for between them — as three sequential statements this cost three round
   // trips to open one sale for editing.
   const [[doc], lineRows, [linkedCheque]] = await Promise.all([
-    db.select().from(documents).where(eq(documents.id, documentId)).limit(1),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
+      .limit(1),
     db.select().from(documentLines).where(eq(documentLines.documentId, documentId)).orderBy(documentLines.lineNo),
     db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1),
   ]);
@@ -262,7 +273,7 @@ export async function getInvoice(documentId: string) {
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(companies, eq(companies.id, documents.companyId))
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
-      .where(eq(documents.id, documentId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
       .limit(1),
     db
       .select({
@@ -380,30 +391,28 @@ async function getShopLocationId(): Promise<string | null> {
 // Resolve each line's item and unit inside the transaction — a typed-but-unpicked
 // name creates the record on the fly (see resolve-refs.ts).
 async function resolveLineRows(tx: SaleTx, companyId: string, lines: SaleLineInput[], locationId: string | null) {
-  const rows = [];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
+  const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
+  const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  return lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
-    const itemId = await resolveItemId(tx, companyId, l.itemId || null, l.itemName || null);
-    const unitId = await resolveUnitId(tx, l.unitId || null, l.unitName || null);
-    rows.push({
+    return {
       lineNo: i + 1,
       sortOrder: i,
-      itemId,
+      itemId: itemIds[i] ?? null,
       locationId,
-      unitId,
+      unitId: unitIds[i] ?? null,
       quantity: String(quantity),
       baseQuantity: String(quantity),
       unitPrice: String(unitPrice),
       unitCost: l.unitCost ? String(Number(l.unitCost)) : null,
       lineTotal: String(quantity * unitPrice),
-    });
-  }
-  return rows;
+    };
+  });
 }
 
-export async function createSale(_prevState: (ActionResult & { id?: string }) | undefined, formData: FormData) {
+export async function createSale(_prevState: (ActionResult & { id?: string }) | undefined, formData: FormData): Promise<ActionResult & { id?: string }> {
+  return guard("Couldn't create the sale.", async () => {
   const session = await getLiveSession();
 
   const companyId = String(formData.get("companyId") ?? "");
@@ -425,6 +434,12 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   const discountTotal = num(formData, "discountTotal", "0");
   const taxTotal = num(formData, "taxTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
+  const financialError = financialDocumentError(validLines, [
+    { label: "Discount", value: discountTotal },
+    { label: "Tax", value: taxTotal },
+    { label: "Shipping", value: shippingTotal },
+  ]);
+  if (financialError) return { error: financialError };
   // Unrecognised (or absent) falls back to counter rather than erroring — it is
   // the answer for the overwhelming majority of sales, and a rejected invoice
   // over a dropdown nobody touched helps nobody.
@@ -510,9 +525,9 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
       // grand total.
       if (settles && paidAmount > 0) {
         if (chequeId) {
-          await linkCheque(tx, chequeId, doc.id, "in");
+          await linkCheque(tx, chequeId, doc.id, "in", companyId);
         }
-        await adjustSettlementBalance(tx, "in", String(paidAmount), bankAccountId, cashAccountId, chequeId, 1);
+        await adjustSettlementBalance(tx, "in", String(paidAmount), bankAccountId, cashAccountId, chequeId, 1, companyId);
       }
 
       // Whatever is left owing goes on the customer's ledger as a debit — the
@@ -529,6 +544,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
     if (e instanceof ChequeUnavailableError) return { error: e.message };
+    if (e instanceof SettlementScopeError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -544,6 +560,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   revalidatePath("/ledger");
   await recordAudit({ action: "create", entity: "sale", entityId: createdId, summary: createdNumber, companyId, detail: `Total ${grandTotal}` });
   return { success: true, id: createdId };
+  });
 }
 
 export async function updateSale(documentId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
@@ -568,6 +585,12 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     const discountTotal = num(formData, "discountTotal", "0");
     const taxTotal = num(formData, "taxTotal", "0");
     const shippingTotal = num(formData, "shippingTotal", "0");
+    const financialError = financialDocumentError(validLines, [
+      { label: "Discount", value: discountTotal },
+      { label: "Tax", value: taxTotal },
+      { label: "Shipping", value: shippingTotal },
+    ]);
+    if (financialError) return { error: financialError };
     // Unrecognised (or absent) falls back to counter rather than erroring — it is
     // the answer for the overwhelming majority of sales, and a rejected invoice
     // over a dropdown nobody touched helps nobody.
@@ -589,30 +612,54 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     const [existingDoc] = await db
       .select({
         number: documents.number,
+        companyId: documents.companyId,
         paidAmount: documents.paidAmount,
         bankAccountId: documents.bankAccountId,
         cashAccountId: documents.cashAccountId,
       })
       .from(documents)
-      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existingDoc) return { error: "Sale not found." };
-    const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
+    if (existingDoc.companyId !== companyId) return { error: "A posted sale can't be moved to another company. Delete it and enter it in the correct company." };
+    let vanishedDuringSave = false;
 
     await db.transaction(async (tx) => {
+      const [lockedDoc] = await tx
+        .select({
+          paidAmount: documents.paidAmount,
+          bankAccountId: documents.bankAccountId,
+          cashAccountId: documents.cashAccountId,
+        })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, companyId)))
+        .limit(1)
+        .for("update");
+      if (!lockedDoc) {
+        vanishedDuringSave = true;
+        return;
+      }
+      const [existingCheque] = await tx
+        .select({ id: chequeRegister.id })
+        .from(chequeRegister)
+        .where(eq(chequeRegister.documentId, documentId))
+        .limit(1)
+        .for("update");
       // Reverse whatever was settled before applying the new figure — handles a
       // changed total, a changed part payment, and paid/unpaid flips in one pass.
       // Keyed on the amount rather than the is_paid flag, so a part payment gets
       // its actual amount back rather than nothing.
-      if (Number(existingDoc.paidAmount) > 0) {
+      if (Number(lockedDoc.paidAmount) > 0) {
         await adjustSettlementBalance(
           tx,
           "in",
-          existingDoc.paidAmount,
-          existingDoc.bankAccountId,
-          existingDoc.cashAccountId,
+          lockedDoc.paidAmount,
+          lockedDoc.bankAccountId,
+          lockedDoc.cashAccountId,
           existingCheque?.id ?? null,
           -1,
+          companyId,
         );
         if (existingCheque) {
           await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
@@ -643,9 +690,9 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
 
       if (settles && paidAmount > 0) {
         if (chequeId) {
-          await linkCheque(tx, chequeId, documentId, "in");
+          await linkCheque(tx, chequeId, documentId, "in", companyId);
         }
-        await adjustSettlementBalance(tx, "in", String(paidAmount), bankAccountId, cashAccountId, chequeId, 1);
+        await adjustSettlementBalance(tx, "in", String(paidAmount), bankAccountId, cashAccountId, chequeId, 1, companyId);
       }
 
       // Re-sync the receivable: drop whatever was there and re-add only what is
@@ -684,6 +731,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         );
       }
     });
+    if (vanishedDuringSave) return { error: "Sale not found — it may already have been deleted." };
 
     // A sale can create items and contacts on the fly (resolve-refs.ts), so their
     // cached option lists are stale — without this a product typed into a sale is
@@ -699,7 +747,8 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
   });
 }
 
-export async function deleteSale(_prevState: ActionResult | undefined, formData: FormData) {
+export async function deleteSale(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't delete the sale.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "sales", "delete");
 
@@ -717,24 +766,46 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
       cashAccountId: documents.cashAccountId,
     })
     .from(documents)
-    .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Sale not found." };
   requirePermission(session, "sales", "delete", { companyId: existingDoc.companyId });
-  const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
+  let vanishedDuringDelete = false;
 
   try {
     await db.transaction(async (tx) => {
+      const [lockedDoc] = await tx
+        .select({
+          paidAmount: documents.paidAmount,
+          bankAccountId: documents.bankAccountId,
+          cashAccountId: documents.cashAccountId,
+        })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, existingDoc.companyId)))
+        .limit(1)
+        .for("update");
+      if (!lockedDoc) {
+        vanishedDuringDelete = true;
+        return;
+      }
+      const [existingCheque] = await tx
+        .select({ id: chequeRegister.id })
+        .from(chequeRegister)
+        .where(eq(chequeRegister.documentId, documentId))
+        .limit(1)
+        .for("update");
       // Give back exactly what came in — the part payment, not the whole total.
-      if (Number(existingDoc.paidAmount) > 0) {
+      if (Number(lockedDoc.paidAmount) > 0) {
         await adjustSettlementBalance(
           tx,
           "in",
-          existingDoc.paidAmount,
-          existingDoc.bankAccountId,
-          existingDoc.cashAccountId,
+          lockedDoc.paidAmount,
+          lockedDoc.bankAccountId,
+          lockedDoc.cashAccountId,
           existingCheque?.id ?? null,
           -1,
+          existingDoc.companyId,
         );
       }
       // Unlinked whatever the paid amount was: cheque_register.document_id is ON
@@ -756,6 +827,7 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
   } catch (e) {
     return { error: describeDbError(e, "Can't delete — this sale is still referenced elsewhere.") };
   }
+  if (vanishedDuringDelete) return { error: "Sale not found — it may already have been deleted." };
 
   // A sale can create items and contacts on the fly (resolve-refs.ts), so their
   // cached option lists are stale — without this a product typed into a sale is
@@ -775,4 +847,5 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     detail: `Total ${existingDoc.grandTotal}`,
   });
   return { success: true };
+  });
 }

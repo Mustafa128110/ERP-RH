@@ -5,8 +5,9 @@ import { db } from "@/lib/db";
 import { companies, inventoryTransactions, documentLines, items, locations, units } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
+import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 
 export interface StockUnitTotal {
   unit: string;
@@ -50,6 +51,9 @@ export interface StockItemRow {
 export async function listStockLevels(locationId?: string, companyId?: string): Promise<StockItemRow[]> {
   const session = await getSession();
   requirePermission(session, "products", "view");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:stock:${cacheScope}:${stableReadKey({ locationId, companyId })}`, async () => {
 
   // Aggregated in SQL (GROUP BY) instead of pulling every inventory_transactions
   // row ever recorded to Node and reducing in JS — that scaled with total
@@ -78,7 +82,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       and(
         // Stock is scoped by the item's company (inventory_transactions carries
         // company_id too, but the item is the source of truth for ownership).
-        await companyInScope(items.companyId),
+        await companyInPermissionScope(items.companyId, session, "products"),
         companyId ? eq(items.companyId, companyId) : undefined,
         locationId === UNASSIGNED_LOCATION
           ? isNull(documentLines.locationId)
@@ -180,4 +184,5 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       };
     })
     .sort((a, b) => a.itemName.localeCompare(b.itemName));
+  });
 }

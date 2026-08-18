@@ -1,11 +1,12 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, userCompanyAccess } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
+import { companyInPermissionScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -13,13 +14,17 @@ import { recordAudit } from "@/lib/actions/audit";
 export async function listCompanies() {
   const session = await getSession();
   requirePermission(session, "companies", "view");
-  return db.select().from(companies);
+  return db.select().from(companies).where(await companyInPermissionScope(companies.id, session, "companies"));
 }
 
 export async function getCompany(companyId: string) {
   const session = await getSession();
   requirePermission(session, "companies", "view");
-  const [company] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+  const [company] = await db
+    .select()
+    .from(companies)
+    .where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies")))
+    .limit(1);
   return company ?? null;
 }
 
@@ -46,7 +51,7 @@ export interface CompanyBatchRow {
 export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<ActionResult> {
   return guard("Couldn't save the companies.", async () => {
     const session = await getLiveSession();
-    requirePermission(session, "companies", "create");
+    requireGlobalPermission(session, "companies", "create");
 
     const valid = rows.filter((r) => r.name.trim());
     if (valid.length === 0) return { error: "Add at least one company with a name." };
@@ -76,12 +81,12 @@ export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<Act
 export async function updateCompany(companyId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the company.", async () => {
     const session = await getLiveSession();
-    requirePermission(session, "companies", "edit");
+    requirePermission(session, "companies", "edit", { companyId });
 
     const values = readCompanyForm(formData);
     if (!values.name) return { error: "Name is required." };
 
-    await db.update(companies).set(values).where(eq(companies.id, companyId));
+    await db.update(companies).set(values).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "edit")));
     invalidateLookups(CACHE.companies);
     revalidatePath("/", "layout");
     await recordAudit({ action: "update", entity: "company", entityId: companyId, summary: values.name, companyId });
@@ -92,10 +97,9 @@ export async function updateCompany(companyId: string, _prevState: ActionResult 
 export async function deleteCompany(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — other records (contacts, items, documents, …) still reference this company.", async () => {
     const session = await getLiveSession();
-    requirePermission(session, "companies", "delete");
-
     const companyId = String(formData.get("companyId") ?? "");
-    await db.delete(companies).where(eq(companies.id, companyId));
+    requirePermission(session, "companies", "delete", { companyId });
+    await db.delete(companies).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "delete")));
 
     invalidateLookups(CACHE.companies);
     revalidatePath("/", "layout");

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { UnitConversionEditForm, DeleteUnitConversionButton, UnitConversionBatchAddDialog } from "@/components/modules/UnitConversionForm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -45,12 +44,10 @@ export function UnitConversionManager({
 }) {
   const [modal, setModal] = useState<ModalState>(null);
   const [detail, setDetail] = useState<Awaited<ReturnType<typeof getDetail>>>(null);
-  const router = useRouter();
 
   function close() {
     setModal(null);
     setDetail(null);
-    router.refresh();
   }
 
   async function openEdit(id: string) {

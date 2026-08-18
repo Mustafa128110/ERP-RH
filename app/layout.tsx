@@ -1,24 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Inter } from "next/font/google";
 import { getSession } from "@/lib/auth/session";
 import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
 import { ServiceWorkerRegister } from "@/components/layout/ServiceWorkerRegister";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import "@fontsource/fraunces/600.css";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
 import "./globals.css";
 
 // Brand pairing (docs/OS/02-brand/typography.md): Fraunces 600 for
-// display/headings, Inter 400/500/600 for body/UI. No other weights load.
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-  weight: "600",
-});
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
+// display/headings, Inter 400/500/600 for body/UI. The font files are bundled
+// from @fontsource so production builds never depend on Google Fonts being up
+// or reachable from a restricted deployment network.
 
 export const metadata: Metadata = {
   title: "Royal Hardware ERP",
@@ -74,7 +68,7 @@ export default async function RootLayout({
       // zoom: text, padding, gaps and the stroked icons all scale together
       // rather than the type growing out of its buttons.
       style={scale === DEFAULT_SCALE ? undefined : { fontSize: `${scale}%` }}
-      className={`${fraunces.variable} ${inter.variable} h-full antialiased`}
+      className="h-full antialiased"
     >
       {/*
         Grammarly (and password managers, and translation extensions) write

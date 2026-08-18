@@ -204,7 +204,7 @@ const flows = {
     path: "/purchases/stock",
     open: `__click('button[aria-label="New purchase"]')`,
     openReady: `!!document.querySelector('[role="dialog"] input[placeholder^="Pick a supplier"]')`,
-    fill: (m) => `
+    fill: () => `
       __setVal('[role="dialog"] input[placeholder^="Pick a supplier"]', 'SP-${m}');
       __setVal('[role="dialog"] input[placeholder^="Where the goods arrived"]', 'Shop');
       __setVal('[role="dialog"] table tbody tr:first-child input[role="combobox"]', 'TI-purchase-${m}');
@@ -218,7 +218,7 @@ const flows = {
     path: "/payments",
     open: `__click('button[aria-label="Add payments"]')`,
     openReady: `!!document.querySelector('[role="dialog"] input[role="combobox"]')`,
-    fill: (m) => `
+    fill: () => `
       __setVal('[role="dialog"] input[role="combobox"]', 'TP-${m}');
       __setVal('[role="dialog"] input[type="number"]', '33');`,
     submitSel: '[role="dialog"] [data-dialog-submit]',
@@ -313,7 +313,7 @@ const flows = {
     // (lost-response) attempt they're blank, exactly as a real user would see
     // them. Re-typing them is what a real user does before clicking Save again,
     // and it is what lets the server-side duplicate refusal actually fire.
-    refill: (m) => `
+    refill: () => `
       __setVal('[role="dialog"] input[name="amount"]', '77');
       __setVal('[role="dialog"] input[name="note"]', 'ledger-test-${m}');`,
     submitSel: '[role="dialog"] button[type="submit"]',
@@ -332,13 +332,13 @@ const flows = {
       document.querySelector('button[title*="Alt+N"]').click();
     })()`,
     openReady: `!!document.querySelector('[role="dialog"] select[name="fromAccount"]')`,
-    fill: (m) => `
+    fill: () => `
       __pickNth('select[name="fromAccount"]', 0);
       __pickNth('select[name="toAccount"]', 0);
       __setVal('[role="dialog"] input[name="amount"]', '21');`,
     // toAccount and amount are uncontrolled inputs, wiped by the action
     // completion after the lost response — re-pick/re-type before the replay.
-    refill: (m) => `
+    refill: () => `
       __pickNth('select[name="toAccount"]', 0);
       __setVal('[role="dialog"] input[name="amount"]', '21');`,
     submitSel: '[role="dialog"] button[type="submit"]',

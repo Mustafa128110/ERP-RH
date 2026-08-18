@@ -134,7 +134,6 @@ export function PaymentManager({
     setBatchOpen(false);
     setEditing(null);
     setChoosing(null);
-    router.refresh();
   }
 
   async function openEdit(id: string) {

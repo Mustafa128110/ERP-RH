@@ -25,7 +25,7 @@ const BY_KEY = new Map(SETTING_DEFS.map((d) => [d.key, d]));
 // blank threshold would mean "everything is dead stock".
 export async function getSettings(companyId: string): Promise<Record<string, string>> {
   const session = await getSession();
-  requirePermission(session, "settings", "view");
+  requirePermission(session, "settings", "view", { companyId });
 
   const rows = await db
     .select({ key: settings.key, value: settings.value })
@@ -83,7 +83,9 @@ export async function settingsOverview() {
   const session = await getSession();
   requirePermission(session, "settings", "view");
 
-  const ids = await getScopeCompanyIds();
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("settings.view") || session.permissionsByCompany.get(companyId)?.has("settings.view"),
+  );
   const companyRows = ids.length
     ? await db.select({ id: companies.id, name: companies.name, taxNumber: companies.taxNumber, phone: companies.phone }).from(companies).where(inArray(companies.id, ids)).orderBy(companies.name)
     : [];

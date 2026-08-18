@@ -48,3 +48,19 @@ export function requirePermission(
     throw new PermissionError(`No access to warehouse ${scope.warehouseId}`);
   }
 }
+
+// Account administration is system-wide: a company-scoped users.* grant must
+// never be enough to create, deactivate, delete, or globally promote a person.
+// Keep this separate from requirePermission()'s intentionally permissive
+// no-scope UI check so callers have to opt into global authority explicitly.
+export function requireGlobalPermission(
+  session: AuthSession | null,
+  moduleName: string,
+  action: string,
+): asserts session is AuthSession {
+  if (!session) throw new PermissionError("Not authenticated");
+  const key = `${moduleName}.${action}`;
+  if (!session.globalPermissions.has(key)) {
+    throw new PermissionError(`Missing global permission ${key}`);
+  }
+}

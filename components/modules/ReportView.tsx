@@ -10,6 +10,7 @@ import { iconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import { money, qty } from "@/lib/format";
 import type { ColumnDef, Row } from "@/lib/table";
+import { toCsv } from "@/lib/csv";
 
 // One component for all eleven reports. They differ in their columns and their
 // SQL (lib/actions/reports.ts) and in nothing else — the filter bar, the table,
@@ -28,11 +29,10 @@ function download(text: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function toCsv(rows: Record<string, string>[]): string {
+function recordsToCsv(rows: Record<string, string>[]): string {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0]);
-  const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  return [headers.map(cell).join(","), ...rows.map((r) => headers.map((h) => cell(r[h] ?? "")).join(","))].join("\n");
+  return toCsv([headers, ...rows.map((row) => headers.map((header) => row[header] ?? ""))]);
 }
 
 export function ReportView({
@@ -75,7 +75,7 @@ export function ReportView({
         setError("Nothing to export — this report has no rows for the chosen dates.");
         return;
       }
-      download(toCsv(data), `${slug}-${filters.from ?? "start"}-to-${filters.to ?? "today"}.csv`);
+      download(recordsToCsv(data), `${slug}-${filters.from ?? "start"}-to-${filters.to ?? "today"}.csv`);
     } catch {
       setError("Couldn't build the export. Try again, or narrow the date range.");
     } finally {

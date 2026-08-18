@@ -21,8 +21,8 @@
 @custom-variant dark (&:where(.rh-dark-unused));
 
 @theme inline {
-  --font-sans: var(--font-inter);
-  --font-display: var(--font-fraunces);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
 }
 
 @theme {

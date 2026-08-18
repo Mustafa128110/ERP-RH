@@ -6,13 +6,14 @@ import { db } from "@/lib/db";
 import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId } from "@/lib/actions/resolve-refs";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { recordAudit } from "@/lib/actions/audit";
+import { cachedPageRead } from "@/lib/read-cache";
 
 export interface ContactPayment {
   date: string;
@@ -45,6 +46,9 @@ export interface ContactLedgerBalance {
 export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:ledger:${cacheScope}`, async () => {
 
   // Neither query depends on the other's rows, so they share one round trip.
   const [rows, paymentRows] = await Promise.all([
@@ -63,7 +67,7 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
       // This used to read every company's entries regardless of who was signed in
       // or what the topbar was set to — the only list in the app that didn't scope.
-      .where(await companyInScope(ledgerEntries.companyId)),
+      .where(await companyInPermissionScope(ledgerEntries.companyId, session, "purchases")),
 
     // Every payment against a contact, newest first — sliced to five per contact
     // below. Both directions: a contact can be owed money on one invoice and owe
@@ -83,7 +87,7 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
         and(
           inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
           isNotNull(documents.contactId),
-          await companyInScope(documents.companyId),
+          await companyInPermissionScope(documents.companyId, session, "purchases"),
         ),
       )
       .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
@@ -131,6 +135,7 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
   return Array.from(byContact.values())
     .map((e) => ({ ...e, balance: e.credit - e.debit }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
+  });
 }
 
 // A balance that didn't come from a sale or a purchase — an opening balance
@@ -326,6 +331,14 @@ export async function setContactBalance(
 
       invalidateLookups(CACHE.documentTypes, CACHE.cheques);
       revalidatePath("/ledger");
+      await recordAudit({
+        action: "update",
+        entity: "contact balance",
+        entityId: contactId,
+        summary: `Balance set to ${direction === "we_owe" ? amount : -amount}`,
+        companyId,
+        detail: note || "Balance correction",
+      });
       return { success: true };
     },
     { [DUPLICATE]: "Can't save — a journal entry number is already in use for this company." },

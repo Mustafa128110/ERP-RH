@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { navSections } from "@/lib/nav-config";
 import { NavIcon } from "@/components/layout/NavIcon";
 import { HoverCard } from "@/components/ui/HoverCard";
+import type { ComponentProps } from "react";
 
 // Fired by the Topbar's hamburger. An event rather than lifted state: the drawer
 // is the only thing the two share, and threading a setter down through the
@@ -13,6 +14,33 @@ import { HoverCard } from "@/components/ui/HoverCard";
 // call the shortcut sheet makes.
 export const NAV_EVENT = "erp:nav";
 export const openNav = () => window.dispatchEvent(new Event(NAV_EVENT));
+
+// Dynamic ERP routes normally prefetch only their loading shell. Once a pointer,
+// keyboard focus, or finger shows intent, opt that one destination into a full
+// prefetch so its cached read model and JavaScript are ready before the click.
+// `null` preserves Next's inexpensive default while the link is merely visible.
+function IntentLink({ onPointerEnter, onFocus, onTouchStart, ...props }: ComponentProps<typeof Link>) {
+  const [intent, setIntent] = useState(false);
+  const warm = () => setIntent(true);
+  return (
+    <Link
+      {...props}
+      prefetch={intent ? true : null}
+      onPointerEnter={(event) => {
+        warm();
+        onPointerEnter?.(event);
+      }}
+      onFocus={(event) => {
+        warm();
+        onFocus?.(event);
+      }}
+      onTouchStart={(event) => {
+        warm();
+        onTouchStart?.(event);
+      }}
+    />
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -68,7 +96,7 @@ export function Sidebar() {
       <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-brass-600">{section.label}</p>
       <div className="flex flex-col gap-0.5">
         {section.items.map((item) => (
-          <Link
+          <IntentLink
             key={item.href}
             href={item.href}
             // Tapping a link on a phone should land you on the page, not on the
@@ -79,7 +107,7 @@ export function Sidebar() {
             className={linkClass(item.href === activeHref)}
           >
             {item.label}
-          </Link>
+          </IntentLink>
         ))}
       </div>
     </div>
@@ -153,7 +181,7 @@ export function Sidebar() {
                       estimatedHeight={54}
                       panelClassName="w-max px-3 py-2"
                       trigger={
-                        <Link
+                        <IntentLink
                           href={item.href}
                           aria-label={item.label}
                           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
@@ -161,7 +189,7 @@ export function Sidebar() {
                           }`}
                         >
                           <NavIcon href={item.href} label={item.label} />
-                        </Link>
+                        </IntentLink>
                       }
                     >
                       <p className="font-semibold text-navy-800">{item.label}</p>

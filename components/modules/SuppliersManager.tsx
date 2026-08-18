@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/SupplierForm";
 import { getContact } from "@/lib/actions/contacts";
@@ -60,12 +59,10 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
   // exists — tick the half-filled ones and finish them in one grid instead of
   // opening each in turn. Same tick column and Ctrl+Enter as the products list.
   const [selected, setSelected] = useState<string[]>([]);
-  const router = useRouter();
 
   function close() {
     setModal(null);
     setDetail(null);
-    router.refresh();
   }
 
   function closeBatchEdit() {
@@ -73,7 +70,6 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
     // The saved rows are no longer the ones that needed fixing, so leaving them
     // ticked invites a second pass over work already done.
     setSelected([]);
-    router.refresh();
   }
 
   async function openEdit(row: Row) {

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, like } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, like, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -15,13 +15,14 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { resolveContactId, resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
-import { describeDbError, type ActionResult } from "@/lib/actions/guard";
+import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
+import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { financialDocumentError } from "@/lib/financial-input";
 
 // One company selling to the other was two jobs done by hand: a sale in the
 // seller and a matching purchase in the buyer, typed twice, with two chances to
@@ -73,6 +74,7 @@ function readHeader(formData: FormData) {
   const fromLocationId = String(formData.get("fromLocationId") ?? "");
   const toLocationId = String(formData.get("toLocationId") ?? "");
   const lines = readLines(formData);
+  const financialError = financialDocumentError(lines.map((line) => ({ quantity: line.quantity, unitPrice: line.rate })), []);
 
   const error = !documentDate
     ? "Document date is required."
@@ -80,7 +82,7 @@ function readHeader(formData: FormData) {
       ? "Pick where the stock ships from and where it lands."
       : lines.length === 0
         ? "Add at least one item with a quantity."
-        : null;
+        : financialError;
 
   return { sellerCompanyId, buyerCompanyId, documentDate, fromLocationId, toLocationId, lines, error };
 }
@@ -105,23 +107,27 @@ interface Side {
 // and the name it was handed was the picker's *label* ("Widget (RH-00003)"), so
 // every inter-company sale created a second catalog entry named after the label
 // with a brand new SKU. Migration 0042 renamed the rows that made.
-async function mirrorItemToBuyer(tx: InterCompanyTx, sellerItemId: string | null, buyerCompanyId: string): Promise<string | null> {
-  if (!sellerItemId) return null;
-  const [source] = await tx.select({ name: items.name, sku: items.sku }).from(items).where(eq(items.id, sellerItemId)).limit(1);
-  if (!source) return null;
-
-  const [existing] = await tx
-    .select({ id: items.id })
+async function mirrorItemsToBuyer(tx: InterCompanyTx, sellerItemIds: (string | null)[], buyerCompanyId: string): Promise<(string | null)[]> {
+  const ids = [...new Set(sellerItemIds.filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return sellerItemIds.map(() => null);
+  const sources = await tx.select({ id: items.id, name: items.name, sku: items.sku }).from(items).where(inArray(items.id, ids));
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  const skus = [...new Set(sources.map((source) => source.sku))];
+  const existing = await tx
+    .select({ id: items.id, sku: items.sku })
     .from(items)
-    .where(and(eq(items.companyId, buyerCompanyId), eq(items.sku, source.sku)))
-    .limit(1);
-  if (existing) return existing.id;
-
-  const [row] = await tx
-    .insert(items)
-    .values({ companyId: buyerCompanyId, name: source.name, sku: source.sku })
-    .returning({ id: items.id });
-  return row.id;
+    .where(and(eq(items.companyId, buyerCompanyId), inArray(items.sku, skus)));
+  const bySku = new Map(existing.map((row) => [row.sku, row.id]));
+  const missing = sources.filter((source, index) => !bySku.has(source.sku) && sources.findIndex((candidate) => candidate.sku === source.sku) === index);
+  if (missing.length > 0) {
+    const inserted = await tx
+      .insert(items)
+      .values(missing.map((source) => ({ companyId: buyerCompanyId, name: source.name, sku: source.sku })))
+      .onConflictDoUpdate({ target: [items.companyId, items.sku], set: { name: sql`excluded.name` } })
+      .returning({ id: items.id, sku: items.sku });
+    for (const row of inserted) bySku.set(row.sku, row.id);
+  }
+  return sellerItemIds.map((id) => (id ? bySku.get(sourceById.get(id)?.sku ?? "") ?? null : null));
 }
 
 // One pass over the lines, resolving both companies' item rows and writing both
@@ -134,13 +140,21 @@ async function writeInterCompanyLines(
   seller: Side,
   buyer: Side,
 ) {
+  const sellerItemIds = await resolveItemIds(
+    tx,
+    lines.map((line) => ({ companyId: seller.companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
+  );
+  const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const buyerItemIds = await mirrorItemsToBuyer(tx, sellerItemIds, buyer.companyId);
+  const pairs: { lineId: string; line: typeof documentLines.$inferInsert; movement: -1 | 1; lineTotal: string }[] = [];
+
   for (const [i, l] of lines.entries()) {
     const quantity = String(Number(l.quantity));
     const rate = String(Number(l.rate) || 0);
     const lineTotal = String(Number(quantity) * Number(rate));
-    const unitId = await resolveUnitId(tx, l.unitId || null, l.unitName || null);
-    const sellerItemId = await resolveItemId(tx, seller.companyId, l.itemId || null, l.itemName || null);
-    const buyerItemId = await mirrorItemToBuyer(tx, sellerItemId, buyer.companyId);
+    const unitId = unitIds[i] ?? null;
+    const sellerItemId = sellerItemIds[i] ?? null;
+    const buyerItemId = buyerItemIds[i] ?? null;
 
     const line = {
       lineNo: i + 1,
@@ -156,30 +170,36 @@ async function writeInterCompanyLines(
       { ...seller, itemId: sellerItemId, movement: -1 as const },
       { ...buyer, itemId: buyerItemId, movement: 1 as const },
     ]) {
-      const [inserted] = await tx
-        .insert(documentLines)
-        .values({
+      const lineId = crypto.randomUUID();
+      pairs.push({
+        lineId,
+        line: {
+          id: lineId,
           ...line,
           companyId: side.companyId,
           documentId: side.documentId,
           itemId: side.itemId,
           locationId: side.locationId,
-        })
-        .returning({ id: documentLines.id });
-
-      if (side.itemId) {
-        await tx.insert(inventoryTransactions).values({
-          companyId: side.companyId,
-          documentLineId: inserted.id,
-          movement: side.movement,
-          quantity,
-          baseQuantity: quantity,
-          unitCost: rate,
-          totalCost: lineTotal,
-        });
-      }
+        },
+        movement: side.movement,
+        lineTotal,
+      });
     }
   }
+
+  await tx.insert(documentLines).values(pairs.map((pair) => pair.line));
+  const movements = pairs
+    .filter((pair) => pair.line.itemId)
+    .map((pair) => ({
+      companyId: pair.line.companyId!,
+      documentLineId: pair.lineId,
+      movement: pair.movement,
+      quantity: pair.line.quantity!,
+      baseQuantity: pair.line.baseQuantity!,
+      unitCost: pair.line.unitPrice,
+      totalCost: pair.lineTotal,
+    }));
+  if (movements.length > 0) await tx.insert(inventoryTransactions).values(movements);
 }
 
 // inventory_transactions.document_line_id is ON DELETE RESTRICT, so the movements
@@ -237,6 +257,8 @@ export async function listInterCompanySales() {
     .orderBy(desc(documents.documentDate));
 
   const scopeIds = await getScopeCompanyIds();
+  const canView = (companyId: string, key: string) =>
+    scopeIds.includes(companyId) && (session.globalPermissions.has(key) || Boolean(session.permissionsByCompany.get(companyId)?.has(key)));
   const pairs = new Map<string, { sale?: (typeof rows)[number]; purchase?: (typeof rows)[number] }>();
   for (const r of rows) {
     const pair = pairs.get(r.reason!) ?? {};
@@ -246,7 +268,7 @@ export async function listInterCompanySales() {
   }
 
   return [...pairs.values()]
-    .filter((p) => p.sale && (scopeIds.includes(p.sale.companyId) || (p.purchase && scopeIds.includes(p.purchase.companyId))))
+    .filter((p) => p.sale && p.purchase && canView(p.sale.companyId, "sales.view") && canView(p.purchase.companyId, "purchases.view"))
     .map((p) => ({
       id: p.sale!.id,
       saleNumber: p.sale!.number,
@@ -265,11 +287,20 @@ export async function getInterCompanySale(saleId: string) {
   const session = await getSession();
   requirePermission(session, "sales", "view");
 
-  const [sale] = await db.select().from(documents).where(eq(documents.id, saleId)).limit(1);
+  const [sale] = await db
+    .select(getTableColumns(documents))
+    .from(documents)
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, saleId), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
+    .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return null;
 
   const [sides, sellerLines, [seller]] = await Promise.all([
-    db.select().from(documents).where(eq(documents.reason, sale.reason)),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.reason, sale.reason), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases"))),
     db
       .select({
         itemId: documentLines.itemId,
@@ -283,7 +314,7 @@ export async function getInterCompanySale(saleId: string) {
       .orderBy(documentLines.lineNo),
     db.select({ name: companies.name }).from(companies).where(eq(companies.id, sale.companyId)).limit(1),
   ]);
-  const purchase = sides.find((d) => d.id !== sale.id);
+  const purchase = sides[0];
   if (!purchase) return null;
 
   const [buyerLine] = await db
@@ -329,6 +360,7 @@ export interface InterCompanyResult {
 }
 
 export async function createInterCompanySale(_prevState: InterCompanyResult | undefined, formData: FormData): Promise<InterCompanyResult> {
+  return guard("Couldn't create the inter-company sale.", async () => {
   const session = await getLiveSession();
 
   const header = readHeader(formData);
@@ -342,6 +374,8 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
   // side outside the session's access refuses the whole pair.
   requirePermission(session, "sales", "create", { companyId: sellerCompanyId });
   requirePermission(session, "purchases", "create", { companyId: buyerCompanyId });
+  requirePermission(session, "sales", "create", { companyId: sellerCompanyId, warehouseId: header.fromLocationId });
+  requirePermission(session, "purchases", "create", { companyId: buyerCompanyId, warehouseId: header.toLocationId });
 
   const [[seller], [buyer]] = await Promise.all([
     db.select({ name: companies.name }).from(companies).where(eq(companies.id, sellerCompanyId)).limit(1),
@@ -451,6 +485,7 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
     detail: `Total ${total}`,
   });
   return { success: true, ...result };
+  });
 }
 
 // Editing replays both documents: the old lines, movements and ledger rows go and
@@ -465,6 +500,7 @@ export async function updateInterCompanySale(
   _prevState: InterCompanyResult | undefined,
   formData: FormData,
 ): Promise<InterCompanyResult> {
+  return guard("Couldn't save the inter-company sale.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "sales", "edit");
   requirePermission(session, "purchases", "edit");
@@ -476,52 +512,71 @@ export async function updateInterCompanySale(
   // and so is a purchase half outside the scope — a pair can only be edited by
   // someone who can act on both sides.
   const [sale] = await db
-    .select()
+    .select(getTableColumns(documents))
     .from(documents)
-    .where(and(eq(documents.id, saleId), await companyInScope(documents.companyId)))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, saleId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return { error: "Inter-company sale not found." };
-  const [purchase] = (await db.select().from(documents).where(and(eq(documents.reason, sale.reason), await companyInScope(documents.companyId)))).filter(
-    (d) => d.id !== sale.id,
-  );
+  const [purchase] = await db
+    .select(getTableColumns(documents))
+    .from(documents)
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.reason, sale.reason), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
+    .limit(1);
   if (!purchase) return { error: "The matching purchase is missing — edit each document from its own page." };
+  if (header.sellerCompanyId !== sale.companyId || header.buyerCompanyId !== purchase.companyId) {
+    return { error: "An inter-company pair can't be moved to different companies. Delete it and enter a new pair." };
+  }
   requirePermission(session, "sales", "edit", { companyId: sale.companyId });
   requirePermission(session, "purchases", "edit", { companyId: purchase.companyId });
+  requirePermission(session, "sales", "edit", { companyId: sale.companyId, warehouseId: header.fromLocationId });
+  requirePermission(session, "purchases", "edit", { companyId: purchase.companyId, warehouseId: header.toLocationId });
 
   const total = linesTotal(header.lines);
 
   try {
     await db.transaction(async (tx) => {
+      // Lock both headers before deriving balances. A payment posted from either
+      // document page must finish first; otherwise this edit could recreate a
+      // ledger row from the paid amount that existed before that payment.
+      const lockedDocs = await tx
+        .select({ id: documents.id, companyId: documents.companyId, paidAmount: documents.paidAmount })
+        .from(documents)
+        .where(inArray(documents.id, [sale.id, purchase.id]))
+        .for("update");
+      if (lockedDocs.length !== 2) throw new Error("Inter-company pair changed while it was being saved.");
+
       // ledger_entries.document_id is ON DELETE NO ACTION, and the amount owed is
       // about to change, so both sides' rows are dropped and re-added from the
       // new total.
       await tx.delete(ledgerEntries).where(inArray(ledgerEntries.documentId, [sale.id, purchase.id]));
       await clearLines(tx, [sale.id, purchase.id]);
 
-      for (const doc of [sale, purchase]) {
-        // Anything already settled on the document's own page stays settled —
-        // only what's still owed is recomputed against the new total.
-        const paid = Number(doc.paidAmount);
-        await tx
-          .update(documents)
-          .set({
-            documentDate: header.documentDate,
-            subtotal: String(total),
-            grandTotal: String(total),
-            isPaid: paid >= total,
-            updatedAt: new Date(),
-          })
-          .where(eq(documents.id, doc.id));
+      // One set-based header update for the pair — no per-document round trips.
+      await tx
+        .update(documents)
+        .set({
+          documentDate: header.documentDate,
+          subtotal: String(total),
+          grandTotal: String(total),
+          isPaid: sql`${documents.paidAmount} >= ${String(total)}::numeric`,
+          updatedAt: new Date(),
+        })
+        .where(inArray(documents.id, [sale.id, purchase.id]));
 
-        const balance = total - paid;
-        if (balance > 0) {
-          await tx.insert(ledgerEntries).values(
-            doc.id === sale.id
-              ? { companyId: doc.companyId, documentId: doc.id, debit: String(balance) }
-              : { companyId: doc.companyId, documentId: doc.id, credit: String(balance) },
-          );
-        }
-      }
+      // Anything already settled on the document's own page stays settled; only
+      // the remaining balance is replaced. Both ledger rows go in one statement.
+      const ledgerRows = lockedDocs.flatMap((doc) => {
+        const balance = total - Number(doc.paidAmount);
+        if (balance <= 0) return [];
+        return [
+          doc.id === sale.id
+            ? { companyId: doc.companyId, documentId: doc.id, debit: String(balance) }
+            : { companyId: doc.companyId, documentId: doc.id, credit: String(balance) },
+        ];
+      });
+      if (ledgerRows.length > 0) await tx.insert(ledgerEntries).values(ledgerRows);
 
       await writeInterCompanyLines(
         tx,
@@ -536,10 +591,20 @@ export async function updateInterCompanySale(
 
   invalidateInterCompanyViews();
   revalidatePath(`/inventory/inter-company/${saleId}`);
+  await recordAudit({
+    action: "update",
+    entity: "inter-company sale",
+    entityId: saleId,
+    summary: `${sale.number} / ${purchase.number}`,
+    companyId: sale.companyId,
+    detail: `Total ${total}`,
+  });
   return { success: true, saleId: sale.id, saleNumber: sale.number, purchaseId: purchase.id, purchaseNumber: purchase.number };
+  });
 }
 
-export async function deleteInterCompanySale(_prevState: ActionResult | undefined, formData: FormData) {
+export async function deleteInterCompanySale(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't delete the inter-company sale.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "sales", "delete");
   requirePermission(session, "purchases", "delete");
@@ -547,14 +612,18 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
   const saleId = String(formData.get("documentId") ?? "");
   // Read scoped: a guessed sale id from an unauthorized company is "not found".
   const [sale] = await db
-    .select()
+    .select(getTableColumns(documents))
     .from(documents)
-    .where(and(eq(documents.id, saleId), await companyInScope(documents.companyId)))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, saleId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!sale?.reason?.startsWith(`${IC_REASON} `)) return { error: "Inter-company sale not found." };
-  const [purchase] = (await db.select().from(documents).where(and(eq(documents.reason, sale.reason), await companyInScope(documents.companyId)))).filter(
-    (d) => d.id !== sale.id,
-  );
+  const [purchase] = await db
+    .select(getTableColumns(documents))
+    .from(documents)
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.reason, sale.reason), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
+    .limit(1);
   if (purchase) {
     requirePermission(session, "sales", "delete", { companyId: sale.companyId });
     requirePermission(session, "purchases", "delete", { companyId: purchase.companyId });
@@ -570,9 +639,26 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
     return { error: "Something has been paid against this — clear the payment on the sale or purchase page first." };
   }
   const ids = sides.map((d) => d.id);
+  let paidDuringDelete = false;
+  let vanishedDuringDelete = false;
 
   try {
     await db.transaction(async (tx) => {
+      // Recheck under row locks. Without this, a payment can commit after the
+      // optimistic check above and immediately before the pair is deleted.
+      const lockedDocs = await tx
+        .select({ id: documents.id, paidAmount: documents.paidAmount })
+        .from(documents)
+        .where(inArray(documents.id, ids))
+        .for("update");
+      if (lockedDocs.length !== ids.length) {
+        vanishedDuringDelete = true;
+        return;
+      }
+      if (lockedDocs.some((document) => Number(document.paidAmount) > 0)) {
+        paidDuringDelete = true;
+        return;
+      }
       await tx.delete(ledgerEntries).where(inArray(ledgerEntries.documentId, ids));
       await clearLines(tx, ids);
       await tx.delete(documents).where(inArray(documents.id, ids));
@@ -580,8 +666,11 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
   } catch (e) {
     return { error: describeDbError(e, "Can't delete — one of these documents is still referenced elsewhere.") };
   }
+  if (paidDuringDelete) return { error: "Something was paid against this while it was open — clear the payment first." };
+  if (vanishedDuringDelete) return { error: "Inter-company sale not found — it may already have been deleted." };
 
   invalidateInterCompanyViews();
   await recordAudit({ action: "delete", entity: "inter-company sale", entityId: saleId, summary: sale.number, companyId: sale.companyId });
   return { success: true };
+  });
 }

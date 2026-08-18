@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { DataTable } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
@@ -61,7 +60,6 @@ export function QuotationManager({
   itemOptions: ({ id: string; name: string; companyId: string } & { salesRate: string | null })[];
   unitOptions: { id: string; name: string }[];
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
 
   // Seed the client reference cache from the live options (so an offline form
@@ -93,7 +91,6 @@ export function QuotationManager({
 
   function close() {
     setOpen(false);
-    router.refresh();
   }
 
   return (

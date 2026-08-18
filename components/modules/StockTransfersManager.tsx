@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -38,11 +37,9 @@ export function StockTransfersManager({
   locationOptions: Option[];
 }) {
   const [open, setOpen] = useState(false);
-  const router = useRouter();
 
   function close() {
     setOpen(false);
-    router.refresh();
   }
 
   useNewEntry(() => setOpen(true));

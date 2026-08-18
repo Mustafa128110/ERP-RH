@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -68,15 +67,12 @@ export function RecordManager<T extends { id: string }>({
   renderEditBody: (args: { record: T; onDone: () => void }) => ReactNode;
 }) {
   const [modal, setModal] = useState<{ kind: "batch" } | { kind: "edit"; record: T } | null>(null);
-  const router = useRouter();
 
-  // A local copy of the list that a successful batch create lands in before the
-  // refresh round-trips — the save has already succeeded, so showing the rows
-  // now is honest, and the refresh below reconciles the order/ids with what the
-  // server actually stored.
+  // A local copy lets a successful batch create land immediately. The action's
+  // revalidated RSC response then reconciles order and database-generated ids.
   const [local, setLocal] = useState(records);
   // The server is the source of truth: whenever the page re-renders with fresh
-  // records (router.refresh() after a save), the optimistic copy steps aside.
+  // records from the action response, the optimistic copy steps aside.
   // Done with the "adjust state during render" pattern (guarded by a comparison)
   // rather than an effect, which the linter rightly flags for cascading renders.
   const [prevRecords, setPrevRecords] = useState(records);
@@ -85,11 +81,11 @@ export function RecordManager<T extends { id: string }>({
     setLocal(records);
   }
 
-  // router.refresh() re-runs the server component behind this list, so the table
-  // reflects the change without a full navigation.
+  // Every action behind these forms invalidates its route. Next includes that
+  // refreshed RSC payload in the action response, so another router.refresh()
+  // here would repeat the database reads after every successful save.
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   const rows = local.map(toRow);
@@ -131,8 +127,8 @@ export function RecordManager<T extends { id: string }>({
         renderBatchDialog({
           onClose: () => setModal(null),
           // The created rows appear immediately — the save already succeeded,
-          // and close()'s router.refresh() reconciles the list with what the
-          // server stored.
+          // and the action response reconciles the list with what the server
+          // stored.
           onDone: (created) => {
             if (created?.length) setLocal((prev) => [...(created as T[]), ...prev]);
             close();

@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { createLedgerEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/actions/ledger";
 import { Dialog } from "@/components/ui/Dialog";
@@ -75,7 +74,6 @@ export function LedgerManager({
   filter?: React.ReactNode;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
-  const router = useRouter();
   // Whose statement is being taken, and as what. Null except for the moment the
   // document is mounted off-screen and photographed.
   const [sheet, setSheet] = useState<{ format: "pdf" | "png"; contact: ContactLedgerBalance } | null>(null);
@@ -131,7 +129,6 @@ export function LedgerManager({
 
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   const byRowId = new Map(balances.map((b) => [`${b.companyId}:${b.contactId}`, b]));
