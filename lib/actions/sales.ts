@@ -16,6 +16,8 @@ import {
   chequeRegister,
   inventoryTransactions,
   ledgerEntries,
+  settings,
+  paymentAllocations,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -32,6 +34,8 @@ import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
+import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
+import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
 
 export interface SaleItemRow {
   itemName: string;
@@ -78,6 +82,7 @@ export async function listSales(filters: SalesFilters = {}) {
         id: documents.id,
         number: documents.number,
         documentDate: documents.documentDate,
+        status: documents.status,
         subtotal: documents.subtotal,
         grandTotal: documents.grandTotal,
         isPaid: documents.isPaid,
@@ -199,7 +204,7 @@ export async function getSale(documentId: string) {
       .select(getTableColumns(documents))
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
       .limit(1),
     db.select().from(documentLines).where(eq(documentLines.documentId, documentId)).orderBy(documentLines.lineNo),
     db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1),
@@ -215,6 +220,7 @@ export async function getSale(documentId: string) {
     documentDate: doc.documentDate,
     discountTotal: doc.discountTotal,
     taxTotal: doc.taxTotal,
+    taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     isPaid: doc.isPaid,
     paidAmount: doc.paidAmount,
@@ -268,11 +274,13 @@ export async function getInvoice(documentId: string) {
         customerAddress: contacts.address,
         customerCity: contacts.city,
         code: documentTypes.code,
+        invoiceFooter: settings.value,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(companies, eq(companies.id, documents.companyId))
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
+      .leftJoin(settings, and(eq(settings.companyId, documents.companyId), eq(settings.key, "invoice_footer")))
       .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
       .limit(1),
     db
@@ -390,9 +398,19 @@ async function getShopLocationId(): Promise<string | null> {
 
 // Resolve each line's item and unit inside the transaction — a typed-but-unpicked
 // name creates the record on the fly (see resolve-refs.ts).
-async function resolveLineRows(tx: SaleTx, companyId: string, lines: SaleLineInput[], locationId: string | null) {
+async function resolveLineRows(
+  tx: SaleTx,
+  companyId: string,
+  lines: SaleLineInput[],
+  locationId: string | null,
+  tax: { taxable: boolean[]; lineTaxAmounts: number[] },
+) {
   const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
   const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const baseQuantities = await resolveBaseQuantities(
+    tx,
+    lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+  );
   return lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
@@ -403,10 +421,13 @@ async function resolveLineRows(tx: SaleTx, companyId: string, lines: SaleLineInp
       locationId,
       unitId: unitIds[i] ?? null,
       quantity: String(quantity),
-      baseQuantity: String(quantity),
+      baseQuantity: String(baseQuantities[i]),
       unitPrice: String(unitPrice),
       unitCost: l.unitCost ? String(Number(l.unitCost)) : null,
       lineTotal: String(quantity * unitPrice),
+      taxable: tax.taxable[i] ?? false,
+      taxAmount: String(tax.lineTaxAmounts[i] ?? 0),
+      stockMovement: -1,
     };
   });
 }
@@ -432,11 +453,9 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   const contactName = opt(formData, "contactName");
   if (!contactId && !contactName) return { error: "Customer is required." };
   const discountTotal = num(formData, "discountTotal", "0");
-  const taxTotal = num(formData, "taxTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
   const financialError = financialDocumentError(validLines, [
     { label: "Discount", value: discountTotal },
-    { label: "Tax", value: taxTotal },
     { label: "Shipping", value: shippingTotal },
   ]);
   if (financialError) return { error: financialError };
@@ -447,7 +466,21 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   const saleType = isSaleType(saleTypeRaw) ? saleTypeRaw : DEFAULT_SALE_TYPE;
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  let tax;
+  try {
+    tax = await resolveDocumentTax(
+      companyId,
+      opt(formData, "taxId"),
+      validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(discountTotal),
+      Number(shippingTotal),
+    );
+  } catch (error) {
+    if (error instanceof TaxConfigurationError) return { error: error.message };
+    throw error;
+  }
+  const taxTotal = String(tax.taxTotal);
+  const grandTotal = tax.grandTotal;
 
   // Read after the total is known — a part payment is only meaningful against it.
   const payment = readPayment(formData, grandTotal);
@@ -484,6 +517,9 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
           subtotal: String(subtotal),
           discountTotal,
           taxTotal,
+          taxId: tax.taxId,
+          taxRate: String(tax.taxRate),
+          taxInclusive: tax.taxInclusive,
           shippingTotal,
           saleType,
           grandTotal: String(grandTotal),
@@ -495,7 +531,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
         })
         .returning();
 
-      const lineRows = await resolveLineRows(tx, companyId, validLines, shopLocationId);
+      const lineRows = await resolveLineRows(tx, companyId, validLines, shopLocationId, tax);
       const insertedLines = await tx
         .insert(documentLines)
         .values(lineRows.map((l) => ({ ...l, companyId, documentId: doc.id })))
@@ -512,8 +548,8 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
             movement: -1,
             quantity: l.quantity,
             baseQuantity: l.baseQuantity,
-            unitCost: l.unitPrice,
-            totalCost: l.lineTotal,
+            unitCost: String(l.unitCost ? Number(l.unitCost) * Number(l.quantity) / Number(l.baseQuantity) : 0),
+            totalCost: String((Number(l.unitCost) || 0) * Number(l.quantity)),
           })),
         );
       }
@@ -545,6 +581,7 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
     if (e instanceof DuplicateOperationError) return { error: e.message };
     if (e instanceof ChequeUnavailableError) return { error: e.message };
     if (e instanceof SettlementScopeError) return { error: e.message };
+    if (e instanceof MissingUnitConversionError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -583,11 +620,9 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     const contactName = opt(formData, "contactName");
     if (!contactId && !contactName) return { error: "Customer is required." };
     const discountTotal = num(formData, "discountTotal", "0");
-    const taxTotal = num(formData, "taxTotal", "0");
     const shippingTotal = num(formData, "shippingTotal", "0");
     const financialError = financialDocumentError(validLines, [
       { label: "Discount", value: discountTotal },
-      { label: "Tax", value: taxTotal },
       { label: "Shipping", value: shippingTotal },
     ]);
     if (financialError) return { error: financialError };
@@ -598,7 +633,21 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     const saleType = isSaleType(saleTypeRaw) ? saleTypeRaw : DEFAULT_SALE_TYPE;
 
     const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-    const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+    let tax;
+    try {
+      tax = await resolveDocumentTax(
+        companyId,
+        opt(formData, "taxId"),
+        validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+        Number(discountTotal),
+        Number(shippingTotal),
+      );
+    } catch (error) {
+      if (error instanceof TaxConfigurationError) return { error: error.message };
+      throw error;
+    }
+    const taxTotal = String(tax.taxTotal);
+    const grandTotal = tax.grandTotal;
 
     const payment = readPayment(formData, grandTotal);
     const payErr = paymentError(payment);
@@ -619,9 +668,11 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existingDoc) return { error: "Sale not found." };
+    const [allocatedPayment] = await db.select({ id: paymentAllocations.id }).from(paymentAllocations).where(eq(paymentAllocations.invoiceDocumentId, documentId)).limit(1);
+    if (allocatedPayment) return { error: "This invoice has FIFO receipts allocated to it. Edit the receipt instead of rewriting the settled invoice." };
     if (existingDoc.companyId !== companyId) return { error: "A posted sale can't be moved to another company. Delete it and enter it in the correct company." };
     let vanishedDuringSave = false;
 
@@ -677,6 +728,9 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
           subtotal: String(subtotal),
           discountTotal,
           taxTotal,
+          taxId: tax.taxId,
+          taxRate: String(tax.taxRate),
+          taxInclusive: tax.taxInclusive,
           shippingTotal,
           saleType,
           grandTotal: String(grandTotal),
@@ -710,7 +764,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         await tx.delete(inventoryTransactions).where(inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)));
       }
       await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-      const lineRows = await resolveLineRows(tx, companyId, validLines, shopLocationId);
+      const lineRows = await resolveLineRows(tx, companyId, validLines, shopLocationId, tax);
       const insertedLines = await tx
         .insert(documentLines)
         .values(lineRows.map((l) => ({ ...l, companyId, documentId })))
@@ -725,8 +779,8 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
             movement: -1,
             quantity: l.quantity,
             baseQuantity: l.baseQuantity,
-            unitCost: l.unitPrice,
-            totalCost: l.lineTotal,
+            unitCost: String(l.unitCost ? Number(l.unitCost) * Number(l.quantity) / Number(l.baseQuantity) : 0),
+            totalCost: String((Number(l.unitCost) || 0) * Number(l.quantity)),
           })),
         );
       }
@@ -748,7 +802,7 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
 }
 
 export async function deleteSale(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't delete the sale.", async () => {
+  return guard("Couldn't cancel the sale.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "sales", "delete");
 
@@ -767,9 +821,11 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Sale not found." };
+  const [allocation] = await db.select({ id: paymentAllocations.id }).from(paymentAllocations).where(eq(paymentAllocations.invoiceDocumentId, documentId)).limit(1);
+  if (allocation) return { error: "This invoice has FIFO payments allocated to it. Cancel or edit those receipts before cancelling the invoice." };
   requirePermission(session, "sales", "delete", { companyId: existingDoc.companyId });
   let vanishedDuringDelete = false;
 
@@ -815,17 +871,25 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
       if (existingCheque) {
         await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
       }
-      const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
-      if (oldLines.length > 0) {
-        await tx.delete(inventoryTransactions).where(inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)));
-      }
-      // ledger_entries.document_id is ON DELETE NO ACTION, so the receivable row
-      // has to go before the document it points at.
-      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-      await tx.delete(documents).where(eq(documents.id, documentId));
+      await tx.execute(sql`
+        INSERT INTO inventory_transactions
+          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+        SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
+               it.base_quantity, it.unit_cost, it.total_cost
+        FROM inventory_transactions it
+        JOIN document_lines dl ON dl.id = it.document_line_id
+        WHERE dl.document_id = ${documentId}::uuid
+      `);
+      await tx.execute(sql`
+        INSERT INTO ledger_entries (company_id, document_id, debit, credit)
+        SELECT company_id, document_id, credit, debit
+        FROM ledger_entries
+        WHERE document_id = ${documentId}::uuid
+      `);
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
     });
   } catch (e) {
-    return { error: describeDbError(e, "Can't delete — this sale is still referenced elsewhere.") };
+    return { error: describeDbError(e, "Can't cancel this sale.") };
   }
   if (vanishedDuringDelete) return { error: "Sale not found — it may already have been deleted." };
 
@@ -839,7 +903,7 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
   revalidatePath("/inventory/stock");
   revalidatePath("/ledger");
   await recordAudit({
-    action: "delete",
+    action: "cancel",
     entity: "sale",
     entityId: documentId,
     summary: existingDoc.number,

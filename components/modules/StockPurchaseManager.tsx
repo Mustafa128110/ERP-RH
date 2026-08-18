@@ -17,6 +17,7 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import type { ColumnDef, Row } from "@/lib/table";
 import { StockFilter } from "@/components/modules/StockFilters";
 import { MergePurchasesDialog } from "@/components/modules/MergePurchasesDialog";
+import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 type PurchaseDetail = NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>;
 
@@ -71,6 +72,9 @@ export function StockPurchaseManager({
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
 }: {
   rows: PurchaseRow[];
   // Whatever the ?company= filter is set to, so an export hands back the same
@@ -78,7 +82,7 @@ export function StockPurchaseManager({
   companyId?: string;
   companyOptions: Option[];
   supplierOptions: ScopedOption[];
-  itemOptions: ScopedOption[];
+  itemOptions: (ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean })[];
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: Option[];
   unitOptions: Option[];
@@ -87,6 +91,9 @@ export function StockPurchaseManager({
   bankAccountOptions: Option[];
   cashAccountOptions: Option[];
   chequeOptions: Option[];
+  taxOptions: (Option & { rate: string })[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
 }) {
   const [open, setOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -242,6 +249,9 @@ export function StockPurchaseManager({
             bankAccountOptions={bankAccountOptions}
             cashAccountOptions={cashAccountOptions}
             chequeOptions={chequeOptions}
+            taxOptions={taxOptions}
+            conversionOptions={conversionOptions}
+            taxSettings={taxSettings}
             onDone={close}
           />
         </Dialog>
@@ -264,6 +274,9 @@ export function StockPurchaseManager({
               bankAccountOptions={bankAccountOptions}
               cashAccountOptions={cashAccountOptions}
               chequeOptions={editChequeOptions}
+              taxOptions={taxOptions}
+              conversionOptions={conversionOptions}
+              taxSettings={taxSettings}
               onDone={close}
             />
             <div className="rounded border border-error/30 bg-error-tint p-4">

@@ -16,10 +16,11 @@ import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
 import { InvoiceImageRenderer } from "@/components/modules/InvoiceDocument";
 import type { ColumnDef, Row } from "@/lib/table";
+import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null };
+type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
 
 // Options the edit form needs. Loaded once with the page rather than on every
 // popup — they're the same lists for every invoice.
@@ -32,6 +33,9 @@ export type SaleFormOptions = {
   bankAccountOptions: Option[];
   cashAccountOptions: ScopedOption[];
   chequeOptions: Option[];
+  taxOptions: (Option & { rate: string })[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
 };
 
 type SaleDetail = NonNullable<Awaited<ReturnType<typeof getSale>>>;

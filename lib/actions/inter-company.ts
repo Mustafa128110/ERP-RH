@@ -21,6 +21,7 @@ import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-n
 import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { financialDocumentError } from "@/lib/financial-input";
 
@@ -110,7 +111,7 @@ interface Side {
 async function mirrorItemsToBuyer(tx: InterCompanyTx, sellerItemIds: (string | null)[], buyerCompanyId: string): Promise<(string | null)[]> {
   const ids = [...new Set(sellerItemIds.filter((id): id is string => Boolean(id)))];
   if (ids.length === 0) return sellerItemIds.map(() => null);
-  const sources = await tx.select({ id: items.id, name: items.name, sku: items.sku }).from(items).where(inArray(items.id, ids));
+  const sources = await tx.select({ id: items.id, name: items.name, sku: items.sku, baseUnitId: items.baseUnitId, taxable: items.taxable }).from(items).where(inArray(items.id, ids));
   const sourceById = new Map(sources.map((source) => [source.id, source]));
   const skus = [...new Set(sources.map((source) => source.sku))];
   const existing = await tx
@@ -122,8 +123,8 @@ async function mirrorItemsToBuyer(tx: InterCompanyTx, sellerItemIds: (string | n
   if (missing.length > 0) {
     const inserted = await tx
       .insert(items)
-      .values(missing.map((source) => ({ companyId: buyerCompanyId, name: source.name, sku: source.sku })))
-      .onConflictDoUpdate({ target: [items.companyId, items.sku], set: { name: sql`excluded.name` } })
+      .values(missing.map((source) => ({ companyId: buyerCompanyId, name: source.name, sku: source.sku, baseUnitId: source.baseUnitId, taxable: source.taxable })))
+      .onConflictDoUpdate({ target: [items.companyId, items.sku], set: { name: sql`excluded.name`, baseUnitId: sql`coalesce(items.base_unit_id, excluded.base_unit_id)` } })
       .returning({ id: items.id, sku: items.sku });
     for (const row of inserted) bySku.set(row.sku, row.id);
   }
@@ -146,6 +147,10 @@ async function writeInterCompanyLines(
   );
   const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
   const buyerItemIds = await mirrorItemsToBuyer(tx, sellerItemIds, buyer.companyId);
+  const baseQuantities = await resolveBaseQuantities(
+    tx,
+    lines.map((line, index) => ({ itemId: sellerItemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+  );
   const pairs: { lineId: string; line: typeof documentLines.$inferInsert; movement: -1 | 1; lineTotal: string }[] = [];
 
   for (const [i, l] of lines.entries()) {
@@ -161,7 +166,7 @@ async function writeInterCompanyLines(
       sortOrder: i,
       unitId,
       quantity,
-      baseQuantity: quantity,
+      baseQuantity: String(baseQuantities[i]),
       unitPrice: rate,
       lineTotal,
     };
@@ -180,6 +185,7 @@ async function writeInterCompanyLines(
           documentId: side.documentId,
           itemId: side.itemId,
           locationId: side.locationId,
+          stockMovement: side.movement,
         },
         movement: side.movement,
         lineTotal,
@@ -196,7 +202,7 @@ async function writeInterCompanyLines(
       movement: pair.movement,
       quantity: pair.line.quantity!,
       baseQuantity: pair.line.baseQuantity!,
-      unitCost: pair.line.unitPrice,
+      unitCost: String(Number(pair.line.unitPrice) * Number(pair.line.quantity) / Number(pair.line.baseQuantity)),
       totalCost: pair.lineTotal,
     }));
   if (movements.length > 0) await tx.insert(inventoryTransactions).values(movements);

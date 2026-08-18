@@ -53,7 +53,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ l
                 location: it.location,
                 onHand: `${qty(u.onHand)} ${u.unit}`,
                 valuation: money(u.valuation),
-                status: u.onHand <= 0 ? "Out" : "OK",
+                status: u.onHand <= 0 ? "Out" : u.onHand <= it.lowStockQty ? "Low" : "OK",
               }),
             ),
           )}

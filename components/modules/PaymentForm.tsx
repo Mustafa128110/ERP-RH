@@ -548,10 +548,10 @@ export function DeletePaymentButton({ paymentId, onDone }: { paymentId: string; 
   }, [state?.success]);
 
   return (
-    <form action={action} onSubmit={(e) => { if (!confirm("Delete this payment?")) e.preventDefault(); }}>
+    <form action={action} onSubmit={(e) => { if (!confirm("Cancel this payment? Its history will remain and FIFO settlements will be recalculated.")) e.preventDefault(); }}>
       <input type="hidden" name="paymentId" value={paymentId} />
       <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Deleting…" : "Delete this payment"}
+        {pending ? "Cancelling…" : "Cancel this payment"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

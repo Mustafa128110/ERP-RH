@@ -15,6 +15,8 @@ import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
+import { calculateTax } from "@/lib/tax-calculation";
+import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -29,7 +31,8 @@ type ScopedOption = Option & { companyId: string };
 // prefilled into the
 // reference column. `salesRate` is its selling price, the price it last went out
 // at, which prefills what it's being sold for now.
-type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null };
+type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
+type TaxOption = { id: string; name: string; rate: string };
 // Both rates are stored with four decimals, but every total on this form is
 // round1 — so a price box prefilled with 1250.7500 shows precision the sale
 // itself will never carry. One decimal in, one decimal out.
@@ -99,6 +102,7 @@ export type SaleDefaults = {
   documentDate: string;
   discountTotal: string;
   taxTotal: string;
+  taxId?: string | null;
   shippingTotal: string;
   isPaid: boolean;
   paidAmount: string;
@@ -124,6 +128,9 @@ export function SaleFormPage({
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
   saleId,
   defaults,
   title,
@@ -137,6 +144,9 @@ export function SaleFormPage({
   bankAccountOptions: Option[];
   cashAccountOptions: ScopedOption[];
   chequeOptions: Option[];
+  taxOptions: TaxOption[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
   saleId?: string;
   defaults?: SaleDefaults;
   // Heading shown on the same row as Clear / Delete. Omitted inside a dialog,
@@ -202,7 +212,7 @@ export function SaleFormPage({
   // ending in % is a percentage of the subtotal. The stored value was always the
   // resolved amount, so an existing sale loads as the plain figure.
   const [discountTotal, setDiscountTotal] = useState(() => defaults?.discountTotal ?? "0");
-  const [taxTotal, setTaxTotal] = useState(() => defaults?.taxTotal ?? "0");
+  const [taxId, setTaxId] = useState(() => defaults?.taxId ?? taxSettings[companyId]?.default_sales_tax_id ?? "");
   const [shippingTotal, setShippingTotal] = useState(() => defaults?.shippingTotal ?? "0");
   const [contactId, setContactId] = useState(() => defaults?.contactId ?? counterId(companyId));
   const [customerText, setCustomerText] = useState(() =>
@@ -229,7 +239,7 @@ export function SaleFormPage({
   //
   // New sales only: an edit has a saved record behind it, and quietly restoring
   // a stale copy over one is how someone else's changes disappear.
-  const draftState = { lines, companyId, contactId, customerText, discountTotal, taxTotal, shippingTotal, isPaid, paidAmount, settlementType };
+  const draftState = { lines, companyId, contactId, customerText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType };
   type SaleDraft = typeof draftState;
 
   const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(saleDraftKey, {
@@ -247,7 +257,7 @@ export function SaleFormPage({
       setContactId(d.contactId);
       setCustomerText(d.customerText);
       setDiscountTotal(d.discountTotal);
-      setTaxTotal(d.taxTotal);
+      setTaxId(d.taxId);
       setShippingTotal(d.shippingTotal);
       setIsPaid(d.isPaid);
       setPaidAmount(d.paidAmount);
@@ -283,7 +293,7 @@ export function SaleFormPage({
     setContactId(counterId(companyId));
     setCustomerText(DEFAULT_CUSTOMER);
     setDiscountTotal("0");
-    setTaxTotal("0");
+    setTaxId(taxSettings[companyId]?.default_sales_tax_id ?? "");
     setShippingTotal("0");
     setIsPaid(defaultPaidMode(companyId));
     setPaidAmount("");
@@ -368,6 +378,7 @@ export function SaleFormPage({
     if (!isEdit) {
       setIsPaid(defaultPaidMode(next));
       setPaidAmount("");
+      setTaxId(taxSettings[next]?.default_sales_tax_id ?? "");
     }
     if (contactId && !customerOpts.some((c) => c.id === contactId && inCompany(next)(c))) {
       setContactId(counterId(next));
@@ -394,16 +405,45 @@ export function SaleFormPage({
         ...l,
         itemText: name,
         itemId: opt?.id ?? "",
+        unitId: sameItem ? l.unitId : (opt?.baseUnitId ?? ""),
+        unitText: sameItem ? l.unitText : (unitOpts.find((unit) => unit.id === opt?.baseUnitId)?.name ?? ""),
         listPrice: sameItem ? l.listPrice : rate1(opt?.rate),
         unitPrice: sameItem ? l.unitPrice : rate1(opt?.salesRate),
       };
     });
   }
 
+  function pickUnit(i: number, name: string) {
+    const unitId = unitOpts.find((unit) => unit.name === name)?.id ?? "";
+    patchLine(i, (line) => {
+      const item = itemOpts.find((option) => option.id === line.itemId);
+      const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+      return {
+        ...line,
+        unitText: name,
+        unitId,
+        listPrice: item ? priceForUnit(item.rate, multiplier) : line.listPrice,
+        unitPrice: item ? priceForUnit(item.salesRate, multiplier) : line.unitPrice,
+      };
+    });
+  }
+
   const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
   const discountAmount = resolveAdjustment(discountTotal, subtotal);
-  const taxAmount = resolveAdjustment(taxTotal, subtotal);
-  const grandTotal = round1(subtotal - discountAmount + taxAmount + (Number(shippingTotal) || 0));
+  const selectedTax = taxOptions.find((tax) => tax.id === taxId);
+  const taxInclusive = taxSettings[companyId]?.tax_prices_include_tax === "true";
+  const taxCalculation = calculateTax(
+    lines.map((line) => ({
+      lineTotal: (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0),
+      taxable: itemOpts.find((item) => item.id === line.itemId)?.taxable ?? false,
+    })),
+    discountAmount,
+    Number(shippingTotal) || 0,
+    Number(selectedTax?.rate ?? 0),
+    taxInclusive,
+  );
+  const taxAmount = taxCalculation.taxTotal;
+  const grandTotal = taxCalculation.grandTotal;
   // Clamped the same way the server clamps it, so the balance on screen is the
   // balance that gets stored.
   const paidNow = round1(
@@ -587,7 +627,7 @@ export function SaleFormPage({
                         placeholder="Unit"
                         className={cellInput}
                         inputProps={{ "data-cell": `${r}-1` }}
-                        onChange={(name) => updateLine(r, { unitText: name, unitId: unitOpts.find((u) => u.name === name)?.id ?? "" })}
+                        onChange={(name) => pickUnit(r, name)}
                       />
                     </td>
                     <td className={tdClass}>
@@ -670,18 +710,13 @@ export function SaleFormPage({
               />
               <input type="hidden" name="discountTotal" value={discountAmount.toFixed(1)} />
             </label>
-            <label className={`${labelClass} w-40`}>
+            <label className={`${labelClass} w-56`}>
               <span className={labelTextClass}>Tax</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="0 or 5%"
-                data-shortcut="t"
-                value={taxTotal}
-                onChange={(e) => setTaxTotal(e.target.value)}
-                className={fieldClass}
-              />
-              <input type="hidden" name="taxTotal" value={taxAmount.toFixed(1)} />
+              <select name="taxId" data-shortcut="t" value={taxId} onChange={(event) => setTaxId(event.target.value)} className={fieldClass}>
+                <option value="">No tax</option>
+                {taxOptions.map((tax) => <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>)}
+              </select>
+              {selectedTax && <span className="text-xs text-steel">{taxInclusive ? "Included in taxable prices" : "Added to taxable products"}</span>}
             </label>
             <label className={`${labelClass} w-40`}>
               <span className={labelTextClass}>Shipping Total</span>
@@ -699,7 +734,7 @@ export function SaleFormPage({
           </div>
           <div className="flex flex-col items-end gap-0.5 border-t border-sand pt-2 text-sm text-ink">
             {discountAmount > 0 && <span className="text-steel">Discount: -{money(discountAmount)}</span>}
-            {taxAmount > 0 && <span className="text-steel">Tax: +{money(taxAmount)}</span>}
+            {taxAmount > 0 && <span className="text-steel">Tax{taxInclusive ? " (included)" : ""}: {taxInclusive ? "" : "+"}{money(taxAmount)}</span>}
             {totalsBlock}
           </div>
         </div>
@@ -822,7 +857,7 @@ export function DeleteSaleButton({ saleId, onDone }: { saleId: string; onDone?: 
   const [error, setError] = useState<string | null>(null);
 
   async function remove() {
-    if (!confirm("Delete this sale? This removes its line items too.")) return;
+    if (!confirm("Cancel this sale? Its history will remain and its stock and accounting effects will be reversed.")) return;
     setPending(true);
     setError(null);
     const formData = new FormData();
@@ -848,7 +883,7 @@ export function DeleteSaleButton({ saleId, onDone }: { saleId: string; onDone?: 
         disabled={pending}
         className="text-sm font-medium text-error hover:underline disabled:opacity-40"
       >
-        {pending ? "Deleting…" : "Delete this sale"}
+        {pending ? "Cancelling…" : "Cancel this sale"}
       </button>
     </div>
   );

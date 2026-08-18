@@ -15,6 +15,8 @@ import {
   items,
   locations,
   roles,
+  taxes,
+  unitConversions,
   units,
 } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
@@ -23,6 +25,7 @@ import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, invalidate, MINUTE } from "@/lib/cache";
 import { bankAccountLabel } from "@/lib/account-label";
 import { CACHE } from "@/lib/cache-keys";
+import { settingsForCompanies } from "@/lib/queries/settings";
 export { CACHE } from "@/lib/cache-keys";
 
 // Dropdown option lists. Nearly forty near-identical copies of these were spread
@@ -123,7 +126,19 @@ export const getCategories = lookup(CACHE.categories, () => db.select().from(cat
 export const getBrands = lookup(CACHE.brands, () => db.select().from(brands));
 export const getLocations = lookup(CACHE.locations, () => db.select().from(locations));
 export const getUnits = lookup(CACHE.units, () => db.select().from(units));
+export const getTaxes = lookup(CACHE.taxes, () => db.select().from(taxes).where(eq(taxes.isActive, true)));
 export const getRoles = lookup(CACHE.roles, () => db.select().from(roles));
+
+export const getUnitConversionOptions = lookup(`${CACHE.items}:unit-conversions`, () =>
+  db
+    .select({
+      itemId: unitConversions.itemId,
+      fromUnitId: unitConversions.fromUnitId,
+      toUnitId: unitConversions.toUnitId,
+      multiplier: unitConversions.multiplier,
+    })
+    .from(unitConversions),
+);
 
 // Still company-scoped: document types and expense categories belong to a company.
 export const getDocumentTypes = scopedLookup(CACHE.documentTypes, documentTypes.companyId, (w) => db.select().from(documentTypes).where(w));
@@ -142,21 +157,31 @@ export const getExpenseCategories = scopedLookup(CACHE.expenseCategories, expens
 // item; nesting it per row would rescan it n times).
 export const getItemOptions = scopedLookup(CACHE.items, items.companyId, async (w) => {
   const [rows, rates, salesRates] = await Promise.all([
-    db.select({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId }).from(items).where(w),
-    db.execute<{ id: string; purchase_rate_1: string | null }>(sql`SELECT id, purchase_rate_1 FROM rate_list`),
-    // The selling price the products page shows — the price it last went out at.
-    // Not in rate_list (that view is purchase-only), so it's its own pass: one
-    // row per item, the newest sales line first.
-    db.execute<{ item_id: string; unit_price: string }>(sql`
-      SELECT DISTINCT ON (dl.item_id) dl.item_id, dl.unit_price
+    db.select({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId, baseUnitId: items.baseUnitId, taxable: items.taxable }).from(items).where(w),
+    db.execute<{ item_id: string; base_rate: string | null }>(sql`
+      SELECT DISTINCT ON (dl.item_id) dl.item_id,
+             coalesce(dl.unit_cost, dl.unit_price) * dl.quantity / nullif(dl.base_quantity, 0) AS base_rate
       FROM document_lines dl
       JOIN documents d ON d.id = dl.document_id
       JOIN document_types dt ON dt.id = d.document_type_id
-      WHERE dt.code = 'SALES_INVOICE' AND dl.item_id IS NOT NULL
-      ORDER BY dl.item_id, d.document_date DESC, dl.line_no DESC`),
+      WHERE dt.code IN ('PURCHASE_INVOICE', 'GOODS_RECEIPT')
+        AND d.status = 'posted' AND dl.item_id IS NOT NULL AND dl.base_quantity > 0
+      ORDER BY dl.item_id, d.document_date DESC, d.created_at DESC, dl.line_no DESC`),
+    // The selling price the products page shows — the price it last went out at.
+    // Not in rate_list (that view is purchase-only), so it's its own pass: one
+    // row per item, the newest sales line first.
+    db.execute<{ item_id: string; base_rate: string }>(sql`
+      SELECT DISTINCT ON (dl.item_id) dl.item_id,
+             dl.unit_price * dl.quantity / nullif(dl.base_quantity, 0) AS base_rate
+      FROM document_lines dl
+      JOIN documents d ON d.id = dl.document_id
+      JOIN document_types dt ON dt.id = d.document_type_id
+      WHERE dt.code = 'SALES_INVOICE' AND d.status = 'posted'
+        AND dl.item_id IS NOT NULL AND dl.base_quantity > 0
+      ORDER BY dl.item_id, d.document_date DESC, d.created_at DESC, dl.line_no DESC`),
   ]);
-  const rateById = new Map(rates.map((r) => [r.id, r.purchase_rate_1]));
-  const saleRateById = new Map(salesRates.map((r) => [r.item_id, r.unit_price]));
+  const rateById = new Map(rates.map((r) => [r.item_id, r.base_rate]));
+  const saleRateById = new Map(salesRates.map((r) => [r.item_id, r.base_rate]));
   return rows.map((r) => ({ ...r, rate: rateById.get(r.id) ?? null, salesRate: saleRateById.get(r.id) ?? null }));
 });
 
@@ -243,12 +268,14 @@ const labelled = {
   // Name only — the SKU used to be appended here, which put it in front of the
   // customer on every sale line and, worse, made the label the string the server
   // resolved items by. Nothing picks an item by SKU on a sale.
-  item: (i: { id: string; name: string; sku: string; companyId: string; rate: string | null; salesRate: string | null }) => ({
+  item: (i: { id: string; name: string; sku: string; companyId: string; baseUnitId: string | null; taxable: boolean | null; rate: string | null; salesRate: string | null }) => ({
     id: i.id,
     name: i.name,
     companyId: i.companyId,
     rate: i.rate,
     salesRate: i.salesRate,
+    baseUnitId: i.baseUnitId,
+    taxable: i.taxable ?? false,
   }),
   unit: (u: { id: string; name: string; symbol: string | null }) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name }),
 };
@@ -257,7 +284,7 @@ const labelled = {
 // each was re-deriving the same display labels inline. One shape, one place, so
 // the two can't drift.
 export async function getSaleFormOptions(documentId?: string) {
-  const [companyOptions, customers, itemRows, locationOptions, unitRows, categoryOptions, brandOptions, bankAccountOptions, cashAccountOptions, chequeOptions] =
+  const [companyOptions, customers, itemRows, locationOptions, unitRows, categoryOptions, brandOptions, bankAccountOptions, cashAccountOptions, chequeOptions, taxOptions, conversionOptions] =
     await Promise.all([
       getCompanies(),
       getCustomers(),
@@ -269,7 +296,11 @@ export async function getSaleFormOptions(documentId?: string) {
       getBankAccountOptions(),
       getCashAccountOptions(),
       getAvailableCheques(documentId),
+      getTaxes(),
+      getUnitConversionOptions(),
     ]);
+
+  const taxSettings = await settingsForCompanies(companyOptions.map((company) => company.id), ["default_sales_tax_id", "tax_prices_include_tax"]);
 
   return {
     companyOptions,
@@ -282,13 +313,16 @@ export async function getSaleFormOptions(documentId?: string) {
     bankAccountOptions,
     cashAccountOptions,
     chequeOptions,
+    taxOptions,
+    conversionOptions,
+    taxSettings,
   };
 }
 
 // Same idea for stock purchases: suppliers rather than customers, plus the
 // document-type list that only the purchase form needs.
 export async function getPurchaseFormOptions(documentId?: string) {
-  const [companyOptions, suppliers, itemRows, documentTypeOptions, locationOptions, unitRows, categoryOptions, brandOptions, bankAccountOptions, cashAccountOptions, chequeOptions] =
+  const [companyOptions, suppliers, itemRows, documentTypeOptions, locationOptions, unitRows, categoryOptions, brandOptions, bankAccountOptions, cashAccountOptions, chequeOptions, taxOptions, conversionOptions] =
     await Promise.all([
       getCompanies(),
       getSuppliers(),
@@ -301,7 +335,11 @@ export async function getPurchaseFormOptions(documentId?: string) {
       getBankAccountOptions(),
       getCashAccountOptions(),
       getAvailableCheques(documentId),
+      getTaxes(),
+      getUnitConversionOptions(),
     ]);
+
+  const taxSettings = await settingsForCompanies(companyOptions.map((company) => company.id), ["default_purchase_tax_id", "tax_prices_include_tax"]);
 
   return {
     companyOptions,
@@ -315,6 +353,9 @@ export async function getPurchaseFormOptions(documentId?: string) {
     bankAccountOptions,
     cashAccountOptions,
     chequeOptions,
+    taxOptions,
+    conversionOptions,
+    taxSettings,
   };
 }
 

@@ -10,7 +10,7 @@ import { companyInPermissionScope } from "@/lib/auth/scope";
 // inside the actions that mutate, the reader from the audit-logs page.
 
 export type AuditEntry = {
-  action: "create" | "update" | "delete" | "merge" | "import";
+  action: "create" | "update" | "delete" | "merge" | "import" | "cancel" | "approve";
   // What kind of record changed, lowercase and singular: "sale", "product".
   entity: string;
   entityId?: string | null;

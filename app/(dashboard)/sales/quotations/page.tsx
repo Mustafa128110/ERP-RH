@@ -13,6 +13,9 @@ export default async function Page() {
       customerOptions={options.customerOptions}
       itemOptions={options.itemOptions}
       unitOptions={options.unitOptions}
+      taxOptions={options.taxOptions}
+      conversionOptions={options.conversionOptions}
+      taxSettings={options.taxSettings}
     />
   );
 }

@@ -30,8 +30,8 @@ export default async function Page({
   const filtered = Boolean(status) || Object.values(listFilters).some(Boolean);
 
   const invoices = sales
-    .map((s) => ({ ...s, balance: Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }))
-    .filter((s) => (status === "outstanding" ? s.balance > 0 : status === "paid" ? s.balance <= 0 : true))
+    .map((s) => ({ ...s, balance: s.status === "cancelled" ? 0 : Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }))
+    .filter((s) => (status === "outstanding" ? s.status === "posted" && s.balance > 0 : status === "paid" ? s.status === "posted" && s.balance <= 0 : true))
     // Outstanding first and oldest of those at the top — the one that has been
     // waiting longest is the one to chase. Settled invoices sit below, newest
     // first, where they're only ever looked up by number.
@@ -54,7 +54,7 @@ export default async function Page({
     total: money(s.grandTotal),
     paid: money(s.paidAmount),
     balance: s.balance > 0 ? money(s.balance) : "—",
-    status: s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
+    status: s.status === "cancelled" ? "Cancelled" : s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
   }));
 
   // listSales already returns each invoice's lines, so the hover panel on the

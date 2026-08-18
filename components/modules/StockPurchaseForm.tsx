@@ -14,6 +14,8 @@ import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
+import { calculateTax } from "@/lib/tax-calculation";
+import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input filling a table cell; the collapsed cell border is the line.
@@ -23,6 +25,8 @@ const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
+type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
+type TaxOption = { id: string; name: string; rate: string };
 type DocumentTypeOption = {
   id: number;
   companyId: string;
@@ -70,6 +74,7 @@ type PurchaseDefaults = {
   documentDate: string;
   discountTotal: string;
   taxTotal: string;
+  taxId?: string | null;
   shippingTotal: string;
   isPaid: boolean;
   bankAccountId: string | null;
@@ -93,13 +98,16 @@ export function StockPurchaseCreateForm({
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
   purchaseId,
   defaults,
   onDone,
 }: {
   companyOptions: Option[];
   supplierOptions: ScopedOption[];
-  itemOptions: ScopedOption[];
+  itemOptions: ItemOption[];
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: (Option & { locationType?: string })[];
   unitOptions: Option[];
@@ -108,6 +116,9 @@ export function StockPurchaseCreateForm({
   bankAccountOptions: Option[];
   cashAccountOptions: Option[];
   chequeOptions: Option[];
+  taxOptions: TaxOption[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
   purchaseId?: string;
   defaults?: PurchaseDefaults;
   onDone: () => void;
@@ -151,7 +162,7 @@ export function StockPurchaseCreateForm({
     () => defaults?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
   const [discountTotal, setDiscountTotal] = useState(() => defaults?.discountTotal ?? "0");
-  const [taxTotal, setTaxTotal] = useState(() => defaults?.taxTotal ?? "0");
+  const [taxId, setTaxId] = useState(() => defaults?.taxId ?? taxSettings[companyId]?.default_purchase_tax_id ?? "");
   const [shippingTotal, setShippingTotal] = useState(() => defaults?.shippingTotal ?? "0");
   const [contactId, setContactId] = useState(() => defaults?.contactId ?? "");
   const [supplierText, setSupplierText] = useState(() => supplierOptions.find((s) => s.id === defaults?.contactId)?.name ?? "");
@@ -184,7 +195,7 @@ export function StockPurchaseCreateForm({
   //
   // New purchases only — restoring a stale copy over a saved one would overwrite
   // whatever someone else had corrected.
-  const draftState = { lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxTotal, shippingTotal, isPaid, settlementType };
+  const draftState = { lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxId, shippingTotal, isPaid, settlementType };
   type PurchaseDraft = typeof draftState;
 
   const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(purchaseDraftKey, {
@@ -199,7 +210,7 @@ export function StockPurchaseCreateForm({
       setLocationId(d.locationId);
       setLocationText(d.locationText);
       setDiscountTotal(d.discountTotal);
-      setTaxTotal(d.taxTotal);
+      setTaxId(d.taxId);
       setShippingTotal(d.shippingTotal);
       setIsPaid(d.isPaid);
       setSettlementType(d.settlementType);
@@ -241,7 +252,7 @@ export function StockPurchaseCreateForm({
     setLocationId(shopLocation?.id ?? "");
     setLocationText(shopLocation?.name ?? "");
     setDiscountTotal("0");
-    setTaxTotal("0");
+    setTaxId(taxSettings[companyId]?.default_purchase_tax_id ?? "");
     setShippingTotal("0");
     setIsPaid("no");
     setSettlementType("account");
@@ -284,6 +295,7 @@ export function StockPurchaseCreateForm({
   // in an effect) — the reset is a response to the user's action, not a sync.
   function changeCompany(next: string) {
     setCompanyId(next);
+    if (!isEdit) setTaxId(taxSettings[next]?.default_purchase_tax_id ?? "");
     if (contactId && !supplierOpts.some((s) => s.id === contactId && inCompany(next)(s))) {
       setContactId("");
       setSupplierText("");
@@ -320,12 +332,43 @@ export function StockPurchaseCreateForm({
     });
   }
 
+  function pickItem(i: number, name: string) {
+    const item = visibleItems.find((option) => option.name === name);
+    updateLine(i, {
+      itemText: name,
+      itemId: item?.id ?? "",
+      unitId: item?.baseUnitId ?? "",
+      unitText: unitOpts.find((unit) => unit.id === item?.baseUnitId)?.name ?? "",
+      unitPrice: item ? priceForUnit(item.rate, 1) : "",
+    });
+  }
+
+  function pickUnit(i: number, name: string) {
+    const unitId = unitOpts.find((unit) => unit.name === name)?.id ?? "";
+    const line = lines[i];
+    const item = itemOpts.find((option) => option.id === line.itemId);
+    const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+    updateLine(i, { unitText: name, unitId, unitPrice: item ? priceForUnit(item.rate, multiplier) : line.unitPrice });
+  }
+
   const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
   // "500" is five hundred rupees, "5%" is five percent of the subtotal — one
   // box, no Rs/% selector beside it. Same rule as the sale form.
   const discountAmount = resolveAdjustment(discountTotal, subtotal);
-  const taxAmount = resolveAdjustment(taxTotal, subtotal);
-  const grandTotal = round1(subtotal - discountAmount + taxAmount + (Number(shippingTotal) || 0));
+  const selectedTax = taxOptions.find((tax) => tax.id === taxId);
+  const taxInclusive = taxSettings[companyId]?.tax_prices_include_tax === "true";
+  const taxCalculation = calculateTax(
+    lines.map((line) => ({
+      lineTotal: (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0),
+      taxable: itemOpts.find((item) => item.id === line.itemId)?.taxable ?? false,
+    })),
+    discountAmount,
+    Number(shippingTotal) || 0,
+    Number(selectedTax?.rate ?? 0),
+    taxInclusive,
+  );
+  const taxAmount = taxCalculation.taxTotal;
+  const grandTotal = taxCalculation.grandTotal;
 
   // Shipping, discount and tax are charged on the delivery, not on any one line
   // of it, so what a piece actually cost landed is its price plus its share of
@@ -337,7 +380,10 @@ export function StockPurchaseCreateForm({
   // what the payable is settled against. The landed figure rides along in
   // unit_cost, for the rate list to quote the next sale from.
   const totalQty = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0);
-  const adjustmentPerUnit = perUnitShare((Number(shippingTotal) || 0) - discountAmount + taxAmount, totalQty);
+  const adjustmentPerUnit = perUnitShare(
+    (Number(shippingTotal) || 0) - discountAmount + (taxInclusive ? 0 : taxAmount),
+    totalQty,
+  );
 
   return (
     <>
@@ -503,7 +549,7 @@ export function StockPurchaseCreateForm({
                       // Alt+I can jump to it from anywhere in this popup — the
                       // purchase popup's jumps are Alt, not Ctrl.
                       inputProps={i === 0 ? { "data-shortcut": "i" } : undefined}
-                      onChange={(name) => updateLine(i, { itemText: name, itemId: visibleItems.find((it) => it.name === name)?.id ?? "" })}
+                      onChange={(name) => pickItem(i, name)}
                     />
                   </td>
                   <td className={tdClass}>
@@ -512,7 +558,7 @@ export function StockPurchaseCreateForm({
                       options={unitOpts}
                       placeholder="Unit"
                       className={cellInput}
-                      onChange={(name) => updateLine(i, { unitText: name, unitId: unitOpts.find((u) => u.name === name)?.id ?? "" })}
+                      onChange={(name) => pickUnit(i, name)}
                     />
                   </td>
                   <td className={tdClass}>
@@ -581,18 +627,13 @@ export function StockPurchaseCreateForm({
             />
             <input type="hidden" name="discountTotal" value={discountAmount.toFixed(1)} />
           </label>
-          <label className={`${labelClass} w-40`}>
+          <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Tax</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="0 or 5%"
-              data-shortcut="t"
-              value={taxTotal}
-              onChange={(e) => setTaxTotal(e.target.value)}
-              className={fieldClass}
-            />
-            <input type="hidden" name="taxTotal" value={taxAmount.toFixed(1)} />
+            <select name="taxId" data-shortcut="t" value={taxId} onChange={(event) => setTaxId(event.target.value)} className={fieldClass}>
+              <option value="">No tax</option>
+              {taxOptions.map((tax) => <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>)}
+            </select>
+            {selectedTax && <span className="text-xs text-steel">{taxInclusive ? "Included in taxable prices" : "Added to taxable products"}</span>}
           </label>
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Shipping Total</span>
@@ -618,7 +659,7 @@ export function StockPurchaseCreateForm({
         <div className="flex flex-col items-end gap-0.5 border-t border-sand pt-2 text-sm text-ink">
           <span>Subtotal: {money(subtotal)}</span>
           {discountAmount > 0 && <span className="text-steel">Discount: -{money(discountAmount)}</span>}
-          {taxAmount > 0 && <span className="text-steel">Tax: +{money(taxAmount)}</span>}
+          {taxAmount > 0 && <span className="text-steel">Tax{taxInclusive ? " (included)" : ""}: {taxInclusive ? "" : "+"}{money(taxAmount)}</span>}
           <span className="font-semibold">Grand Total: {money(grandTotal)}</span>
         </div>
       </div>
@@ -713,12 +754,12 @@ export function DeleteStockPurchaseButton({ purchaseId, onDone }: { purchaseId: 
     <form
       action={action}
       onSubmit={(e) => {
-        if (!confirm("Delete this purchase? This removes its line items too.")) e.preventDefault();
+        if (!confirm("Cancel this purchase? Its history will remain and its stock and accounting effects will be reversed.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="documentId" value={purchaseId} />
       <button type="submit" disabled={pending} className="text-sm font-medium text-error hover:underline disabled:opacity-40">
-        {pending ? "Deleting…" : "Delete this purchase"}
+        {pending ? "Cancelling…" : "Cancel this purchase"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

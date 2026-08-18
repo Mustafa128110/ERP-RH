@@ -29,6 +29,7 @@ import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
+import { allocatePaymentsFifo, reallocateAccountPaymentsFifo, releasePaymentAllocations } from "@/lib/actions/payment-allocation";
 
 export type PaymentDirection = "made" | "received";
 export type PaymentType = SettlementType;
@@ -121,6 +122,7 @@ export async function listPayments(filters: PaymentFilters = {}) {
           filters.direction === "received" ? undefined : and(eq(documentTypes.code, "PURCHASE_INVOICE"), eq(documents.isPaid, true)),
         ),
         await companyInPermissionScope(documents.companyId, session, "payments"),
+        eq(documents.status, "posted"),
         // Narrows within the scope, never widens it — the permission scope still gates
         // every row.
         filters.company ? eq(documents.companyId, filters.company) : undefined,
@@ -267,6 +269,7 @@ export async function createPayment(
       if (contactId) {
         await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, ...paymentLedgerSide(direction, values.amount) });
       }
+      await allocatePaymentsFifo(tx, [doc.id]);
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
@@ -314,6 +317,7 @@ export async function getPayment(documentId: string) {
         and(
           eq(documents.id, documentId),
           inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
+          eq(documents.status, "posted"),
           await companyInPermissionScope(documents.companyId, session, "payments"),
         ),
       )
@@ -501,6 +505,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
         .filter(({ contactId }) => contactId)
         .map(({ row, amount, documentId }) => ({ companyId: row.companyId, documentId, ...paymentLedgerSide(row.direction, amount) }));
       if (entries.length > 0) await tx.insert(ledgerEntries).values(entries);
+      await allocatePaymentsFifo(tx, prepared.map(({ documentId }) => documentId));
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
@@ -542,6 +547,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         amount: documents.grandTotal,
         bankAccountId: documents.bankAccountId,
         cashAccountId: documents.cashAccountId,
+        contactId: documents.contactId,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
@@ -549,6 +555,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         and(
           eq(documents.id, paymentId),
           inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
+          eq(documents.status, "posted"),
           await companyInScope(documents.companyId),
         ),
       )
@@ -578,6 +585,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
           vanishedDuringSave = true;
           return;
         }
+        await releasePaymentAllocations(tx, [paymentId]);
         const [existingCheque] = await tx
           .select({ id: chequeRegister.id })
           .from(chequeRegister)
@@ -615,6 +623,11 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         if (contactId) {
           await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
         }
+        const paymentCode = direction === "made" ? "PAYMENT_MADE" : "PAYMENT_RECEIVED";
+        await reallocateAccountPaymentsFifo(tx, existing.companyId, existing.contactId, paymentCode);
+        if (contactId !== existing.contactId) {
+          await reallocateAccountPaymentsFifo(tx, existing.companyId, contactId, paymentCode);
+        }
       });
     } catch (e) {
       if (e instanceof ChequeUnavailableError) return { error: e.message };
@@ -638,7 +651,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
 }
 
 export async function deletePayment(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't delete the payment.", async () => {
+  return guard("Couldn't cancel the payment.", async () => {
   const session = await getLiveSession();
   requirePermission(session, "payments", "delete");
 
@@ -652,6 +665,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
       amount: documents.grandTotal,
       bankAccountId: documents.bankAccountId,
       cashAccountId: documents.cashAccountId,
+      contactId: documents.contactId,
     })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
@@ -659,6 +673,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
       and(
         eq(documents.id, paymentId),
         inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
+        eq(documents.status, "posted"),
         await companyInScope(documents.companyId),
       ),
     )
@@ -698,14 +713,25 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
         .limit(1)
         .for("update");
       await adjustSettlementBalance(tx, SETTLE_DIRECTION[direction], lockedPayment.amount, lockedPayment.bankAccountId, lockedPayment.cashAccountId, existingCheque?.id ?? null, -1, existing.companyId);
+      await releasePaymentAllocations(tx, [paymentId]);
       if (existingCheque) {
         await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
       }
-      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
-      await tx.delete(documents).where(eq(documents.id, paymentId));
+      await tx.insert(ledgerEntries).values(
+        direction === "made"
+          ? { companyId: existing.companyId, documentId: paymentId, credit: lockedPayment.amount, debit: "0" }
+          : { companyId: existing.companyId, documentId: paymentId, debit: lockedPayment.amount, credit: "0" },
+      );
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, paymentId));
+      await reallocateAccountPaymentsFifo(
+        tx,
+        existing.companyId,
+        existing.contactId,
+        direction === "made" ? "PAYMENT_MADE" : "PAYMENT_RECEIVED",
+      );
     });
   } catch (e) {
-    return { error: describeDbError(e, "Can't delete this payment.") };
+    return { error: describeDbError(e, "Can't cancel this payment.") };
   }
   if (vanishedDuringDelete) return { error: "Payment not found — it may already have been deleted." };
 
@@ -713,7 +739,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
-    action: "delete",
+    action: "cancel",
     entity: `payment ${direction}`,
     entityId: paymentId,
     summary: existing.number,

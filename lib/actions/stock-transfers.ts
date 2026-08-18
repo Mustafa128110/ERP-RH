@@ -21,6 +21,7 @@ import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { averageCosts } from "@/lib/queries/stock-cost";
+import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { UNASSIGNED_LABEL, locationFormValue, locationIdOrNull } from "@/lib/location-constants";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -68,12 +69,11 @@ export async function listStockTransfers() {
         // A line with no location is where the stock actually is — nowhere in
         // particular — so it reads as Unassigned rather than as a missing value.
         locationName: sql<string>`coalesce(${locations.name}, ${UNASSIGNED_LABEL})`,
-        movement: inventoryTransactions.movement,
+        movement: documentLines.stockMovement,
       })
       .from(documentLines)
       .innerJoin(documents, eq(documents.id, documentLines.documentId))
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .innerJoin(inventoryTransactions, eq(inventoryTransactions.documentLineId, documentLines.id))
       .leftJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
@@ -123,10 +123,9 @@ export async function getStockTransfer(documentId: string) {
         unitId: documentLines.unitId,
         locationId: documentLines.locationId,
         quantity: documentLines.quantity,
-        movement: inventoryTransactions.movement,
+        movement: documentLines.stockMovement,
       })
       .from(documentLines)
-      .innerJoin(inventoryTransactions, eq(inventoryTransactions.documentLineId, documentLines.id))
       .where(eq(documentLines.documentId, documentId))
       .orderBy(documentLines.lineNo),
   ]);
@@ -236,6 +235,10 @@ async function writeTransferLines(
     header.lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
   );
   const unitIds = await resolveUnitIds(tx, header.lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const baseQuantities = await resolveBaseQuantities(
+    tx,
+    header.lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+  );
   const costs = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId: fromLocationId })));
 
   for (const [index, l] of header.lines.entries()) {
@@ -262,7 +265,8 @@ async function writeTransferLines(
           locationId,
           unitId,
           quantity,
-          baseQuantity: quantity,
+          baseQuantity: String(baseQuantities[index]),
+          stockMovement: movement,
         },
       });
     }
@@ -310,8 +314,6 @@ export async function createStockTransfer(
   if (header.error) return { error: header.error };
   // Scoped to the submitted company: membership + stock_transfers.create there.
   requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
-  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
-  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
   if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
   if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
   const operationId = readOperationId(formData);
@@ -373,15 +375,13 @@ export async function updateStockTransfer(
   requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
   if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
   if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
-  if (header.fromLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.fromLocationId });
-  if (header.toLocationId) requirePermission(session, "stock_transfers", "create", { companyId: header.companyId, warehouseId: header.toLocationId });
 
   // Read scoped: a guessed id from an unauthorized company is "not found".
   const [existing] = await db
     .select({ id: documents.id, number: documents.number, companyId: documents.companyId })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existing) return { error: "Transfer not found." };
   if (existing.companyId !== header.companyId) return { error: "A posted transfer can't be moved to another company. Delete it and enter it in the correct company." };
@@ -420,7 +420,7 @@ export async function updateStockTransfer(
 }
 
 export async function deleteStockTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't delete the stock transfer.", async () => {
+  return guard("Couldn't cancel the stock transfer.", async () => {
   const session = await getLiveSession();
   // No stock_transfers.delete in the permission catalog — reversing a posted
   // transfer is an approve-level act, so it reuses that.
@@ -436,32 +436,33 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
     .select({ number: documents.number, companyId: documents.companyId })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Transfer not found." };
   requirePermission(session, "stock_transfers", "approve", { companyId: doomed.companyId });
 
   try {
     await db.transaction(async (tx) => {
-      // inventory_transactions.document_line_id is ON DELETE RESTRICT, so the
-      // movements go before the lines they point at.
-      const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
-      if (oldLines.length > 0) {
-        await tx.delete(inventoryTransactions).where(
-          inArray(
-            inventoryTransactions.documentLineId,
-            oldLines.map((l) => l.id),
-          ),
-        );
-      }
-      await tx.delete(documents).where(eq(documents.id, documentId));
+      await tx.execute(sql`
+        INSERT INTO inventory_transactions
+          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+        SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
+               it.base_quantity, it.unit_cost, it.total_cost
+        FROM inventory_transactions it
+        JOIN document_lines dl ON dl.id = it.document_line_id
+        WHERE dl.document_id = ${documentId}::uuid
+      `);
+      await tx
+        .update(documents)
+        .set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
     });
   } catch (e) {
-    return { error: describeDbError(e, "Can't delete — this transfer is still referenced elsewhere.") };
+    return { error: describeDbError(e, "Can't cancel this transfer.") };
   }
 
   invalidateTransferViews();
-  await recordAudit({ action: "delete", entity: "stock transfer", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
+  await recordAudit({ action: "cancel", entity: "stock transfer", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
   return { success: true };
   });
 }

@@ -16,7 +16,7 @@ import {
   units,
 } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { PermissionError } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, MINUTE } from "@/lib/cache";
 
@@ -58,10 +58,7 @@ export interface DashboardData {
 
 export async function getDashboardData(): Promise<DashboardData> {
   const session = await getSession();
-  // No `dashboard` module in the permission catalog. sales.view is the broadest
-  // read anyone who reaches this page already holds; every query below is still
-  // company-scoped, so it never shows books the user can't otherwise open.
-  requirePermission(session, "sales", "view");
+  if (!session) throw new PermissionError("Not authenticated");
 
   // The business day is part of the key, so the cache flips at midnight exactly
   // rather than waiting out a TTL to stop showing yesterday as today. The scope
@@ -77,7 +74,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     purchases: idsFor("purchases.view"),
     expenses: idsFor("expenses.view"),
     accounts: idsFor("accounts.view"),
-    products: idsFor("products.view"),
+    stock: idsFor("stock.view"),
   };
   const cacheScope = Object.values(scopes).map((ids) => ids.join(",")).join("|");
   return cached(`dashboard:${today}:${cacheScope}`, AGGREGATE_TTL, () => loadDashboard(today, scopes));
@@ -90,7 +87,7 @@ function idsInScope(column: Column, ids: string[], includeGlobal = false): SQL {
 
 async function loadDashboard(
   today: string,
-  scopes: { sales: string[]; purchases: string[]; expenses: string[]; accounts: string[]; products: string[] },
+  scopes: { sales: string[]; purchases: string[]; expenses: string[]; accounts: string[]; stock: string[] },
 ): Promise<DashboardData> {
   const saleScope = idsInScope(documents.companyId, scopes.sales);
   const purchaseScope = idsInScope(documents.companyId, scopes.purchases);
@@ -98,8 +95,8 @@ async function loadDashboard(
   // One pass over documents for the four money figures — four separate scans of
   // the same table would cost four round trips for numbers that share a filter.
   // greatest(...,0) keeps an overpaid invoice from subtracting from what's owed.
-  const isSale = and(sql`${documentTypes.code} = 'SALES_INVOICE'`, saleScope)!;
-  const isPurchase = and(sql`${documentTypes.code} = 'PURCHASE_INVOICE'`, purchaseScope)!;
+  const isSale = and(sql`${documentTypes.code} = 'SALES_INVOICE'`, eq(documents.status, "posted"), saleScope)!;
+  const isPurchase = and(sql`${documentTypes.code} = 'PURCHASE_INVOICE'`, eq(documents.status, "posted"), purchaseScope)!;
   const isToday = sql`${documents.documentDate} = ${today}`;
   const stillOwed = sql`greatest(${documents.grandTotal} - ${documents.paidAmount}, 0)`;
 
@@ -152,7 +149,7 @@ async function loadDashboard(
       .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
       .innerJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
-      .where(idsInScope(items.companyId, scopes.products))
+      .where(idsInScope(items.companyId, scopes.stock))
       .groupBy(items.id, locations.name),
 
     // What actually moved off the shelves, by quantity sold.
@@ -218,10 +215,8 @@ async function loadDashboard(
 // figures clears this too.
 export async function getDashboardCompanies() {
   const session = await getSession();
-  requirePermission(session, "sales", "view");
-  const ids = (await getScopeCompanyIds()).filter(
-    (companyId) => session.globalPermissions.has("sales.view") || session.permissionsByCompany.get(companyId)?.has("sales.view"),
-  );
+  if (!session) throw new PermissionError("Not authenticated");
+  const ids = await getScopeCompanyIds();
   return cached(`dashboard:companies:${ids.join(",")}`, AGGREGATE_TTL, async () =>
     ids.length > 0 ? db.select({ name: companies.name }).from(companies).where(inArray(companies.id, ids)) : [],
   );

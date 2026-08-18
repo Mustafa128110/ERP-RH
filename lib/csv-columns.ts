@@ -56,7 +56,7 @@ export const PURCHASE_CSV_COLUMNS: CsvColumn[] = [
   // Rupees or a percentage of the subtotal ("250" or "5%"), same as the box in
   // the popup.
   { key: "discountTotal", label: "Discount", sample: "0" },
-  { key: "taxTotal", label: "Tax", sample: "0" },
+  { key: "tax", label: "Tax Rule", sample: "GST 18%" },
   { key: "shippingTotal", label: "Shipping Total", sample: "0" },
   { key: "paid", label: "Paid (yes/no)", sample: "no" },
   { key: "settlementType", label: "Settle via (account/cash/cheque)", sample: "" },

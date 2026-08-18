@@ -45,10 +45,23 @@ export interface ContactLedgerBalance {
 // negative one is a receivable.
 export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
   const session = await getSession();
-  requirePermission(session, "purchases", "view");
+  requirePermission(session, "accounts", "view");
+  return loadLedgerBalances(session, "accounts");
+}
+
+export async function listPaymentLedgerBalances(): Promise<ContactLedgerBalance[]> {
+  const session = await getSession();
+  requirePermission(session, "payments", "view");
+  return loadLedgerBalances(session, "payments");
+}
+
+async function loadLedgerBalances(
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  permissionModule: "accounts" | "payments",
+): Promise<ContactLedgerBalance[]> {
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:ledger:${cacheScope}`, async () => {
+  return cachedPageRead(`${session.userId}:ledger:${permissionModule}:${cacheScope}`, async () => {
 
   // Neither query depends on the other's rows, so they share one round trip.
   const [rows, paymentRows] = await Promise.all([
@@ -67,7 +80,7 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
       // This used to read every company's entries regardless of who was signed in
       // or what the topbar was set to — the only list in the app that didn't scope.
-      .where(await companyInPermissionScope(ledgerEntries.companyId, session, "purchases")),
+      .where(await companyInPermissionScope(ledgerEntries.companyId, session, permissionModule)),
 
     // Every payment against a contact, newest first — sliced to five per contact
     // below. Both directions: a contact can be owed money on one invoice and owe
@@ -86,8 +99,9 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
       .where(
         and(
           inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
+          eq(documents.status, "posted"),
           isNotNull(documents.contactId),
-          await companyInPermissionScope(documents.companyId, session, "purchases"),
+          await companyInPermissionScope(documents.companyId, session, permissionModule),
         ),
       )
       .orderBy(desc(documents.documentDate), desc(documents.createdAt)),

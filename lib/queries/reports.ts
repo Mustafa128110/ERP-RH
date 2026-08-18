@@ -41,15 +41,10 @@ export type ReportFilters = { from?: string; to?: string; company?: string; loca
 // in user may see at all, resolved by the caller before it gets here.
 export type Scope = { companies: SQL; from: string; to: string; company: string | null; location: string | null };
 
-// Dead stock: no sale in this many days. A settings row would be the eventual
-// home for it; until anyone asks to change it, a named constant is the honest
-// version of "configurable in Settings".
-const DEAD_STOCK_DAYS = 90;
-
 const NOTES: Partial<Record<ReportSlug, string>> = {
   profit:
     "Cost is what the item cost when it was sold (document_lines.unit_cost), not what it costs today — a price rise since then does not rewrite last month's margin.",
-  "dead-stock": `Items with stock on hand and no sale in the last ${DEAD_STOCK_DAYS} days.`,
+  "dead-stock": "Items with stock on hand and no sale within their company's configured dead-stock threshold.",
   "receivables-payables": "Age is counted from the document date. A negative balance means it has been overpaid.",
   gst: "Read from the tax recorded on each document, not recomputed from rates — so it agrees with what the invoices actually say.",
 };
@@ -160,6 +155,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN document_types dt ON dt.id = d.document_type_id
         JOIN companies c ON c.id = d.company_id
        WHERE dt.code = 'SALES_INVOICE'
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY d.document_date, c.name, d.sale_type
@@ -185,6 +181,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN companies c ON c.id = d.company_id
         JOIN items i ON i.id = dl.item_id
        WHERE dt.code = 'SALES_INVOICE'
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY i.name, c.name
@@ -245,6 +242,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN companies c ON c.id = d.company_id
         JOIN contacts ct ON ct.id = d.contact_id
        WHERE dt.code = 'SALES_INVOICE'
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY ct.display_name, c.name
@@ -261,6 +259,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN companies c ON c.id = d.company_id
         JOIN contacts ct ON ct.id = d.contact_id
        WHERE dt.code = 'PURCHASE_INVOICE'
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY ct.display_name, c.name
@@ -278,6 +277,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN companies c ON c.id = d.company_id
         LEFT JOIN contacts ct ON ct.id = d.contact_id
        WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.grand_total - d.paid_amount <> 0
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
@@ -301,6 +301,7 @@ const QUERIES: Record<ReportSlug, Query> = {
           JOIN documents d ON d.id = dl.document_id
           JOIN document_types dt ON dt.id = d.document_type_id
          WHERE dt.code = 'SALES_INVOICE'
+           AND d.status = 'posted'
          GROUP BY dl.item_id
       )
       SELECT i.sku, i.name AS item, c.name AS company,
@@ -311,7 +312,9 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN items i ON i.id = oh.item_id
         JOIN companies c ON c.id = i.company_id
         LEFT JOIN last_sale ls ON ls.item_id = oh.item_id
-       WHERE ls.sold_on IS NULL OR ls.sold_on < CURRENT_DATE - ${DEAD_STOCK_DAYS}::int
+        LEFT JOIN settings dead_setting ON dead_setting.company_id = i.company_id AND dead_setting.key = 'dead_stock_days'
+       WHERE ls.sold_on IS NULL
+          OR ls.sold_on < CURRENT_DATE - coalesce(nullif(dead_setting.value, '')::int, 90)
        ORDER BY oh.value DESC`),
 
   purchase: async (s) =>
@@ -326,6 +329,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN companies c ON c.id = d.company_id
         LEFT JOIN contacts ct ON ct.id = d.contact_id
        WHERE dt.code = 'PURCHASE_INVOICE'
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY d.document_date, ct.display_name, c.name
@@ -342,6 +346,7 @@ const QUERIES: Record<ReportSlug, Query> = {
         JOIN document_types dt ON dt.id = d.document_type_id
         JOIN companies c ON c.id = d.company_id
        WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')
+         AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY to_char(d.document_date, 'YYYY-MM'), c.name

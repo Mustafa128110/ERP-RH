@@ -39,6 +39,7 @@ export type Invoice = {
   customerPhone: string | null;
   customerAddress: string | null;
   customerCity: string | null;
+  invoiceFooter?: string | null;
   lines: InvoiceLine[];
 };
 
@@ -216,7 +217,8 @@ export async function buildInvoicePdf(invoice: Invoice): Promise<jsPDF> {
   doc.setDrawColor(...SAND).setLineWidth(0.3);
   doc.line(MARGIN, pageHeight - 20, right, pageHeight - 20);
   doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...STEEL);
-  doc.text(`${INVOICE_COMPANY_NAME} · ${invoice.number} · ${formatDate(invoice.documentDate)}`, MARGIN, pageHeight - 14);
+  const footer = invoice.invoiceFooter?.trim() || `${INVOICE_COMPANY_NAME} · ${invoice.number} · ${formatDate(invoice.documentDate)}`;
+  doc.text(doc.splitTextToSize(footer, right - MARGIN), MARGIN, pageHeight - 14);
 
   return doc;
 }

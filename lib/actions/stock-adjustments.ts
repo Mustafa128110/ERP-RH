@@ -26,6 +26,8 @@ import { UNASSIGNED_LABEL, locationIdOrNull } from "@/lib/location-constants";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
+import { companySettingValue } from "@/lib/queries/settings";
 
 // An adjustment is the one document that writes stock without a counterparty: no
 // customer, no supplier, no second location. One line per item at the adjusted
@@ -71,12 +73,11 @@ export async function listStockAdjustments(companyId?: string) {
         // A line with no location is where the stock actually is — nowhere in
         // particular — so it reads as Unassigned rather than as a missing value.
         locationName: sql<string>`coalesce(${locations.name}, ${UNASSIGNED_LABEL})`,
-        movement: inventoryTransactions.movement,
+        movement: documentLines.stockMovement,
       })
       .from(documentLines)
       .innerJoin(documents, eq(documents.id, documentLines.documentId))
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .innerJoin(inventoryTransactions, eq(inventoryTransactions.documentLineId, documentLines.id))
       .leftJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
@@ -88,7 +89,7 @@ export async function listStockAdjustments(companyId?: string) {
   for (const l of lineRows) {
     const entry = byDoc.get(l.documentId) ?? { location: null, items: [], net: 0 };
     entry.location ??= l.locationName;
-    const signed = Number(l.quantity) * l.movement;
+    const signed = Number(l.quantity) * Number(l.movement ?? 0);
     entry.items.push({ itemName: l.itemName ?? "—", sku: l.sku ?? "", quantity: String(signed), unitSymbol: l.unitSymbol });
     entry.net += signed;
     byDoc.set(l.documentId, entry);
@@ -122,10 +123,9 @@ export async function getStockAdjustment(documentId: string) {
         // A line with no location is where the stock actually is — nowhere in
         // particular — so it reads as Unassigned rather than as a missing value.
         locationName: sql<string>`coalesce(${locations.name}, ${UNASSIGNED_LABEL})`,
-        movement: inventoryTransactions.movement,
+        movement: documentLines.stockMovement,
       })
       .from(documentLines)
-      .innerJoin(inventoryTransactions, eq(inventoryTransactions.documentLineId, documentLines.id))
       .leftJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
@@ -144,7 +144,7 @@ export async function getStockAdjustment(documentId: string) {
     lines: lineRows.map((l) => ({
       itemName: l.itemName ?? "—",
       sku: l.sku ?? "",
-      quantity: String(Number(l.quantity) * l.movement),
+      quantity: String(Number(l.quantity) * Number(l.movement ?? 0)),
       unitSymbol: l.unitSymbol,
     })),
   };
@@ -182,9 +182,9 @@ function getOrCreateAdjustmentDocumentType(companyId: string) {
 }
 
 export async function createStockAdjustment(
-  _prevState: (ActionResult & { id?: string }) | undefined,
+  _prevState: (ActionResult & { id?: string; status?: "posted" | "pending" }) | undefined,
   formData: FormData,
-): Promise<ActionResult & { id?: string }> {
+): Promise<ActionResult & { id?: string; status?: "posted" | "pending" }> {
   return guard("Couldn't create the stock adjustment.", async () => {
   const session = await getLiveSession();
 
@@ -209,34 +209,41 @@ export async function createStockAdjustment(
   if (validLines.length === 0) return { error: "Add at least one item with a non-zero quantity." };
 
   const documentType = await getOrCreateAdjustmentDocumentType(companyId);
+  const approvalThreshold = Number(await companySettingValue(companyId, "adjustment_approval_amount")) || 0;
 
   let createdId: string;
   let createdNumber = "";
+  let pendingApproval = false;
   try {
     createdId = await db.transaction(async (tx) => {
       // First statement: claim the operation id, or abort as a duplicate.
       if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const number = await nextDocumentNumber(documentType.series, tx);
       createdNumber = number;
+      const itemIds = await resolveItemIds(
+        tx,
+        validLines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
+      );
+      const unitIds = await resolveUnitIds(tx, validLines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+      const baseQuantities = await resolveBaseQuantities(
+        tx,
+        validLines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Math.abs(Number(line.quantity)) })),
+      );
+      const costs = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId })));
+      const adjustmentValue = baseQuantities.reduce((sum, quantity, index) => sum + quantity * (costs[index] ?? 0), 0);
+      pendingApproval = approvalThreshold > 0 && adjustmentValue > approvalThreshold;
       const [doc] = await tx
         .insert(documents)
         .values({
           companyId,
           documentTypeId: documentType.id,
           number,
-          status: "posted",
+          status: pendingApproval ? "pending" : "posted",
           documentDate,
           reason,
           createdBy: session.userId,
         })
         .returning();
-
-      const itemIds = await resolveItemIds(
-        tx,
-        validLines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
-      );
-      const unitIds = await resolveUnitIds(tx, validLines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
-      const costs = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId })));
       const rows = validLines.map((l, index) => {
         const entered = Number(l.quantity);
         const itemId = itemIds[index] ?? null;
@@ -255,7 +262,10 @@ export async function createStockAdjustment(
             locationId,
             unitId: unitIds[index] ?? null,
             quantity: String(Math.abs(entered)),
-            baseQuantity: String(Math.abs(entered)),
+            baseQuantity: String(baseQuantities[index]),
+            unitCost: String(costs[index] ?? 0),
+            lineTotal: String((costs[index] ?? 0) * baseQuantities[index]),
+            stockMovement: entered < 0 ? -1 : 1,
           } satisfies typeof documentLines.$inferInsert,
         };
       });
@@ -265,21 +275,22 @@ export async function createStockAdjustment(
         .values(rows.map((r) => r.line))
         .returning({ id: documentLines.id });
 
-      await tx.insert(inventoryTransactions).values(
-        rows
-          .map((r, i) => ({ ...r, lineId: insertedLines[i].id }))
-          // Nothing to track stock of when the line has no catalog item.
-          .filter((r) => r.line.itemId)
-          .map((r) => ({
-            companyId,
-            documentLineId: r.lineId,
-            movement: r.movement,
-            quantity: r.line.quantity!,
-            baseQuantity: r.line.baseQuantity!,
-            unitCost: String(r.unitCost),
-            totalCost: String(r.unitCost * Number(r.line.baseQuantity)),
-          })),
-      );
+      if (!pendingApproval) {
+        await tx.insert(inventoryTransactions).values(
+          rows
+            .map((r, i) => ({ ...r, lineId: insertedLines[i].id }))
+            .filter((r) => r.line.itemId)
+            .map((r) => ({
+              companyId,
+              documentLineId: r.lineId,
+              movement: r.movement,
+              quantity: r.line.quantity!,
+              baseQuantity: r.line.baseQuantity!,
+              unitCost: String(r.unitCost),
+              totalCost: String(r.unitCost * Number(r.line.baseQuantity)),
+            })),
+        );
+      }
 
       await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
 
@@ -294,56 +305,92 @@ export async function createStockAdjustment(
   revalidatePath("/inventory/stock-adjustments");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
-  await recordAudit({ action: "create", entity: "stock adjustment", entityId: createdId, summary: createdNumber, companyId, detail: reason });
-  return { success: true, id: createdId };
+  await recordAudit({ action: "create", entity: "stock adjustment", entityId: createdId, summary: createdNumber, companyId, detail: `${reason}${pendingApproval ? " · pending approval" : ""}` });
+  return { success: true, id: createdId, status: pendingApproval ? "pending" : "posted" };
+  });
+}
+
+export async function approveStockAdjustment(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't approve the stock adjustment.", async () => {
+    const session = await getLiveSession();
+    const documentId = String(formData.get("documentId") ?? "");
+    requirePermission(session, "stock_adjustments", "approve");
+    const [pending] = await db
+      .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason })
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "pending"), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInScope(documents.companyId)))
+      .limit(1);
+    if (!pending) return { error: "Pending adjustment not found." };
+    requirePermission(session, "stock_adjustments", "approve", { companyId: pending.companyId });
+
+    await db.transaction(async (tx) => {
+      const updated = await tx
+        .update(documents)
+        .set({ status: "posted", approvedBy: session.userId, updatedAt: new Date() })
+        .where(and(eq(documents.id, documentId), eq(documents.status, "pending")))
+        .returning({ id: documents.id });
+      if (updated.length === 0) throw new Error("This adjustment is no longer pending.");
+      await tx.execute(sql`
+        INSERT INTO inventory_transactions
+          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+        SELECT dl.company_id, dl.id, dl.stock_movement, dl.quantity, dl.base_quantity,
+               dl.unit_cost, dl.line_total
+        FROM document_lines dl
+        WHERE dl.document_id = ${documentId}::uuid
+          AND dl.item_id IS NOT NULL AND dl.stock_movement IS NOT NULL
+      `);
+    });
+
+    invalidateLookups(CACHE.items);
+    revalidatePath("/inventory/stock-adjustments");
+    revalidatePath(`/inventory/stock-adjustments/${documentId}`);
+    revalidatePath("/inventory/stock");
+    await recordAudit({ action: "approve", entity: "stock adjustment", entityId: documentId, summary: pending.number, companyId: pending.companyId, detail: pending.reason });
+    return { success: true };
   });
 }
 
 export async function deleteStockAdjustment(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't delete the stock adjustment.", async () => {
+  return guard("Couldn't cancel the stock adjustment.", async () => {
   const session = await getLiveSession();
-  // No stock_adjustments.delete in the permission catalog — undoing a posted
-  // adjustment is an approve-level act, so it reuses that.
   requirePermission(session, "stock_adjustments", "approve");
 
   const documentId = String(formData.get("documentId") ?? "");
   if (!documentId) return { error: "Adjustment not found." };
 
-  // Read before the delete, because afterwards there is nothing left to name it
-  // by — an audit entry saying a uuid was deleted answers nobody.
-  // Read scoped: a guessed id from an unauthorized company is "not found".
   const [doomed] = await db
-    .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason })
+    .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason, status: documents.status })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, documentId), inArray(documents.status, ["pending", "posted"]), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!doomed) return { error: "Adjustment not found." };
   requirePermission(session, "stock_adjustments", "approve", { companyId: doomed.companyId });
 
   try {
     await db.transaction(async (tx) => {
-      // inventory_transactions.document_line_id is ON DELETE RESTRICT, so the
-      // movements go before the lines they point at.
-      const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
-      if (oldLines.length > 0) {
-        await tx.delete(inventoryTransactions).where(
-          inArray(
-            inventoryTransactions.documentLineId,
-            oldLines.map((l) => l.id),
-          ),
-        );
+      if (doomed.status === "posted") {
+        await tx.execute(sql`
+          INSERT INTO inventory_transactions
+            (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+          SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
+                 it.base_quantity, it.unit_cost, it.total_cost
+          FROM inventory_transactions it
+          JOIN document_lines dl ON dl.id = it.document_line_id
+          WHERE dl.document_id = ${documentId}::uuid
+        `);
       }
-      await tx.delete(documents).where(eq(documents.id, documentId));
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, documentId), inArray(documents.status, ["pending", "posted"])));
     });
   } catch (e) {
-    return { error: describeDbError(e, "Can't delete — this adjustment is still referenced elsewhere.") };
+    return { error: describeDbError(e, "Can't cancel this adjustment.") };
   }
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques);
   revalidatePath("/inventory/stock-adjustments");
   revalidatePath("/inventory/stock");
-  await recordAudit({ action: "delete", entity: "stock adjustment", entityId: documentId, summary: doomed.number, companyId: doomed.companyId, detail: doomed.reason });
+  await recordAudit({ action: "cancel", entity: "stock adjustment", entityId: documentId, summary: doomed.number, companyId: doomed.companyId, detail: doomed.reason });
   return { success: true };
   });
 }

@@ -13,6 +13,8 @@ import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { useSync } from "@/components/layout/SyncProvider";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
+import { calculateTax } from "@/lib/tax-calculation";
+import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
 
 // Deliberately not SaleForm with the money parts hidden. A quotation has no
 // payment, no settlement account, no previous-balance line and no stock — a
@@ -30,7 +32,8 @@ const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-type ItemOption = ScopedOption & { salesRate: string | null };
+type ItemOption = ScopedOption & { salesRate: string | null; baseUnitId: string | null; taxable: boolean };
+type TaxOption = { id: string; name: string; rate: string };
 
 type Line = {
   itemId: string;
@@ -58,7 +61,8 @@ export type QuotationDefaults = {
   documentDate: string;
   validUntil: string;
   discountTotal: string;
-  taxTotal: string;
+  taxTotal?: string;
+  taxId?: string | null;
   shippingTotal: string;
   lines: QuotationLine[];
 };
@@ -68,6 +72,9 @@ export function QuotationForm({
   customerOptions,
   itemOptions,
   unitOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
   quotationId,
   defaults,
   onDone,
@@ -76,6 +83,9 @@ export function QuotationForm({
   customerOptions: ScopedOption[];
   itemOptions: ItemOption[];
   unitOptions: Option[];
+  taxOptions: TaxOption[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
   quotationId?: string;
   defaults?: QuotationDefaults;
   // When the form lives in a popup (the list page's add dialog), a successful
@@ -98,7 +108,7 @@ export function QuotationForm({
   const [documentDate, setDocumentDate] = useState(defaults?.documentDate ?? todayISO());
   const [validUntil, setValidUntil] = useState(defaults?.validUntil ?? "");
   const [discount, setDiscount] = useState(defaults?.discountTotal && Number(defaults.discountTotal) ? defaults.discountTotal : "");
-  const [tax, setTax] = useState(defaults?.taxTotal && Number(defaults.taxTotal) ? defaults.taxTotal : "");
+  const [taxId, setTaxId] = useState(defaults?.taxId ?? taxSettings[companyId]?.default_sales_tax_id ?? "");
   const [shipping, setShipping] = useState(defaults?.shippingTotal && Number(defaults.shippingTotal) ? defaults.shippingTotal : "");
 
   const [lines, setLines] = useState<Line[]>(() => {
@@ -127,7 +137,7 @@ export function QuotationForm({
   // restoring a stale copy over one is how someone else's changes disappear.
   // The hook (components/ui/useDraft.tsx) owns the store read, the
   // offer/restore/discard logic and the save-on-change effect.
-  const draftState = { companyId, contactId, contactText, documentDate, validUntil, discount, tax, shipping, lines };
+  const draftState = { companyId, contactId, contactText, documentDate, validUntil, discount, taxId, shipping, lines };
   type QuotationDraft = typeof draftState;
 
   const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(quotationDraftKey, {
@@ -141,7 +151,7 @@ export function QuotationForm({
       setDocumentDate(d.documentDate);
       setValidUntil(d.validUntil);
       setDiscount(d.discount);
-      setTax(d.tax);
+      setTaxId(d.taxId);
       setShipping(d.shipping);
       setLines(d.lines);
     },
@@ -205,17 +215,34 @@ export function QuotationForm({
     update(index, {
       itemText: name,
       itemId: match?.id ?? "",
-      ...(match?.salesRate && !lines[index].unitPrice ? { unitPrice: match.salesRate } : {}),
+      unitId: match?.baseUnitId ?? "",
+      unitText: unitOptions.find((unit) => unit.id === match?.baseUnitId)?.name ?? "",
+      ...(match?.salesRate && !lines[index].unitPrice ? { unitPrice: priceForUnit(match.salesRate, 1) } : {}),
     });
+  }
+
+  function pickUnit(index: number, name: string) {
+    const unitId = unitOptions.find((unit) => unit.name === name)?.id ?? "";
+    const item = itemOptions.find((option) => option.id === lines[index].itemId);
+    const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+    update(index, { unitText: name, unitId, unitPrice: item ? priceForUnit(item.salesRate, multiplier) : lines[index].unitPrice });
   }
 
   const filled = lines.filter((l) => (l.itemId || l.itemText.trim()) && Number(l.quantity) > 0);
   const subtotal = round1(filled.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   // One box takes rupees or a percentage ("250" or "5%"), same as the sale form.
   const discountAmount = resolveAdjustment(discount, subtotal);
-  const taxAmount = resolveAdjustment(tax, subtotal);
   const shippingAmount = resolveAdjustment(shipping, subtotal);
-  const grandTotal = round1(subtotal - discountAmount + taxAmount + shippingAmount);
+  const selectedTax = taxOptions.find((tax) => tax.id === taxId);
+  const taxInclusive = taxSettings[companyId]?.tax_prices_include_tax === "true";
+  const taxCalculation = calculateTax(
+    filled.map((line) => ({ lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0), taxable: itemOptions.find((item) => item.id === line.itemId)?.taxable ?? false })),
+    discountAmount,
+    shippingAmount,
+    Number(selectedTax?.rate ?? 0),
+    taxInclusive,
+  );
+  const grandTotal = taxCalculation.grandTotal;
 
   // Any line already invoiced locks the whole quotation: the server refuses the
   // edit (it would rewrite lines an invoice is built on), so saying so here beats
@@ -247,7 +274,7 @@ export function QuotationForm({
         documentDate,
         validUntil,
         discountTotal: String(discountAmount),
-        taxTotal: String(taxAmount),
+        taxId,
         shippingTotal: String(shippingAmount),
         linesJson,
       },
@@ -276,7 +303,7 @@ export function QuotationForm({
           on a sale line — so both go up and the server decides. */}
       <input type="hidden" name="contactName" value={contactId ? "" : contactText} />
       <input type="hidden" name="discountTotal" value={String(discountAmount)} />
-      <input type="hidden" name="taxTotal" value={String(taxAmount)} />
+      <input type="hidden" name="taxId" value={taxId} />
       <input type="hidden" name="shippingTotal" value={String(shippingAmount)} />
       <input type="hidden" name="linesJson" value={linesJson} />
 
@@ -300,6 +327,7 @@ export function QuotationForm({
                 setCompanyId(e.target.value);
                 setContactId("");
                 setContactText("");
+                if (!isEdit) setTaxId(taxSettings[e.target.value]?.default_sales_tax_id ?? "");
               }}
               disabled={locked}
               className={fieldClass}
@@ -378,7 +406,7 @@ export function QuotationForm({
                 <td className={tdClass}>
                   <ComboBox
                     value={line.unitText}
-                    onChange={(name) => update(r, { unitText: name, unitId: unitOptions.find((u) => u.name === name)?.id ?? "" })}
+                    onChange={(name) => pickUnit(r, name)}
                     options={unitOptions}
                     className={cellInput}
                     inputProps={{ "data-cell": `${r}-1`, disabled: locked }}
@@ -430,7 +458,10 @@ export function QuotationForm({
           </label>
           <label className={labelClass}>
             <span className={labelTextClass}>Tax</span>
-            <input value={tax} onChange={(e) => setTax(e.target.value)} placeholder="0 or 17%" data-shortcut="t" disabled={locked} className={`${fieldClass} sm:w-28`} />
+            <select value={taxId} onChange={(event) => setTaxId(event.target.value)} data-shortcut="t" disabled={locked} className={`${fieldClass} sm:w-48`}>
+              <option value="">No tax</option>
+              {taxOptions.map((tax) => <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>)}
+            </select>
           </label>
           <label className={labelClass}>
             <span className={labelTextClass}>Shipping</span>

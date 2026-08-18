@@ -18,12 +18,14 @@ interface ConversionListItem {
   itemSku: string | null;
   fromUnitId: string;
   fromUnitName: string | null;
+  toUnitId: string;
 }
 
 const columns: ColumnDef[] = [
   { key: "item", label: "Item" },
   { key: "fromUnit", label: "From Unit" },
-  { key: "multiplier", label: "Multiplier", align: "right" },
+  { key: "baseUnit", label: "Base Unit" },
+  { key: "conversion", label: "Stock Conversion" },
 ];
 
 interface FormOptions {
@@ -59,7 +61,8 @@ export function UnitConversionManager({
     id: c.id,
     item: c.itemSku ? `${c.itemSku} — ${c.itemName}` : "—",
     fromUnit: c.fromUnitName ?? "—",
-    multiplier: c.multiplier,
+    baseUnit: options.unitOptions.find((unit) => unit.id === c.toUnitId)?.name ?? "—",
+    conversion: `1 ${c.fromUnitName ?? "unit"} = ${c.multiplier} ${options.unitOptions.find((unit) => unit.id === c.toUnitId)?.name ?? "base units"}`,
   }));
 
   useNewEntry(() => setModal({ kind: "batch" }));

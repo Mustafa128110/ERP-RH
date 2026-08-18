@@ -7,6 +7,8 @@ export const CACHE = {
   brands: "brands",
   locations: "locations",
   units: "units",
+  taxes: "taxes",
+  settings: "settings",
   documentTypes: "document_types",
   expenseCategories: "expense_categories",
   roles: "roles",

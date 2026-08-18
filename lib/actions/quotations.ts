@@ -16,6 +16,8 @@ import { recordAudit } from "@/lib/actions/audit";
 import { createSale } from "@/lib/actions/sales";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { financialDocumentError } from "@/lib/financial-input";
+import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
+import { resolveDocumentTax } from "@/lib/queries/document-tax";
 
 // A quotation is an ordinary document of type QUOTATION — the universal model
 // already had the type and the QT series, so this needed three nullable columns
@@ -190,6 +192,7 @@ export async function getQuotation(documentId: string) {
     validUntil: doc.validUntil ?? "",
     discountTotal: doc.discountTotal,
     taxTotal: doc.taxTotal,
+    taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     grandTotal: doc.grandTotal,
     status: statusOf(quoted, converted, doc.validUntil),
@@ -216,7 +219,6 @@ function readForm(formData: FormData) {
   const contactId = String(formData.get("contactId") ?? "").trim() || null;
   const contactName = String(formData.get("contactName") ?? "").trim() || null;
   const discountTotal = String(formData.get("discountTotal") ?? "0") || "0";
-  const taxTotal = String(formData.get("taxTotal") ?? "0") || "0";
   const shippingTotal = String(formData.get("shippingTotal") ?? "0") || "0";
 
   let lines: LineInput[] = [];
@@ -231,12 +233,11 @@ function readForm(formData: FormData) {
 
   const financialError = financialDocumentError(validLines, [
     { label: "Discount", value: discountTotal },
-    { label: "Tax", value: taxTotal },
     { label: "Shipping", value: shippingTotal },
   ]);
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  const grandTotal = round1(subtotal - Number(discountTotal) + Number(shippingTotal));
 
   const error = !companyId
     ? "Company is required."
@@ -254,14 +255,15 @@ function readForm(formData: FormData) {
             ? "Valid Until can't be before the quotation date."
             : null;
 
-  return { companyId, documentDate, validUntil, contactId, contactName, discountTotal, taxTotal, shippingTotal, validLines, subtotal, grandTotal, error };
+  return { companyId, documentDate, validUntil, contactId, contactName, taxId: String(formData.get("taxId") ?? "") || null, discountTotal, shippingTotal, validLines, subtotal, grandTotal, error };
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function writeLines(tx: Tx, companyId: string, documentId: string, lines: LineInput[]) {
+async function writeLines(tx: Tx, companyId: string, documentId: string, lines: LineInput[], tax: { taxable: boolean[]; lineTaxAmounts: number[] }) {
   const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
   const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const baseQuantities = await resolveBaseQuantities(tx, lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })));
   const rows = lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
@@ -275,9 +277,11 @@ async function writeLines(tx: Tx, companyId: string, documentId: string, lines: 
       itemId: itemIds[i] ?? null,
       unitId: unitIds[i] ?? null,
       quantity: String(quantity),
-      baseQuantity: String(quantity),
+      baseQuantity: String(baseQuantities[i]),
       unitPrice: String(unitPrice),
       lineTotal: String(round1(quantity * unitPrice)),
+      taxable: tax.taxable[i] ?? false,
+      taxAmount: String(tax.lineTaxAmounts[i] ?? 0),
       convertedQuantity: "0",
     };
   });
@@ -299,6 +303,13 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
       // permission held in some other company, or an access revoked since the
       // form was filled, is refused here rather than written into.
       requirePermission(session, "quotations", "create", { companyId: f.companyId });
+      const tax = await resolveDocumentTax(
+        f.companyId,
+        f.taxId,
+        f.validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+        Number(f.discountTotal),
+        Number(f.shippingTotal),
+      );
       const operationId = readOperationId(formData);
 
       const documentType = await quotationType(f.companyId);
@@ -325,15 +336,18 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
             contactId,
             subtotal: String(f.subtotal),
             discountTotal: f.discountTotal,
-            taxTotal: f.taxTotal,
+            taxTotal: String(tax.taxTotal),
+            taxId: tax.taxId,
+            taxRate: String(tax.taxRate),
+            taxInclusive: tax.taxInclusive,
             shippingTotal: f.shippingTotal,
-            grandTotal: String(f.grandTotal),
+            grandTotal: String(tax.grandTotal),
             createdBy: session.userId,
           })
           .returning({ id: documents.id });
 
         await tx.insert(documentNumberLedger).values({ companyId: f.companyId, documentTypeId: documentType.id, number, documentId: doc.id });
-        await writeLines(tx, f.companyId, doc.id, f.validLines);
+        await writeLines(tx, f.companyId, doc.id, f.validLines, tax);
         return doc.id;
       });
 
@@ -347,7 +361,7 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
         entityId: createdId,
         summary: createdNumber,
         companyId: f.companyId,
-        detail: `Total ${f.grandTotal}`,
+        detail: `Total ${tax.grandTotal}`,
       });
       return { success: true, id: createdId };
     },
@@ -365,6 +379,13 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
     // so a forged or stale companyId can't steer an edit into (or out of) a set
     // of books the user can't act on.
     requirePermission(session, "quotations", "edit", { companyId: f.companyId });
+    const tax = await resolveDocumentTax(
+      f.companyId,
+      f.taxId,
+      f.validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(f.discountTotal),
+      Number(f.shippingTotal),
+    );
 
     const [existing] = await db
       .select({ number: documents.number, companyId: documents.companyId })
@@ -396,21 +417,24 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
           contactId: await resolveContactId(tx, f.companyId, f.contactId, f.contactName),
           subtotal: String(f.subtotal),
           discountTotal: f.discountTotal,
-          taxTotal: f.taxTotal,
+          taxTotal: String(tax.taxTotal),
+          taxId: tax.taxId,
+          taxRate: String(tax.taxRate),
+          taxInclusive: tax.taxInclusive,
           shippingTotal: f.shippingTotal,
-          grandTotal: String(f.grandTotal),
+          grandTotal: String(tax.grandTotal),
           updatedAt: new Date(),
         })
         .where(eq(documents.id, documentId));
 
       // No inventory_transactions to clear first — a quotation never wrote any.
       await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-      await writeLines(tx, f.companyId, documentId, f.validLines);
+      await writeLines(tx, f.companyId, documentId, f.validLines, tax);
     });
 
     invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.units, CACHE.contacts, CACHE.cheques);
     revalidatePath("/sales/quotations");
-    await recordAudit({ action: "update", entity: "quotation", entityId: documentId, summary: existing.number, companyId: f.companyId, detail: `Total ${f.grandTotal}` });
+    await recordAudit({ action: "update", entity: "quotation", entityId: documentId, summary: existing.number, companyId: f.companyId, detail: `Total ${tax.grandTotal}` });
     return { success: true };
   });
 }
@@ -525,7 +549,7 @@ export async function convertQuotation(
     // conversion carries them; a partial one leaves them for the last invoice.
     const whole = converting.length === quotation.lines.length && converting.every(({ index, quantity }) => quantity >= Number(quotation.lines[index].quantity) - Number(quotation.lines[index].convertedQuantity));
     saleForm.set("discountTotal", whole ? quotation.discountTotal : "0");
-    saleForm.set("taxTotal", whole ? quotation.taxTotal : "0");
+    saleForm.set("taxId", whole ? (quotation.taxId ?? "") : "");
     saleForm.set("shippingTotal", whole ? quotation.shippingTotal : "0");
     // Unpaid: a converted quotation is an invoice raised, not money taken. It is
     // settled from the invoice list like any other.

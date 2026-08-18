@@ -19,6 +19,8 @@ import {
   chequeRegister,
   inventoryTransactions,
   expenses,
+  paymentAllocations,
+  taxes,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -34,6 +36,7 @@ import {
   getItemOptions,
   getLocations,
   getSuppliers,
+  getTaxes,
   getUnits,
   invalidateLookups,
 } from "@/lib/queries/lookups";
@@ -44,10 +47,13 @@ import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, to
 import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { financialDocumentError } from "@/lib/financial-input";
+import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
+import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
+import { settingsForCompanies } from "@/lib/queries/settings";
 
 export interface StockPurchaseItemRow {
   itemName: string;
@@ -81,6 +87,7 @@ export async function listStockPurchases(companyId?: string) {
         id: documents.id,
         number: documents.number,
         documentDate: documents.documentDate,
+        status: documents.status,
         subtotal: documents.subtotal,
         grandTotal: documents.grandTotal,
         isPaid: documents.isPaid,
@@ -152,7 +159,7 @@ export async function getStockPurchase(documentId: string) {
       .select(getTableColumns(documents))
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases")))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases")))
       .limit(1),
     db.select().from(documentLines).where(eq(documentLines.documentId, documentId)).orderBy(documentLines.lineNo),
     db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1),
@@ -168,6 +175,7 @@ export async function getStockPurchase(documentId: string) {
     documentDate: doc.documentDate,
     discountTotal: doc.discountTotal,
     taxTotal: doc.taxTotal,
+    taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     isPaid: doc.isPaid,
     bankAccountId: doc.bankAccountId,
@@ -213,6 +221,8 @@ async function resolvePurchaseLineRows(
   companyId: string,
   lines: PurchaseLineInput[],
   location: { locationId: string; locationName: string },
+  tax: { taxable: boolean[]; lineTaxAmounts: number[]; taxTotal: number; taxInclusive: boolean },
+  adjustment: { discountTotal: number; shippingTotal: number },
 ) {
   // One delivery arrives in one place, so the location is a header field and is
   // resolved once rather than per line — a typed name that did not match creates
@@ -220,6 +230,15 @@ async function resolvePurchaseLineRows(
   const locationId = await resolveLocationId(tx, location.locationId || null, location.locationName || null);
   const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
   const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const baseQuantities = await resolveBaseQuantities(
+    tx,
+    lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+  );
+  const totalQuantity = lines.reduce((sum, line) => sum + Number(line.quantity), 0);
+  const adjustmentPerUnit = perUnitShare(
+    adjustment.shippingTotal - adjustment.discountTotal + (tax.taxInclusive ? 0 : tax.taxTotal),
+    totalQuantity,
+  );
   return lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
@@ -230,10 +249,13 @@ async function resolvePurchaseLineRows(
       locationId,
       unitId: unitIds[i] ?? null,
       quantity: String(quantity),
-      baseQuantity: String(quantity),
+      baseQuantity: String(baseQuantities[i]),
       unitPrice: String(unitPrice),
-      unitCost: l.unitCost ? String(Number(l.unitCost)) : null,
+      unitCost: String(landedUnitCost(unitPrice, adjustmentPerUnit)),
       lineTotal: String(quantity * unitPrice),
+      taxable: tax.taxable[i] ?? false,
+      taxAmount: String(tax.lineTaxAmounts[i] ?? 0),
+      stockMovement: 1,
     };
   });
 }
@@ -380,13 +402,11 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   const contactName = opt(formData, "contactName");
   if (!contactId && !contactName) return { error: "Supplier is required." };
   const discountTotal = num(formData, "discountTotal", "0");
-  const taxTotal = num(formData, "taxTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
   const financialError = financialDocumentError(
     validLines,
     [
       { label: "Discount", value: discountTotal },
-      { label: "Tax", value: taxTotal },
       { label: "Shipping", value: shippingTotal },
     ],
     { allowZeroQuantity: ratesOnly },
@@ -405,7 +425,21 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  let tax;
+  try {
+    tax = await resolveDocumentTax(
+      companyId,
+      opt(formData, "taxId"),
+      validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(discountTotal),
+      Number(shippingTotal),
+    );
+  } catch (error) {
+    if (error instanceof TaxConfigurationError) return { error: error.message };
+    throw error;
+  }
+  const taxTotal = String(tax.taxTotal);
+  const grandTotal = tax.grandTotal;
 
   // Freight is paid the moment the goods arrive (recordShippingExpense below),
   // so what the supplier is owed is the total minus the shipping.
@@ -442,6 +476,9 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           subtotal: String(subtotal),
           discountTotal,
           taxTotal,
+          taxId: tax.taxId,
+          taxRate: String(tax.taxRate),
+          taxInclusive: tax.taxInclusive,
           shippingTotal,
           grandTotal: String(grandTotal),
           isPaid,
@@ -456,7 +493,10 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
         .returning();
       createdId = doc.id;
 
-      const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName });
+      const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName }, tax, {
+        discountTotal: Number(discountTotal),
+        shippingTotal: Number(shippingTotal),
+      });
       const insertedLines = await tx
         .insert(documentLines)
         .values(
@@ -486,7 +526,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
             movement: 1,
             quantity: l.quantity,
             baseQuantity: l.baseQuantity,
-            unitCost: l.unitPrice,
+            unitCost: String(Number(l.unitPrice) * Number(l.quantity) / Number(l.baseQuantity)),
             totalCost: l.lineTotal,
           })),
         );
@@ -541,6 +581,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
     if (e instanceof DuplicateOperationError) return { error: e.message };
     if (e instanceof ChequeUnavailableError) return { error: e.message };
     if (e instanceof SettlementScopeError) return { error: e.message };
+    if (e instanceof MissingUnitConversionError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -599,20 +640,32 @@ export async function updateStockPurchase(
   const contactName = opt(formData, "contactName");
   if (!contactId && !contactName) return { error: "Supplier is required." };
   const discountTotal = num(formData, "discountTotal", "0");
-  const taxTotal = num(formData, "taxTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
   const financialError = financialDocumentError(
     validLines,
     [
       { label: "Discount", value: discountTotal },
-      { label: "Tax", value: taxTotal },
       { label: "Shipping", value: shippingTotal },
     ],
   );
   if (financialError) return { error: financialError };
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  let tax;
+  try {
+    tax = await resolveDocumentTax(
+      companyId,
+      opt(formData, "taxId"),
+      validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(discountTotal),
+      Number(shippingTotal),
+    );
+  } catch (error) {
+    if (error instanceof TaxConfigurationError) return { error: error.message };
+    throw error;
+  }
+  const taxTotal = String(tax.taxTotal);
+  const grandTotal = tax.grandTotal;
 
   // Freight is paid on arrival (recordShippingExpense below), so the supplier's
   // payable is the total minus the shipping — the same split as create.
@@ -639,9 +692,15 @@ export async function updateStockPurchase(
     })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
+  const [allocation] = await db
+    .select({ id: paymentAllocations.id })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId))
+    .limit(1);
+  if (allocation) return { error: "This purchase has FIFO payments allocated to it. Cancel or edit those payments before editing the purchase." };
   if (existingDoc.companyId !== companyId) return { error: "A posted purchase can't be moved to another company. Delete it and enter it in the correct company." };
   const [documentType] = await db.select().from(documentTypes).where(eq(documentTypes.id, existingDoc.documentTypeId)).limit(1);
 
@@ -735,6 +794,9 @@ export async function updateStockPurchase(
         subtotal: String(subtotal),
         discountTotal,
         taxTotal,
+        taxId: tax.taxId,
+        taxRate: String(tax.taxRate),
+        taxInclusive: tax.taxInclusive,
         shippingTotal,
         grandTotal: String(grandTotal),
         isPaid,
@@ -764,7 +826,10 @@ export async function updateStockPurchase(
       );
     }
     await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-    const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName });
+    const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName }, tax, {
+      discountTotal: Number(discountTotal),
+      shippingTotal: Number(shippingTotal),
+    });
     const insertedLines = await tx
       .insert(documentLines)
       .values(
@@ -784,7 +849,7 @@ export async function updateStockPurchase(
           movement: 1,
           quantity: l.quantity,
           baseQuantity: l.baseQuantity,
-          unitCost: l.unitPrice,
+          unitCost: String(Number(l.unitPrice) * Number(l.quantity) / Number(l.baseQuantity)),
           totalCost: l.lineTotal,
         })),
       );
@@ -851,9 +916,15 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.id, documentId), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
+  const [allocation] = await db
+    .select({ id: paymentAllocations.id })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId))
+    .limit(1);
+  if (allocation) return { error: "This purchase has FIFO payments allocated to it. Cancel or edit those payments before cancelling the purchase." };
   requirePermission(session, "purchases", "delete", { companyId: existingDoc.companyId });
   let vanishedDuringDelete = false;
 
@@ -922,17 +993,25 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
       if (existingCheque) {
         await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
       }
-      const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
-      if (oldLines.length > 0) {
-        await tx.delete(inventoryTransactions).where(
-          inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)),
-        );
-      }
-      // ledger_entries.document_id is ON DELETE NO ACTION, so an unpaid
-      // purchase's payable row has to go before the document. Without this,
-      // deleting one failed the FK and reported "still referenced elsewhere".
-      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-      await tx.delete(documents).where(eq(documents.id, documentId));
+      await tx.execute(sql`
+        INSERT INTO inventory_transactions
+          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+        SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
+               it.base_quantity, it.unit_cost, it.total_cost
+        FROM inventory_transactions it
+        JOIN document_lines dl ON dl.id = it.document_line_id
+        WHERE dl.document_id = ${documentId}::uuid
+      `);
+      await tx.execute(sql`
+        INSERT INTO ledger_entries (company_id, document_id, debit, credit)
+        SELECT company_id, document_id, credit, debit
+        FROM ledger_entries
+        WHERE document_id = ${documentId}::uuid
+      `);
+      await tx
+        .update(documents)
+        .set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() })
+        .where(eq(documents.id, documentId));
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't delete — this purchase is still referenced elsewhere.") };
@@ -951,7 +1030,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
   revalidatePath("/ledger");
   revalidatePath("/expenses");
   await recordAudit({
-    action: "delete",
+    action: "cancel",
     entity: "purchase",
     entityId: documentId,
     summary: existingDoc.number,
@@ -1224,7 +1303,7 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
         number: documents.number,
         documentDate: documents.documentDate,
         discountTotal: documents.discountTotal,
-        taxTotal: documents.taxTotal,
+        taxName: taxes.name,
         shippingTotal: documents.shippingTotal,
         isPaid: documents.isPaid,
         bankAccountId: documents.bankAccountId,
@@ -1251,7 +1330,8 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
       .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-      .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), scope))
+      .leftJoin(taxes, eq(taxes.id, documents.taxId))
+      .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), eq(documents.status, "posted"), scope))
       .orderBy(desc(documents.documentDate), documents.number, documentLines.lineNo),
     // A cheque points at the document, not the other way round, so it can't be
     // joined off documents — one pass over the register instead.
@@ -1283,7 +1363,7 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
       // Header figures, repeated on every line of the document — the import reads
       // them off the first row of the group and ignores the rest.
       discountTotal: r.discountTotal,
-      taxTotal: r.taxTotal,
+      tax: r.taxName ?? "",
       shippingTotal: r.shippingTotal,
       paid: r.isPaid ? "yes" : "no",
       settlementType,
@@ -1326,7 +1406,7 @@ export async function importStockPurchasesCsv(
     // lookups the pickers already use, so a name that matches arrives as an id and
     // the transaction does no lookup at all. A name that matches nothing still
     // goes down as text and is created inside the transaction, exactly as before.
-    const [companyRows, bankOptions, cashOptions, chequeOptions, itemRows, unitRows, locationRows, supplierRows] = await Promise.all([
+    const [companyRows, bankOptions, cashOptions, chequeOptions, itemRows, unitRows, locationRows, supplierRows, taxOptions] = await Promise.all([
       getCompanies(),
       getBankAccountOptions(),
       getCashAccountOptions(),
@@ -1335,7 +1415,9 @@ export async function importStockPurchasesCsv(
       getUnits(),
       getLocations(),
       getSuppliers(),
+      getTaxes(),
     ]);
+    const taxSettings = await settingsForCompanies(companyRows.map((company) => company.id), ["default_purchase_tax_id"]);
     const companyByName = new Map(companyRows.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const byName = (list: { id: string; name: string }[], name: string) =>
       list.find((o) => o.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -1346,6 +1428,7 @@ export async function importStockPurchasesCsv(
     const itemByName = new Map(itemRows.map((i) => [`${i.companyId}|${key(i.name)}`, i.id]));
     const unitByName = new Map(unitRows.map((u) => [key(u.name), u.id]));
     const locationByName = new Map(locationRows.map((l) => [key(l.name), l.id]));
+    const taxByName = new Map(taxOptions.map((tax) => [key(tax.name), tax.id]));
     const supplierId = (companyId: string, name: string) => {
       const matches = supplierRows.filter((s) => key(s.displayName) === key(name) && inCompany(companyId)(s));
       return (matches.find((s) => s.companyId === companyId) ?? matches[0])?.id ?? "";
@@ -1391,6 +1474,9 @@ export async function importStockPurchasesCsv(
 
       if (!(head.supplier ?? "").trim()) errors.push(`${at}: Supplier is required.`);
       if (!(head.location ?? "").trim()) errors.push(`${at}: Location is required — goods have to arrive somewhere.`);
+      const taxName = (head.tax ?? "").trim();
+      const taxId = taxName ? (taxByName.get(key(taxName)) ?? "") : (companyId ? (taxSettings[companyId]?.default_purchase_tax_id ?? "") : "");
+      if (taxName && !taxId) errors.push(`${at}: no active tax rule named "${taxName}".`);
 
       // Settlement is only read when the purchase says it was paid — the same rule
       // the form follows, where the account picker only appears for a paid one.
@@ -1449,23 +1535,10 @@ export async function importStockPurchasesCsv(
 
       if (!companyId || errors.length > 0) continue;
 
-      // Discount and tax take rupees or a percentage of the subtotal ("250" or
-      // "5%"), the same as the boxes in the popup — which post the resolved amount,
-      // never the percentage, so the resolving happens here too.
+      // Discount takes rupees or a percentage of the subtotal ("250" or "5%").
+      // Tax is a named master rule, exactly as it is in the purchase form.
       const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
       const discount = resolveAdjustment(head.discountTotal ?? "", subtotal);
-      const tax = resolveAdjustment(head.taxTotal ?? "", subtotal);
-
-      // The landed cost the popup shows in its Unit Cost column — shipping,
-      // discount and tax spread over every unit that came in the delivery. All
-      // three are per-purchase figures in the file, and the discount and tax can
-      // be percentages of the subtotal, so a line's share can only be worked out
-      // once every line has been read and those two resolved.
-      const perUnit = perUnitShare(
-        (Number((head.shippingTotal ?? "").trim()) || 0) - discount + tax,
-        lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
-      );
-      for (const l of lines) l.unitCost = String(landedUnitCost(Number(l.unitPrice) || 0, perUnit));
 
       const form = new FormData();
       form.set("companyId", companyId);
@@ -1481,7 +1554,7 @@ export async function importStockPurchasesCsv(
       form.set("locationId", locationByName.get(key(location)) ?? "");
       form.set("locationName", location);
       form.set("discountTotal", String(discount));
-      form.set("taxTotal", String(tax));
+      form.set("taxId", taxId);
       form.set("shippingTotal", (head.shippingTotal ?? "").trim());
       form.set("isPaid", paid ? "yes" : "no");
       if (paid) {

@@ -8,6 +8,7 @@ import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 
 export async function listTaxes() {
   const session = await getSession();
@@ -45,6 +46,7 @@ export async function createTaxesBatch(rows: TaxBatchRow[]): Promise<ActionResul
     if (valid.length === 0) return { error: "Add at least one tax with a name and a numeric rate." };
 
     await db.insert(taxes).values(valid);
+    invalidateLookups(CACHE.taxes);
     revalidatePath("/taxes");
     await recordAudit({ action: "create", entity: "tax", summary: valid.map((r) => r.name).join(", ") });
     return { success: true };
@@ -61,6 +63,7 @@ export async function updateTax(taxId: string, _prevState: ActionResult | undefi
     if (Number.isNaN(Number(values.rate))) return { error: "Rate must be a number." };
 
     await db.update(taxes).set(values).where(eq(taxes.id, taxId));
+    invalidateLookups(CACHE.taxes);
     revalidatePath("/taxes");
     await recordAudit({ action: "update", entity: "tax", entityId: taxId, summary: values.name, detail: `Rate ${values.rate}%` });
     return { success: true };
@@ -68,12 +71,13 @@ export async function updateTax(taxId: string, _prevState: ActionResult | undefi
 }
 
 export async function deleteTax(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete — this tax is still referenced by document lines.", async () => {
+  return guard("Couldn't delete the tax.", async () => {
     const session = await getLiveSession();
     requireGlobalPermission(session, "taxes", "delete");
 
     const taxId = String(formData.get("taxId") ?? "");
     await db.delete(taxes).where(eq(taxes.id, taxId));
+    invalidateLookups(CACHE.taxes);
 
     revalidatePath("/taxes");
     await recordAudit({ action: "delete", entity: "tax", entityId: taxId, summary: taxId });

@@ -1,5 +1,5 @@
 import { listPayments } from "@/lib/actions/payments";
-import { listLedgerBalances } from "@/lib/actions/ledger";
+import { listPaymentLedgerBalances } from "@/lib/actions/ledger";
 import {
   getAvailableCheques,
   getBankAccountOptions,
@@ -26,7 +26,7 @@ export default async function Page({
     getAvailableCheques(),
     // Which company each contact's balance sits in, so a new payment settles the
     // books that actually hold it rather than whichever company sorts first.
-    listLedgerBalances(),
+    listPaymentLedgerBalances(),
   ]);
 
   return (

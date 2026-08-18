@@ -13,6 +13,7 @@ import { statusColumn, type ColumnDef, type Row } from "@/lib/table";
 import { useCachedOptions } from "@/lib/client-cache";
 import type { QuotationListRow } from "@/lib/actions/quotations";
 import { QuotationForm } from "@/components/modules/QuotationForm";
+import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 const columns: ColumnDef[] = [
   {
@@ -51,14 +52,20 @@ export function QuotationManager({
   customerOptions,
   itemOptions,
   unitOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
 }: {
   quotations: QuotationListRow[];
   // The options the add popup's form needs — the same bundle the sale form
   // uses, minus the settlement lists a quotation never touches.
   companyOptions: { id: string; name: string }[];
   customerOptions: { id: string; name: string; companyId: string }[];
-  itemOptions: ({ id: string; name: string; companyId: string } & { salesRate: string | null })[];
+  itemOptions: ({ id: string; name: string; companyId: string } & { salesRate: string | null; baseUnitId: string | null; taxable: boolean })[];
   unitOptions: { id: string; name: string }[];
+  taxOptions: { id: string; name: string; rate: string }[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -123,6 +130,9 @@ export function QuotationManager({
             customerOptions={cachedCustomers.value}
             itemOptions={cachedItems.value}
             unitOptions={cachedUnits.value}
+            taxOptions={taxOptions}
+            conversionOptions={conversionOptions}
+            taxSettings={taxSettings}
             onDone={close}
           />
         </Dialog>

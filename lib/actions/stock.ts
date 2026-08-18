@@ -8,6 +8,7 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
+import { settingsForCompanies } from "@/lib/queries/settings";
 
 export interface StockUnitTotal {
   unit: string;
@@ -29,6 +30,8 @@ export interface StockItemRow {
   // The item's owning company (items.company_id is NOT NULL — no global products),
   // so this never splits an item across rows.
   company: string;
+  companyId: string;
+  lowStockQty: number;
   location: string;
   // Different units for the same item are never added together — each gets
   // its own total here (one item = one card, one entry per unit).
@@ -50,7 +53,7 @@ export interface StockItemRow {
 // gates every row.
 export async function listStockLevels(locationId?: string, companyId?: string): Promise<StockItemRow[]> {
   const session = await getSession();
-  requirePermission(session, "products", "view");
+  requirePermission(session, "stock", "view");
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
   return cachedPageRead(`${session.userId}:stock:${cacheScope}:${stableReadKey({ locationId, companyId })}`, async () => {
@@ -65,9 +68,10 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       itemName: items.name,
       sku: items.sku,
       companyName: companies.name,
+      companyId: items.companyId,
       locationId: documentLines.locationId,
       locationName: locations.name,
-      unit: sql<string>`coalesce(${units.symbol}, '—')`,
+      unit: sql<string>`coalesce(${units.symbol}, ${units.name}, '—')`,
       onHand: sql<string>`sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity})`,
       costSum: sql<string>`sum(case when ${inventoryTransactions.movement} = 1 then ${inventoryTransactions.totalCost} else 0 end)`,
       costQty: sql<string>`sum(case when ${inventoryTransactions.movement} = 1 then ${inventoryTransactions.baseQuantity} else 0 end)`,
@@ -77,12 +81,12 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
     .innerJoin(items, eq(items.id, documentLines.itemId))
     .innerJoin(companies, eq(companies.id, items.companyId))
     .leftJoin(locations, eq(locations.id, documentLines.locationId))
-    .leftJoin(units, eq(units.id, documentLines.unitId))
+    .leftJoin(units, eq(units.id, items.baseUnitId))
     .where(
       and(
         // Stock is scoped by the item's company (inventory_transactions carries
         // company_id too, but the item is the source of truth for ownership).
-        await companyInPermissionScope(items.companyId, session, "products"),
+        await companyInPermissionScope(items.companyId, session, "stock"),
         companyId ? eq(items.companyId, companyId) : undefined,
         locationId === UNASSIGNED_LOCATION
           ? isNull(documentLines.locationId)
@@ -91,7 +95,9 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
             : undefined,
       ),
     )
-    .groupBy(items.id, items.name, items.sku, companies.name, documentLines.locationId, locations.name, units.symbol);
+    .groupBy(items.id, items.name, items.sku, items.companyId, companies.name, documentLines.locationId, locations.name, units.symbol, units.name);
+
+  const companySettings = await settingsForCompanies([...new Set(rows.map((row) => row.companyId))], ["low_stock_qty"]);
 
   // All rows share one location when locationId is set — grab its name once.
   const filteredLocationName = locationId ? (rows[0]?.locationName ?? UNASSIGNED_LABEL) : null;
@@ -102,6 +108,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
     itemName: string;
     sku: string;
     companyName: string;
+    companyId: string;
     unit: string;
     locationName: string;
     onHand: number;
@@ -116,6 +123,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       itemName: r.itemName,
       sku: r.sku,
       companyName: r.companyName,
+      companyId: r.companyId,
       unit: r.unit,
       locationName: r.locationName ?? UNASSIGNED_LABEL,
       onHand: Number(r.onHand),
@@ -131,6 +139,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
     itemName: string;
     sku: string;
     companyName: string;
+    companyId: string;
     unitAgg: Map<string, { onHand: number; costSum: number; costQty: number }>;
     breakdown: StockLocationBreakdown[];
   };
@@ -141,6 +150,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       itemName: loc.itemName,
       sku: loc.sku,
       companyName: loc.companyName,
+      companyId: loc.companyId,
       unitAgg: new Map(),
       breakdown: [],
     };
@@ -178,6 +188,8 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
         itemName: e.itemName,
         sku: e.sku,
         company: e.companyName,
+        companyId: e.companyId,
+        lowStockQty: Number(companySettings[e.companyId]?.low_stock_qty ?? 10),
         location: filteredLocationName ?? onlyLocation ?? "All Locations",
         unitTotals,
         breakdown: onlyLocation ? [] : e.breakdown.sort((a, b) => a.location.localeCompare(b.location) || a.unit.localeCompare(b.unit)),

@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
+import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
@@ -102,12 +102,12 @@ export function StockAdjustmentFormPage({
   // the same transaction as the adjustment, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(
-    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
+    async (prev: { error?: string; success?: boolean; id?: string; status?: "posted" | "pending" } | undefined, formData: FormData) => {
       // A transport failure must not throw into the error boundary — that would
       // lose the form (and its operation id), and a restored draft would mint a
       // fresh id and post the adjustment twice. Keep the form alive; a replayed
       // Save is then refused server-side as a duplicate.
-      let result: { error?: string; success?: boolean; id?: string } | undefined;
+      let result: { error?: string; success?: boolean; id?: string; status?: "posted" | "pending" } | undefined;
       try {
         result = await createStockAdjustment(prev, formData);
       } catch {
@@ -280,7 +280,7 @@ export function StockAdjustmentFormPage({
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
       {state?.success && (
         <p className={successTextClass}>
-          Adjustment posted — form cleared for the next one.{" "}
+          {state.status === "pending" ? "Adjustment saved for approval" : "Adjustment posted"} — form cleared for the next one.{" "}
           {state.id && (
             <Link href={`/inventory/stock-adjustments/${state.id}`} className="underline">
               View it
@@ -325,12 +325,30 @@ export function DeleteStockAdjustmentButton({ adjustmentId }: { adjustmentId: st
     <form
       action={action}
       onSubmit={(e) => {
-        if (!confirm("Delete this adjustment? The stock it wrote off or added is put back.")) e.preventDefault();
+        if (!confirm("Cancel this adjustment? Its stock effect will be reversed and the document will remain in the audit trail.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="documentId" value={adjustmentId} />
       <button type="submit" disabled={pending} className="text-sm font-medium text-error hover:underline disabled:opacity-40">
-        {pending ? "Deleting…" : "Delete this adjustment"}
+        {pending ? "Cancelling…" : "Cancel this adjustment"}
+      </button>
+      {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
+    </form>
+  );
+}
+
+export function ApproveStockAdjustmentButton({ adjustmentId }: { adjustmentId: string }) {
+  const router = useRouter();
+  const [state, action, pending] = useActionState(approveStockAdjustment, undefined);
+  useEffect(() => {
+    if (state?.success) router.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.success]);
+  return (
+    <form action={action}>
+      <input type="hidden" name="documentId" value={adjustmentId} />
+      <button type="submit" disabled={pending} className="h-10 rounded bg-navy-800 px-4 text-sm font-semibold text-white disabled:opacity-40">
+        {pending ? "Approving…" : "Approve & Post"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

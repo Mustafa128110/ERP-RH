@@ -44,7 +44,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           documentDate: quotation.documentDate,
           validUntil: quotation.validUntil,
           discountTotal: quotation.discountTotal,
-          taxTotal: quotation.taxTotal,
+          taxId: quotation.taxId,
           shippingTotal: quotation.shippingTotal,
           lines: quotation.lines,
         }}
@@ -54,6 +54,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         customerOptions={options.customerOptions}
         itemOptions={options.itemOptions}
         unitOptions={options.unitOptions}
+        taxOptions={options.taxOptions}
+        conversionOptions={options.conversionOptions}
+        taxSettings={options.taxSettings}
       />
 
       {conversions.length > 0 && (
