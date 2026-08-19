@@ -35,7 +35,7 @@ import {
   getCompanies,
   getItemOptions,
   getLocations,
-  getSuppliers,
+  getContactOptions,
   getTaxes,
   getUnits,
   invalidateLookups,
@@ -1414,7 +1414,7 @@ export async function importStockPurchasesCsv(
       getItemOptions(),
       getUnits(),
       getLocations(),
-      getSuppliers(),
+      getContactOptions(),
       getTaxes(),
     ]);
     const taxSettings = await settingsForCompanies(companyRows.map((company) => company.id), ["default_purchase_tax_id"]);

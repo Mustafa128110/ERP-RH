@@ -10,7 +10,14 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
-import { PaymentEditForm, DeletePaymentButton, PaymentBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/PaymentForm";
+import {
+  PaymentEditForm,
+  DeletePaymentButton,
+  PaymentBatchAddDialog,
+  type BankOption,
+  type CashOption,
+  type ChequeOption,
+} from "@/components/modules/PaymentForm";
 import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
 import type { ContactBalanceHint } from "@/lib/payment-constants";
 import { formatDate, money } from "@/lib/format";
@@ -107,7 +114,7 @@ export function PaymentManager({
   contactBalances: ContactBalanceHint[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   // The filter controls, built by the page — they drive query params, so the
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
@@ -123,7 +130,7 @@ export function PaymentManager({
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [editing, setEditing] = useState<PaymentDetail | null>(null);
-  const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
+  const [editChequeOptions, setEditChequeOptions] = useState<ChequeOption[]>(chequeOptions);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   // Which grouped row was clicked: it stands for several payments, so there's no
   // single record to open until one is picked.

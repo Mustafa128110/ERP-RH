@@ -1,11 +1,11 @@
-import { listSuppliers } from "@/lib/actions/contacts";
+import { listContacts } from "@/lib/actions/contacts";
 import { getCompanies } from "@/lib/queries/lookups";
-import { SuppliersManager } from "@/components/modules/SuppliersManager";
+import { ContactsManager } from "@/components/modules/ContactsManager";
 import type { Row } from "@/lib/table";
 import { formatDate, money } from "@/lib/format";
 
 export default async function Page() {
-  const [contacts, companyRows] = await Promise.all([listSuppliers(), getCompanies()]);
+  const [contacts, companyRows] = await Promise.all([listContacts(), getCompanies()]);
   const rows: Row[] = contacts.map((contact) => ({
     id: contact.id,
     displayName: contact.displayName,
@@ -25,5 +25,5 @@ export default async function Page() {
     _incomplete: !contact.phone && !contact.email,
   }));
 
-  return <SuppliersManager rows={rows} companyOptions={companyRows} />;
+  return <ContactsManager rows={rows} companyOptions={companyRows} />;
 }

@@ -10,22 +10,17 @@ import { DateField } from "@/components/ui/DateField";
 import { todayISO, money } from "@/lib/format";
 import { useClientUserId } from "@/lib/client-user";
 import { useSync } from "@/components/layout/SyncProvider";
-import { ChequeQuickAddButton } from "@/components/modules/AccountForms";
+import { ChequeQuickAddButton, chequeDialogOptions } from "@/components/modules/AccountForms";
+import { inCompany } from "@/lib/contact-scope";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 // Cash accounts carry their default flag so a new row can preselect the drawer.
-export type CashOption = Option & { isDefault: boolean };
+export type CashOption = Option & { isDefault: boolean; companyId: string | null };
 // Bank accounts carry their company (null = global) — the cheque quick-add needs
 // it to narrow its own bank picker.
 export type BankOption = Option & { companyId: string | null };
-
-// The cheque dialog names contacts and bank accounts its own way; this is the
-// one place that translation lives.
-const forChequeDialog = (contactOptions: ScopedOption[], bankAccountOptions: BankOption[]) => ({
-  contactOptions: contactOptions.map((c) => ({ id: c.id, displayName: c.name, companyId: c.companyId || null })),
-  bankAccountOptions: bankAccountOptions.map((b) => ({ id: b.id, label: b.name, companyId: b.companyId })),
-});
+export type ChequeOption = Option & { companyId: string | null };
 
 interface ExpenseValues {
   companyId: string;
@@ -97,7 +92,7 @@ export function ExpenseBatchAddDialog({
   contactOptions: ScopedOption[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -107,7 +102,8 @@ export function ExpenseBatchAddDialog({
   // "Settle via" choice. Cheques created from a row's "+" join the shared list,
   // so they're pickable from every row.
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
-  const settlementList = (t: SettlementType) => (t === "account" ? bankAccountOptions : t === "cash" ? cashAccountOptions : chequeOpts);
+  const settlementList = (type: SettlementType, companyId: string) =>
+    (type === "account" ? bankAccountOptions : type === "cash" ? cashAccountOptions : chequeOpts).filter(inCompany(companyId));
 
   // One operation id per dialog session: every submit of this batch posts under
   // the same id, so a response lost after a successful save can't post the batch
@@ -130,14 +126,17 @@ export function ExpenseBatchAddDialog({
   // so rows start on Cash with the account flagged default (Cash on Hand). Which
   // one that is comes from cash_accounts.is_default, not a name match — there are
   // several cash accounts and "Carton Cash" happened to sort first.
-  const defaultCashId = cashAccountOptions.find((a) => a.isDefault)?.id ?? cashAccountOptions[0]?.id ?? "";
+  const defaultCashId = (companyId: string) => {
+    const accounts = cashAccountOptions.filter(inCompany(companyId));
+    return accounts.find((account) => account.isDefault)?.id ?? accounts[0]?.id ?? "";
+  };
 
   const emptyRow = (): BatchRow => ({
     companyId: defaultCompanyId,
     expenseCategoryId: "",
     expenseCategoryText: "",
     settlementType: "cash",
-    settlementId: defaultCashId,
+    settlementId: defaultCashId(defaultCompanyId),
     amount: "",
     notes: "",
   });
@@ -176,7 +175,7 @@ export function ExpenseBatchAddDialog({
         // as if the work were safe.
         return enqueue("expense", `${values.length} expense(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values)?.persisted ?? false;
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <select
@@ -186,7 +185,12 @@ export function ExpenseBatchAddDialog({
                 // the picked id — the text stays and re-resolves against the new
                 // company's list on save.
                 const stillValid = categoryOptions.some((c) => c.id === row.expenseCategoryId && c.companyId === e.target.value);
-                update({ companyId: e.target.value, ...(stillValid ? {} : { expenseCategoryId: "" }) });
+                const accountStillValid = settlementList(row.settlementType, e.target.value).some((account) => account.id === row.settlementId);
+                update({
+                  companyId: e.target.value,
+                  ...(stillValid ? {} : { expenseCategoryId: "" }),
+                  settlementId: accountStillValid ? row.settlementId : row.settlementType === "cash" ? defaultCashId(e.target.value) : "",
+                });
               }}
               className={batchInputClass}
             >
@@ -237,7 +241,7 @@ export function ExpenseBatchAddDialog({
             <div className="flex gap-1.5">
               <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
                 <option value="">—</option>
-                {settlementList(row.settlementType).map((o) => (
+                {settlementList(row.settlementType, row.companyId).map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.name}
                   </option>
@@ -246,10 +250,10 @@ export function ExpenseBatchAddDialog({
               {row.settlementType === "cheque" && (
                 <ChequeQuickAddButton
                   companyOptions={companyOptions}
-                  {...forChequeDialog(contactOptions, bankAccountOptions)}
+                  {...chequeDialogOptions(contactOptions, bankAccountOptions)}
                   onCreated={(created) => {
-                    setChequeOpts((prev) => [...created, ...prev]);
-                    update({ settlementId: created[0].id });
+                    setChequeOpts((previous) => [...created, ...previous]);
+                    if (created[0]?.companyId === row.companyId) update({ settlementId: created[0].id });
                   }}
                 />
               )}
@@ -283,7 +287,7 @@ function Fields({
   contactOptions: ScopedOption[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
 }) {
   const [companyId, setCompanyId] = useState(defaults?.companyId ?? companyOptions[0]?.id ?? "");
   const [expenseCategoryId, setExpenseCategoryId] = useState(defaults?.expenseCategoryId ?? "");
@@ -293,7 +297,7 @@ function Fields({
   );
   // Cheques created from the "+" beside the picker, newest first.
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
-  const settlementOptions = settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? cashAccountOptions : chequeOpts;
+  const settlementOptions = (settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? cashAccountOptions : chequeOpts).filter(inCompany(companyId));
   const settlementFieldName = settlementType === "account" ? "bankAccountId" : settlementType === "cash" ? "cashAccountId" : "chequeId";
   const settlementDefault =
     settlementType === "account" ? defaults?.bankAccountId : settlementType === "cash" ? defaults?.cashAccountId : defaults?.chequeId;
@@ -313,8 +317,7 @@ function Fields({
           onChange={(e) => {
             setCompanyId(e.target.value);
             // Drop a category that doesn't belong to the newly chosen company.
-            if (expenseCategoryId && !categoryOptions.some((c) => c.id === expenseCategoryId && c.companyId === e.target.value))
-              setExpenseCategoryId("");
+            if (expenseCategoryId && !categoryOptions.some((c) => c.id === expenseCategoryId && c.companyId === e.target.value)) setExpenseCategoryId("");
           }}
           className={inputClass}
         >
@@ -378,7 +381,7 @@ function Fields({
         <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
         <div className="flex gap-1.5">
           <select
-            key={`${settlementType}:${createdChequeId}`}
+            key={`${settlementType}:${companyId}:${createdChequeId}`}
             name={settlementFieldName}
             required
             defaultValue={createdChequeId || settlementDefault || ""}
@@ -398,10 +401,10 @@ function Fields({
           {settlementType === "cheque" && (
             <ChequeQuickAddButton
               companyOptions={companyOptions}
-              {...forChequeDialog(contactOptions, bankAccountOptions)}
+              {...chequeDialogOptions(contactOptions, bankAccountOptions)}
               onCreated={(created) => {
-                setChequeOpts((prev) => [...created, ...prev]);
-                setCreatedChequeId(created[0].id);
+                setChequeOpts((previous) => [...created, ...previous]);
+                if (created[0]?.companyId === companyId) setCreatedChequeId(created[0].id);
               }}
             />
           )}
@@ -438,7 +441,7 @@ export function ExpenseEditForm({
   contactOptions: ScopedOption[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   onDone?: () => void;
 }) {
   const [state, action, pending] = useActionState(updateExpense.bind(null, expenseId), undefined);

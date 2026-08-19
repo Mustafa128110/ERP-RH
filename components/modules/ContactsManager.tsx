@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/SupplierForm";
+import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/ContactForm";
 import { getContact } from "@/lib/actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -50,7 +50,7 @@ type Option = { id: string; name: string };
 type ContactDetail = Awaited<ReturnType<typeof getContact>> | null;
 type ModalState = { kind: "batch" } | { kind: "edit"; id: string } | { kind: "batchEdit" } | null;
 
-export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; companyOptions: Option[] }) {
+export function ContactsManager({ rows, companyOptions }: { rows: Row[]; companyOptions: Option[] }) {
   const [modal, setModal] = useState<ModalState>(null);
   // The table only carries display columns; the full record is fetched when a
   // row is opened, so the list query stays light.

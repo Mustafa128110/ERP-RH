@@ -28,7 +28,6 @@ export type SaleFormOptions = {
   companyOptions: Option[];
   customerOptions: ScopedOption[];
   itemOptions: ItemOption[];
-  locationOptions: Option[];
   unitOptions: Option[];
   bankAccountOptions: Option[];
   cashAccountOptions: ScopedOption[];

@@ -9,7 +9,7 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
-import { ExpenseEditForm, DeleteExpenseButton, ExpenseBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/ExpenseForm";
+import { ExpenseEditForm, DeleteExpenseButton, ExpenseBatchAddDialog, type BankOption, type CashOption, type ChequeOption } from "@/components/modules/ExpenseForm";
 import { listChequesForExpenses } from "@/lib/actions/expenses";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
@@ -118,7 +118,7 @@ export function ExpenseManager({
   contactOptions: ScopedOption[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   // The filter controls, built by the page — they drive query params, so the
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
@@ -134,7 +134,7 @@ export function ExpenseManager({
   const cachedCheques = useCachedOptions("cheques", chequeOptions);
 
   const [modal, setModal] = useState<ModalState>(null);
-  const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
+  const [editChequeOptions, setEditChequeOptions] = useState<ChequeOption[]>(chequeOptions);
 
   function close() {
     setModal(null);

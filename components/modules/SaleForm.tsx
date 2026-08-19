@@ -141,7 +141,6 @@ export function SaleFormPage({
   companyOptions: Option[];
   customerOptions: ScopedOption[];
   itemOptions: ItemOption[];
-  locationOptions: Option[];
   unitOptions: Option[];
   bankAccountOptions: Option[];
   cashAccountOptions: ScopedOption[];

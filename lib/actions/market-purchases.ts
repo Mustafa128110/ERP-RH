@@ -1,6 +1,7 @@
 "use server";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -31,6 +32,9 @@ import { linkCheque } from "@/lib/actions/cheque-link";
 import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { round1 } from "@/lib/format";
 
+const REVALIDATION_PATHS = ["/purchases/market", "/inventory/stock", "/inventory/products", "/expenses", "/dashboard"];
+const confirmationDocuments = alias(documents, "confirmation_documents");
+
 export async function listMarketPurchaseRequests() {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
@@ -49,11 +53,7 @@ export async function listMarketPurchaseRequests() {
       purchaseCost: marketPurchaseRequests.purchaseCost,
       status: marketPurchaseRequests.status,
       confirmationDocumentId: marketPurchaseRequests.confirmationDocumentId,
-      confirmationNumber: sql<string | null>`(
-        SELECT confirmation.number
-        FROM documents confirmation
-        WHERE confirmation.id = ${marketPurchaseRequests.confirmationDocumentId}
-      )`,
+      confirmationNumber: confirmationDocuments.number,
     })
     .from(marketPurchaseRequests)
     .innerJoin(documents, eq(documents.id, marketPurchaseRequests.saleDocumentId))
@@ -61,8 +61,12 @@ export async function listMarketPurchaseRequests() {
     .innerJoin(items, eq(items.id, marketPurchaseRequests.itemId))
     .leftJoin(units, eq(units.id, marketPurchaseRequests.unitId))
     .leftJoin(contacts, eq(contacts.id, documents.contactId))
+    .leftJoin(confirmationDocuments, eq(confirmationDocuments.id, marketPurchaseRequests.confirmationDocumentId))
     .where(await companyInPermissionScope(marketPurchaseRequests.companyId, session, "purchases"))
-    .orderBy(sql`${marketPurchaseRequests.status} = 'pending' DESC`, desc(marketPurchaseRequests.createdAt));
+    // Enum order is pending, confirmed, cancelled, so this is the same pending-
+    // first presentation as the former boolean expression and can use the
+    // company/status/created_at index directly.
+    .orderBy(marketPurchaseRequests.status, desc(marketPurchaseRequests.createdAt));
 }
 
 function marketPurchaseDocumentType(companyId: string) {
@@ -234,7 +238,7 @@ export async function confirmMarketPurchases(
     }
 
     invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.expenseCategories, CACHE.cheques);
-    for (const path of ["/purchases/market", "/inventory/stock", "/inventory/products", "/expenses", "/dashboard"]) revalidatePath(path);
+    for (const path of REVALIDATION_PATHS) revalidatePath(path);
     await recordAudit({ action: "create", entity: "market purchase", entityId: createdId, summary: number, companyId, detail: `${input.selected.length} item(s)` });
     return { success: true, id: createdId };
   });
@@ -281,7 +285,7 @@ export async function cancelMarketPurchase(_prevState: ActionResult | undefined,
     });
 
     invalidateLookups(CACHE.items, CACHE.expenseCategories, CACHE.cheques);
-    for (const path of ["/purchases/market", "/inventory/stock", "/inventory/products", "/expenses", "/dashboard"]) revalidatePath(path);
+    for (const path of REVALIDATION_PATHS) revalidatePath(path);
     await recordAudit({ action: "cancel", entity: "market purchase", entityId: documentId, summary: existing.number, companyId: existing.companyId });
     return { success: true };
   });

@@ -38,7 +38,7 @@ import { financialDocumentError } from "@/lib/financial-input";
 // "Inter-Company <key>" with the same random key. That column already exists and
 // already means "why this document exists", which is exactly what's being said —
 // no schema change, and the prefix is what the list page filters on.
-// ponytail: reason as the join key; add a real linked_document_id column if a
+// Design note: reason as the join key; add a real linked_document_id column if a
 // second thing ever needs to pair documents.
 const IC_REASON = "Inter-Company";
 
@@ -500,7 +500,7 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
 //
 // Which companies sell and buy is fixed once created — moving a document to
 // another company would mean renumbering it out of one series and into another.
-// ponytail: delete and re-enter to change the companies.
+// Delete and re-enter to change the companies.
 export async function updateInterCompanySale(
   saleId: string,
   _prevState: InterCompanyResult | undefined,

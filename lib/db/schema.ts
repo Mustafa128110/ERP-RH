@@ -511,6 +511,10 @@ export const documents = pgTable(
       name: "documents_company_document_type_fk",
     }),
     unique().on(table.companyId, table.documentTypeId, table.number),
+    // Commerce lists resolve a document type, narrow to a company scope, then
+    // show newest documents first. One composite index serves that shared path
+    // instead of making PostgreSQL combine and sort the single-column indexes.
+    index("idx_documents_company_type_date").on(table.companyId, table.documentTypeId, table.documentDate.desc(), table.createdAt.desc()),
     index("idx_documents_date").on(table.documentDate),
     index("idx_documents_contact").on(table.contactId),
     index("idx_documents_status").on(table.status),
@@ -641,7 +645,7 @@ export const marketPurchaseRequests = pgTable(
   },
   (table) => [
     unique().on(table.saleLineId),
-    index("idx_market_purchase_status_company").on(table.status, table.companyId),
+    index("idx_market_purchase_company_status_created").on(table.companyId, table.status, table.createdAt.desc()),
     index("idx_market_purchase_confirmation").on(table.confirmationDocumentId),
     check("market_purchase_quantity_check", sql`${table.quantity} > 0 AND ${table.baseQuantity} > 0`),
     check("market_purchase_cost_check", sql`${table.purchaseCost} IS NULL OR ${table.purchaseCost} >= 0`),

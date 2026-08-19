@@ -334,7 +334,7 @@ export interface ChequeBatchRow {
   issuedByCompany: boolean;
 }
 
-export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: string): Promise<CreateResult<{ id: string; name: string }>> {
+export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: string): Promise<CreateResult<{ id: string; name: string; companyId: string }>> {
   return guard(
     "Couldn't save the cheques.",
     async () => {
@@ -379,7 +379,7 @@ export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: s
               remarks: null,
             })),
           )
-          .returning({ id: chequeRegister.id, chequeNumber: chequeRegister.chequeNumber, amount: chequeRegister.amount });
+          .returning({ id: chequeRegister.id, chequeNumber: chequeRegister.chequeNumber, amount: chequeRegister.amount, companyId: chequeRegister.companyId });
       });
 
       invalidateAccounts();
@@ -389,7 +389,7 @@ export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: s
       // Labelled the way getAvailableCheques labels them, so one created from
       // inside a payment or an expense drops into the picker reading identically
       // to the rest of the list.
-      return { created: inserted.map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` })) };
+      return { created: inserted.map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})`, companyId: c.companyId })) };
     },
     { [DUPLICATE]: "Can't create — a cheque number is duplicated for its bank account." },
   );

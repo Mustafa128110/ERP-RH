@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
-
   updatePayment,
   deletePayment,
   createPaymentsBatch,
@@ -27,24 +26,18 @@ import { todayISO, money } from "@/lib/format";
 import { inCompany } from "@/lib/contact-scope";
 import { useClientUserId } from "@/lib/client-user";
 import { useSync } from "@/components/layout/SyncProvider";
-import { ChequeQuickAddButton } from "@/components/modules/AccountForms";
+import { ChequeQuickAddButton, chequeDialogOptions } from "@/components/modules/AccountForms";
 import { settlingCompanyId, type ContactBalanceHint } from "@/lib/payment-constants";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
+export type ChequeOption = Option & { companyId: string | null };
 // Cash accounts carry their default flag so a new row can preselect the drawer,
 // and their company so a row only offers the drawers that company actually has.
 export type CashOption = Option & { isDefault: boolean; companyId: string | null };
 // Bank accounts carry their company (null = global) — the cheque quick-add needs
 // it to narrow its own bank picker.
 export type BankOption = Option & { companyId: string | null };
-
-// The cheque dialog names contacts and bank accounts its own way; this is the
-// one place that translation lives.
-const forChequeDialog = (contactOptions: ScopedOption[], bankAccountOptions: BankOption[]) => ({
-  contactOptions: contactOptions.map((c) => ({ id: c.id, displayName: c.name, companyId: c.companyId || null })),
-  bankAccountOptions: bankAccountOptions.map((b) => ({ id: b.id, label: b.name, companyId: b.companyId })),
-});
 
 interface PaymentValues {
   companyId: string;
@@ -116,7 +109,7 @@ export function PaymentBatchAddDialog({
   contactBalances: ContactBalanceHint[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -159,8 +152,8 @@ export function PaymentBatchAddDialog({
   // An account belongs to one company (or to none, which means all of them), and
   // money moves within one set of books — so a row offers that company's
   // accounts and the global ones, nothing else.
-  const settlementList = (t: SettlementType, companyId: string) =>
-    t === "account" ? bankAccountOptions.filter(inCompany(companyId)) : t === "cash" ? cashAccountOptions.filter(inCompany(companyId)) : chequeOpts;
+  const settlementList = (type: SettlementType, companyId: string) =>
+    (type === "account" ? bankAccountOptions : type === "cash" ? cashAccountOptions : chequeOpts).filter(inCompany(companyId));
 
   // Payments are nearly always made out of the drawer, on the day they happen, so
   // that's where a fresh row starts. Which cash account is "the drawer" comes from
@@ -221,7 +214,7 @@ export function PaymentBatchAddDialog({
         // as if the work were safe.
         return enqueue("payment", `${values.length} payment(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values)?.persisted ?? false;
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <select
@@ -301,10 +294,10 @@ export function PaymentBatchAddDialog({
               {row.settlementType === "cheque" && (
                 <ChequeQuickAddButton
                   companyOptions={companyOptions}
-                  {...forChequeDialog(contactOptions, bankAccountOptions)}
+                  {...chequeDialogOptions(contactOptions, bankAccountOptions)}
                   onCreated={(created) => {
                     setChequeOpts((prev) => [...created, ...prev]);
-                    update({ settlementId: created[0].id });
+                    if (created[0]?.companyId === row.companyId) update({ settlementId: created[0].id });
                   }}
                 />
               )}
@@ -350,7 +343,7 @@ function Fields({
   onContactChange: (id: string, text: string) => void;
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
 }) {
   const [paymentType, setPaymentType] = useState<PaymentType>(defaults?.paymentType ?? "cash");
   const [companyId, setCompanyId] = useState(defaults?.companyId ?? "");
@@ -361,12 +354,9 @@ function Fields({
   const [chequeOpts, setChequeOpts] = useState(chequeOptions);
   // This company's accounts and the global ones, same rule as the batch grid:
   // an account belongs to one set of books and money moves within one.
-  const settlementOptions =
-    paymentType === "account"
-      ? bankAccountOptions.filter(inCompany(companyId))
-      : paymentType === "cash"
-        ? cashAccountOptions.filter(inCompany(companyId))
-        : chequeOpts;
+  const settlementOptions = (paymentType === "account" ? bankAccountOptions : paymentType === "cash" ? cashAccountOptions : chequeOpts).filter(
+    inCompany(companyId),
+  );
   const settlementFieldName = paymentType === "account" ? "bankAccountId" : paymentType === "cash" ? "cashAccountId" : "chequeId";
   const settlementDefault =
     paymentType === "account" ? defaults?.bankAccountId : paymentType === "cash" ? defaults?.cashAccountId : defaults?.chequeId;
@@ -441,7 +431,7 @@ function Fields({
         <span className={labelTextClass}>{paymentType === "account" ? "Account" : paymentType === "cash" ? "Cash Account" : "Cheque"}</span>
         <div className="flex gap-1.5">
           <select
-            key={`${paymentType}:${createdChequeId}`}
+            key={`${paymentType}:${companyId}:${createdChequeId}`}
             name={settlementFieldName}
             required
             defaultValue={createdChequeId || settlementDefault || ""}
@@ -461,10 +451,10 @@ function Fields({
           {paymentType === "cheque" && (
             <ChequeQuickAddButton
               companyOptions={companyOptions}
-              {...forChequeDialog(contactOptions, bankAccountOptions)}
+              {...chequeDialogOptions(contactOptions, bankAccountOptions)}
               onCreated={(created) => {
                 setChequeOpts((prev) => [...created, ...prev]);
-                setCreatedChequeId(created[0].id);
+                if (created[0]?.companyId === companyId) setCreatedChequeId(created[0].id);
               }}
             />
           )}
@@ -498,7 +488,7 @@ export function PaymentEditForm({
   contactOptions: ScopedOption[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   onDone?: () => void;
 }) {
   const [state, action, pending] = useActionState(updatePayment.bind(null, paymentId), undefined);

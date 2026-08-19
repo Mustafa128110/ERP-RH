@@ -35,7 +35,7 @@ export interface AuthSession {
 // this is a cache with explicit invalidation rather than a staleness window; the
 // TTL is just a backstop for anything that learns to change permissions later.
 //
-// ponytail: in-process Map, so it is per server instance. It serves READS —
+// Design note: in-process Map, so it is per server instance. It serves READS —
 // what a page shows. Writes must never rest on it: a revocation that lands on
 // another instance (or straight in the database) must not keep authorizing
 // writes here for up to the TTL, so every mutation reads its session through

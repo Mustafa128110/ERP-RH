@@ -209,7 +209,7 @@ export function BankAccountBatchAddDialog({
         }));
         return createBankAccountsBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
@@ -394,7 +394,7 @@ export function CashAccountBatchAddDialog({
         }));
         return createCashAccountsBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
@@ -573,7 +573,25 @@ type ChequeBatchRowLocal = {
   issuedByCompany: boolean;
 };
 
-export type CreatedCheque = { id: string; name: string };
+export type CreatedCheque = { id: string; name: string; companyId: string };
+
+export function chequeDialogOptions(
+  contactOptions: { id: string; name: string; companyId: string }[],
+  bankAccountOptions: { id: string; name: string; companyId: string | null }[],
+) {
+  return {
+    contactOptions: contactOptions.map((contact) => ({
+      id: contact.id,
+      displayName: contact.name,
+      companyId: contact.companyId || null,
+    })),
+    bankAccountOptions: bankAccountOptions.map((account) => ({
+      id: account.id,
+      label: account.name,
+      companyId: account.companyId,
+    })),
+  };
+}
 
 export function ChequeBatchAddDialog({
   companyOptions,
@@ -651,7 +669,7 @@ export function ChequeBatchAddDialog({
         }));
         return createChequesBatch(values, operationId);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <select

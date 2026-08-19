@@ -2,7 +2,7 @@
 // a picked file) and the server actions that take the parsed rows, so this file
 // stays free of both "use server" and browser APIs.
 //
-// ponytail: hand-rolled rather than papaparse — the format is a comma, a quote
+// Design note: hand-rolled rather than papaparse — the format is a comma, a quote
 // and a newline. Swap in a library if quoted-multiline files from Excel ever
 // prove it wrong.
 

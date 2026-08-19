@@ -37,7 +37,7 @@ export function UserBatchAddDialog({
         }));
         return createUsersBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Name" />

@@ -41,7 +41,7 @@ const contactColumns = {
   company: companies.name,
 };
 
-export async function listSuppliers() {
+export async function listContacts() {
   const session = await getSession();
   requireContactPermission(session, "view");
   const scopeIds = await getScopeCompanyIds();

@@ -111,8 +111,6 @@ export function StockPurchaseCreateForm({
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: (Option & { locationType?: string })[];
   unitOptions: Option[];
-  categoryOptions: Option[];
-  brandOptions: Option[];
   bankAccountOptions: Option[];
   cashAccountOptions: Option[];
   chequeOptions: Option[];

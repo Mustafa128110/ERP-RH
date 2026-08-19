@@ -18,7 +18,7 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, getBrands, getCategories, getCompanies, getLocations, getSuppliers, getUnits, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { SKU_SCOPE, formatSku, nextSequenceRange, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
 import { ensureDocumentType } from "@/lib/actions/document-numbering";
@@ -229,7 +229,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
   // Same derivation as the stock list (lib/actions/stock.ts) — SUM(movement *
   // base_quantity) — grouped by location and unit rather than rolled up, because
   // that's the grain an adjustment is written at.
-  const stockRows = await db
+  const stockRowsPromise = db
     .select({
       itemId: documentLines.itemId,
       locationId: documentLines.locationId,
@@ -255,7 +255,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     ids.map((id) => sql`${id}`),
     sql`, `,
   );
-  const rateRows = await db.execute<{
+  const rateRowsPromise = db.execute<{
     id: string;
     purchase_rate_1: string | null;
     sales_rate: string | null;
@@ -283,13 +283,11 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       LIMIT 1
     ) c ON true
     WHERE rl.id IN (${idList})`);
-  const ratesById = new Map(rateRows.map((r) => [r.id, r]));
-
   // Who it was last bought from and in what unit. DISTINCT ON keeps the first
   // row per item under the ORDER BY, which is the newest line — the same "last
   // purchase wins" rule the rate columns follow. Stock receipts count alongside
   // purchase invoices: both are this item arriving.
-  const lastPurchaseRows = await db.execute<{
+  const lastPurchaseRowsPromise = db.execute<{
     item_id: string;
     contact_id: string | null;
     unit_id: string | null;
@@ -302,9 +300,23 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     WHERE dl.item_id IN (${idList})
       AND dt.code IN ('PURCHASE_INVOICE', 'STOCK_OPENING')
     ORDER BY dl.item_id, d.document_date DESC, dl.line_no DESC`);
-  const lastPurchaseById = new Map(lastPurchaseRows.map((r) => [r.item_id, r]));
-
-  const [supplierOpts, unitOpts, locationOpts] = await Promise.all([getSuppliers(), getUnits(), getLocations()]);
+  const [stockRows, rateRows, lastPurchaseRows, supplierOpts, unitOpts, locationOpts] = await Promise.all([
+    stockRowsPromise,
+    rateRowsPromise,
+    lastPurchaseRowsPromise,
+    getContactOptions(),
+    getUnits(),
+    getLocations(),
+  ]);
+  const ratesById = new Map(rateRows.map((row) => [row.id, row]));
+  const lastPurchaseById = new Map(lastPurchaseRows.map((row) => [row.item_id, row]));
+  const stockByItem = new Map<string, ProductEditRow["stock"]>();
+  for (const row of stockRows) {
+    if (!row.itemId || Number(row.onHand) === 0) continue;
+    const stock = stockByItem.get(row.itemId) ?? [];
+    stock.push({ ...row, onHand: Number(row.onHand) });
+    stockByItem.set(row.itemId, stock);
+  }
 
   return {
     rows: rows.map((r) => ({
@@ -317,7 +329,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       lastPurchaseDate: lastPurchaseById.get(r.id)?.document_date ?? null,
       purchaseRate: ratesById.get(r.id)?.purchase_rate_1 ?? null,
       salesRate: ratesById.get(r.id)?.sales_rate ?? null,
-      stock: stockRows.filter((s) => s.itemId === r.id).map((s) => ({ ...s, onHand: Number(s.onHand) })).filter((s) => s.onHand !== 0),
+      stock: stockByItem.get(r.id) ?? [],
     })),
     supplierOptions: supplierOpts.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId })),
     unitOptions: unitOpts.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name })),
@@ -584,17 +596,13 @@ async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProdu
     groups.set(key, [...(groups.get(key) ?? []), s]);
   }
 
-  for (const group of groups.values()) {
+  const errors = await Promise.all([...groups.values()].map(async (group) => {
     const { companyId, row: first } = group[0];
     // Delegated to createStockPurchase rather than reimplemented: it is what
     // allocates the document number, writes the lines and posts the +1 inventory
     // movements. Whether any of it reaches the ledger is decided by the document
     // type's own affects* flags, which is why the type below is the whole of the
     // difference between this and a real purchase.
-    //
-    // ponytail: one round trip per document, in sequence. Fine for a grid
-    // someone filled in by hand; revisit if a batch ever runs to hundreds of
-    // suppliers.
     //
     // A stock receipt, not a purchase invoice. Editing a product is catalogue
     // work: it records what arrived and what it cost, so the quantity lands in
@@ -648,9 +656,10 @@ async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProdu
 
     const result = await createStockPurchase(undefined, purchaseForm);
     if (result.error) return `${rowLabel(group)} saved, but the stock wasn't recorded: ${result.error}`;
-  }
+    return null;
+  }));
 
-  return null;
+  return errors.find((error): error is string => Boolean(error)) ?? null;
 }
 
 // The mirror of the above: location, date and reason are shared by the whole
@@ -661,27 +670,36 @@ async function recordAdjustments(shared: ProductBatchEditShared, saved: SavedPro
   // fall through to "every location".
   const locationId = locationIdOrNull(shared.locationId);
 
+  const targets = saved.filter((row) => row.row.targetQty.trim() !== "");
+  if (targets.length === 0) return null;
+
+  // One grouped read for the whole grid. The previous loop issued one aggregate
+  // statement per product, so twenty corrected rows paid twenty remote round
+  // trips before the adjustment document could even be created.
+  const currentRows = await db
+    .select({
+      itemId: documentLines.itemId,
+      unitId: documentLines.unitId,
+      onHand: sql<string>`coalesce(sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity}), 0)`,
+    })
+    .from(inventoryTransactions)
+    .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
+    .where(
+      and(
+        inArray(documentLines.itemId, [...new Set(targets.map((row) => row.itemId))]),
+        locationId ? eq(documentLines.locationId, locationId) : isNull(documentLines.locationId),
+      ),
+    )
+    .groupBy(documentLines.itemId, documentLines.unitId);
+
+  const stockKey = (itemId: string, unitId: string | null) => `${itemId}:${unitId ?? "unassigned"}`;
+  const onHandByItemUnit = new Map(
+    currentRows.filter((row) => row.itemId).map((row) => [stockKey(row.itemId!, row.unitId), Number(row.onHand)]),
+  );
+
   const groups = new Map<string, { rows: SavedProductRow[]; lines: unknown[] }>();
-  for (const s of saved) {
-    if (s.row.targetQty.trim() === "") continue;
-
-    // The delta is measured here, not in the browser: the grid's "current" was
-    // read when it opened, and a sale posted in between would make a client-side
-    // subtraction adjust to the wrong number. Same grain as the adjustment line —
-    // this one location, this one unit.
-    const [current] = await db
-      .select({ onHand: sql<string>`coalesce(sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity}), 0)` })
-      .from(inventoryTransactions)
-      .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
-      .where(
-        and(
-          eq(documentLines.itemId, s.itemId),
-          locationId ? eq(documentLines.locationId, locationId) : isNull(documentLines.locationId),
-          s.unitId ? eq(documentLines.unitId, s.unitId) : isNull(documentLines.unitId),
-        ),
-      );
-
-    const delta = Number(s.row.targetQty) - Number(current?.onHand ?? 0);
+  for (const s of targets) {
+    const delta = Number(s.row.targetQty) - (onHandByItemUnit.get(stockKey(s.itemId, s.unitId)) ?? 0);
     // Already at the target — a line of zero would be a paper trail recording
     // that nothing happened.
     if (delta === 0) continue;

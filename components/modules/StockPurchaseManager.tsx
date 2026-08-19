@@ -67,8 +67,6 @@ export function StockPurchaseManager({
   documentTypeOptions,
   locationOptions,
   unitOptions,
-  categoryOptions,
-  brandOptions,
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
@@ -86,8 +84,6 @@ export function StockPurchaseManager({
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: Option[];
   unitOptions: Option[];
-  categoryOptions: Option[];
-  brandOptions: Option[];
   bankAccountOptions: Option[];
   cashAccountOptions: Option[];
   chequeOptions: Option[];
@@ -244,8 +240,6 @@ export function StockPurchaseManager({
             documentTypeOptions={documentTypeOptions}
             locationOptions={locationOptions}
             unitOptions={unitOptions}
-            categoryOptions={categoryOptions}
-            brandOptions={brandOptions}
             bankAccountOptions={bankAccountOptions}
             cashAccountOptions={cashAccountOptions}
             chequeOptions={chequeOptions}
@@ -269,8 +263,6 @@ export function StockPurchaseManager({
               documentTypeOptions={documentTypeOptions}
               locationOptions={locationOptions}
               unitOptions={unitOptions}
-              categoryOptions={categoryOptions}
-              brandOptions={brandOptions}
               bankAccountOptions={bankAccountOptions}
               cashAccountOptions={cashAccountOptions}
               chequeOptions={editChequeOptions}

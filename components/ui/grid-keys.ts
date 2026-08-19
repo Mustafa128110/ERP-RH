@@ -22,7 +22,7 @@ import type { ClipboardEvent, KeyboardEvent, MouseEvent, RefObject } from "react
 // prototype's setter updates the node past that tracker, and the dispatched
 // event is what React's delegated listener turns back into onChange.
 //
-// ponytail: this is the standard way to drive a controlled input from outside
+// Design note: this is the standard way to drive a controlled input from outside
 // React. The alternative — a data-field attribute on all ~12 cells plus a
 // per-field clear callback in every grid — is more code in more places and has
 // to know each cell's shape (a typeahead clears to {id,text}, not "").

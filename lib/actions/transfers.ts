@@ -27,7 +27,7 @@ import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 // tied together through documents.reason, the same way an inter-company sale
 // pairs its invoice with its purchase.
 //
-// ponytail: reason as the join key, matching lib/actions/inter-company.ts. A real
+// Design note: reason as the join key, matching lib/actions/inter-company.ts. A real
 // linked_document_id column would serve both, if a third thing ever needs it.
 const TRANSFER_REASON = "Cash Transfer";
 const outReason = (key: string) => `${TRANSFER_REASON} out ${key}`;

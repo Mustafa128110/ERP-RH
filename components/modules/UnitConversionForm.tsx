@@ -97,7 +97,7 @@ export function UnitConversionBatchAddDialog({
         }));
         return createUnitConversionsBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 // One glyph per nav entry, for the collapsed sidebar — where the label is gone
 // and the icon is the only thing left to navigate by.
 //
-// ponytail: hand-drawn paths rather than an icon package. It's one shape per
+// Design note: hand-drawn paths rather than an icon package. It's one shape per
 // route on a 24-grid, all stroked in currentColor so they inherit the link's
 // active/hover colours for free — a dependency would be 200kB to draw the same
 // thirty lines. Add a package if the app ever needs icons by the hundred.

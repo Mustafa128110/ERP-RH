@@ -151,5 +151,24 @@ function ConfirmedPurchase({ id, number, company, lines, total }: { id: string; 
   const router = useRouter();
   const [state, action, pending] = useActionState(cancelMarketPurchase, undefined);
   useEffect(() => { if (state?.success) router.refresh(); }, [state?.success, router]);
-  return <form action={action} className="flex items-center gap-3 py-2 text-sm"><input type="hidden" name="documentId" value={id} /><StatusPill value="Confirmed" /><span className="font-medium text-navy-800">{number}</span><span className="flex-1">{company} · {lines} item(s)</span><span className="tabular-nums">{money(total)}</span><button type="submit" disabled={pending} onClick={(event) => { if (!confirm("Cancel this market purchase? Stock and the Item Purchase expense will be reversed, and its sales lines will return to Pending.")) event.preventDefault(); }} className="font-medium text-error hover:underline">{pending ? "Cancelling…" : "Cancel"}</button>{state?.error && <span className={errorTextClass}>{state.error}</span>}</form>;
+  return (
+    <form action={action} className="flex items-center gap-3 py-2 text-sm">
+      <input type="hidden" name="documentId" value={id} />
+      <StatusPill value="Confirmed" />
+      <span className="font-medium text-navy-800">{number}</span>
+      <span className="flex-1">{company} · {lines} item(s)</span>
+      <span className="tabular-nums">{money(total)}</span>
+      <button
+        type="submit"
+        disabled={pending}
+        onClick={(event) => {
+          if (!confirm("Cancel this market purchase? Stock and the Item Purchase expense will be reversed, and its sales lines will return to Pending.")) event.preventDefault();
+        }}
+        className="font-medium text-error hover:underline"
+      >
+        {pending ? "Cancelling…" : "Cancel"}
+      </button>
+      {state?.error && <span className={errorTextClass}>{state.error}</span>}
+    </form>
+  );
 }
