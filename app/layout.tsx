@@ -64,6 +64,7 @@ export default async function RootLayout({
     <html
       lang="en"
       data-theme={theme}
+      data-scroll-behavior="smooth"
       // Everything in this app is sized in rem, so the root font size is the
       // zoom: text, padding, gaps and the stroked icons all scale together
       // rather than the type growing out of its buttons.

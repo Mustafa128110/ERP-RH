@@ -28,7 +28,7 @@ export function StockLevels({ items }: { items: StockItem[] }) {
   const totalsOf = (row: Row) => (row as unknown as { unitTotals: StockUnitTotal[] }).unitTotals;
 
   const columns: ColumnDef[] = [
-    { key: "sku", label: "SKU" },
+    { key: "sku", label: "SKU", hideOnMobile: true },
     { key: "itemName", label: "Product" },
     { key: "company", label: "Company" },
     {

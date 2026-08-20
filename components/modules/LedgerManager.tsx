@@ -8,6 +8,7 @@ import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { ContactPaymentsHover } from "@/components/modules/ContactPaymentsHover";
+import { LedgerDocHover } from "@/components/modules/LedgerDocHover";
 import { DateField } from "@/components/ui/DateField";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
@@ -32,12 +33,30 @@ const buildColumns = (byRowId: Map<string, ContactLedgerBalance>): ColumnDef[] =
     label: "Contact",
     render: (row) => {
       const balance = byRowId.get(String(row.id));
-      return balance ? <ContactPaymentsHover name={balance.displayName} payments={balance.recentPayments} /> : String(row.displayName);
+      return balance ? <ContactPaymentsHover name={balance.displayName} paymentsMade={balance.recentPayments.filter((p) => p.direction === "made")} paymentsReceived={balance.recentPayments.filter((p) => p.direction === "received")} /> : String(row.displayName);
     },
   },
   { key: "company", label: "Company" },
-  { key: "creditBalance", label: "We Owe", align: "right" },
-  { key: "debtBalance", label: "Owes Us", align: "right" },
+  {
+    key: "creditBalance",
+    label: "We Owe",
+    align: "right",
+    render: (row) => {
+      const balance = byRowId.get(String(row.id));
+      if (!balance || balance.recentPurchases.length === 0) return String(row.creditBalance);
+      return <LedgerDocHover docs={balance.recentPurchases} trigger={String(row.creditBalance)} />;
+    },
+  },
+  {
+    key: "debtBalance",
+    label: "Owes Us",
+    align: "right",
+    render: (row) => {
+      const balance = byRowId.get(String(row.id));
+      if (!balance || balance.recentInvoices.length === 0) return String(row.debtBalance);
+      return <LedgerDocHover docs={balance.recentInvoices} trigger={String(row.debtBalance)} />;
+    },
+  },
 ];
 
 // Sent to the contact to be checked against their own book, so it goes out one

@@ -69,7 +69,7 @@ export async function listCashTransfers(): Promise<CashTransferRow[]> {
       reason: documents.reason,
       documentDate: documents.documentDate,
       amount: documents.grandTotal,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       // Bank, branch and account title, as everywhere else an account is named.
       bankAccount: sql<string>`${sql.raw(BANK_ACCOUNT_LABEL_SQL())}`,
       cashAccount: cashAccounts.name,

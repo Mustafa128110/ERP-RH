@@ -6,6 +6,7 @@ import { ProductBatchAddDialog } from "@/components/modules/ProductForm";
 import { UnitBatchAddDialog } from "@/components/modules/UnitForm";
 import { QuickAddSelect, QuickAddButton } from "@/components/ui/QuickAddSelect";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { ComboBox } from "@/components/ui/ComboBox";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 
 interface ConversionValues {
@@ -16,48 +17,41 @@ interface ConversionValues {
   multiplier: string;
 }
 
-type Option = { id: string; name: string };
 type ItemOption = { id: string; name: string; sku: string };
 type UnitOption = { id: string; name: string; symbol: string | null };
 
-const itemLabel = (o: ItemOption) => `${o.sku} — ${o.name}`;
-const unitLabel = (o: UnitOption) => `${o.name} (${o.symbol})`;
+const itemLabel = (o: ItemOption) => o.sku ? `${o.sku} — ${o.name}` : o.name;
+const unitLabel = (o: UnitOption) => o.symbol ? `${o.name} (${o.symbol})` : o.name;
 
 // --- Batch add ------------------------------------------------------------
 
-type BatchRow = { companyId: string; itemId: string; fromUnitId: string; toUnitId: string; multiplier: string };
+type BatchRow = { companyId: null; itemId: string; fromUnitId: string; toUnitId: string; multiplier: string };
 
 export function UnitConversionBatchAddDialog({
-  companyOptions,
   itemOptions,
   unitOptions,
   onClose,
   onDone,
-  initialRows,
 }: {
-  companyOptions: Option[];
   itemOptions: ItemOption[];
   unitOptions: UnitOption[];
   onClose: () => void;
   onDone: () => void;
-  initialRows?: number;
 }) {
-  // Items and units created from the toolbar go into these, so every row's
-  // dropdowns pick them up immediately.
   const [itemOpts, setItemOpts] = useState(itemOptions);
   const [unitOpts, setUnitOpts] = useState(unitOptions);
 
-  // companyId "" = global, the default.
-  const emptyRow = (): BatchRow => ({ companyId: "", itemId: "", fromUnitId: "", toUnitId: "", multiplier: "1" });
+  const emptyRow = (): BatchRow => ({ companyId: null, itemId: "", fromUnitId: "", toUnitId: "", multiplier: "1" });
 
   return (
     <BatchAddDialog<BatchRow>
       title="Add Unit Conversions"
       onClose={onClose}
       onDone={onDone}
-      initialRows={initialRows}
+      initialRows={1}
+      autoAppend
       emptyRow={emptyRow}
-      headers={["Company", "Item", "From Unit", "To Unit", "Multiplier"]}
+      headers={["Item", "From Unit", "To Unit", "Multiplier"]}
       toolbar={
         <>
           <QuickAddButton
@@ -65,7 +59,7 @@ export function UnitConversionBatchAddDialog({
             onCreated={(rows) => setItemOpts((prev) => [...rows.map((r) => ({ id: r.id, name: r.name, sku: "" })), ...prev])}
             renderDialog={({ onClose, onCreated }) => (
               <ProductBatchAddDialog
-                companyOptions={companyOptions}
+                companyOptions={[]}
                 categoryOptions={[]}
                 brandOptions={[]}
                 initialRows={1}
@@ -89,7 +83,7 @@ export function UnitConversionBatchAddDialog({
       }
       onSubmit={async (rows) => {
         const values: UnitConversionBatchRow[] = rows.map((r) => ({
-          companyId: r.companyId || null,
+          companyId: null,
           itemId: r.itemId,
           fromUnitId: r.fromUnitId,
           toUnitId: r.toUnitId,
@@ -100,44 +94,40 @@ export function UnitConversionBatchAddDialog({
       renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
-            <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
-              <option value="">Global</option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <ComboBox
+              value={row.itemId ? itemOpts.find((o) => o.id === row.itemId)?.name ?? "" : ""}
+              onChange={(name) => {
+                const match = itemOpts.find((o) => o.name === name || (o.sku && `${o.sku} — ${o.name}` === name));
+                update({ itemId: match?.id ?? "" });
+              }}
+              options={itemOpts.map((o) => ({ id: o.id, name: itemLabel(o) }))}
+              placeholder="Search item…"
+              className={batchInputClass}
+            />
           </td>
           <td className={batchCellClass}>
-            <select value={row.itemId} onChange={(e) => update({ itemId: e.target.value })} className={batchInputClass}>
-              <option value="">—</option>
-              {itemOpts.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.sku ? itemLabel(o) : o.name}
-                </option>
-              ))}
-            </select>
+            <ComboBox
+              value={row.fromUnitId ? unitOpts.find((o) => o.id === row.fromUnitId)?.name ?? "" : ""}
+              onChange={(name) => {
+                const match = unitOpts.find((o) => o.name === name || (o.symbol && `${o.name} (${o.symbol})` === name));
+                update({ fromUnitId: match?.id ?? "" });
+              }}
+              options={unitOpts.map((o) => ({ id: o.id, name: unitLabel(o) }))}
+              placeholder="Search unit…"
+              className={batchInputClass}
+            />
           </td>
           <td className={batchCellClass}>
-            <select value={row.fromUnitId} onChange={(e) => update({ fromUnitId: e.target.value })} className={batchInputClass}>
-              <option value="">—</option>
-              {unitOpts.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.symbol ? unitLabel(o) : o.name}
-                </option>
-              ))}
-            </select>
-          </td>
-          <td className={batchCellClass}>
-            <select value={row.toUnitId} onChange={(e) => update({ toUnitId: e.target.value })} className={batchInputClass}>
-              <option value="">—</option>
-              {unitOpts.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.symbol ? unitLabel(o) : o.name}
-                </option>
-              ))}
-            </select>
+            <ComboBox
+              value={row.toUnitId ? unitOpts.find((o) => o.id === row.toUnitId)?.name ?? "" : ""}
+              onChange={(name) => {
+                const match = unitOpts.find((o) => o.name === name || (o.symbol && `${o.name} (${o.symbol})` === name));
+                update({ toUnitId: match?.id ?? "" });
+              }}
+              options={unitOpts.map((o) => ({ id: o.id, name: unitLabel(o) }))}
+              placeholder="Search unit…"
+              className={batchInputClass}
+            />
           </td>
           <td className={batchCellClass}>
             <input
@@ -159,12 +149,10 @@ export function UnitConversionBatchAddDialog({
 
 function EditFields({
   defaults,
-  companyOptions,
   itemOptions,
   unitOptions,
 }: {
   defaults: ConversionValues;
-  companyOptions: Option[];
   itemOptions: ItemOption[];
   unitOptions: UnitOption[];
 }) {
@@ -174,18 +162,6 @@ function EditFields({
 
   return (
     <>
-      <label className={labelClass}>
-        <span className={labelTextClass}>Company</span>
-        <select name="companyId" defaultValue={defaults.companyId ?? ""} className={inputClass}>
-          <option value="">Global (all companies)</option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
       <QuickAddSelect
         label="Item"
         name="itemId"
@@ -196,7 +172,7 @@ function EditFields({
         placeholder="Select an item"
         renderDialog={({ onClose, onCreated }) => (
           <ProductBatchAddDialog
-            companyOptions={companyOptions}
+            companyOptions={[]}
             categoryOptions={[]}
             brandOptions={[]}
             initialRows={1}
@@ -252,14 +228,12 @@ function EditFields({
 export function UnitConversionEditForm({
   conversionId,
   defaults,
-  companyOptions,
   itemOptions,
   unitOptions,
   onDone,
 }: {
   conversionId: string;
   defaults: ConversionValues;
-  companyOptions: Option[];
   itemOptions: ItemOption[];
   unitOptions: UnitOption[];
   onDone?: () => void;
@@ -273,7 +247,7 @@ export function UnitConversionEditForm({
 
   return (
     <form action={action} className="flex flex-col gap-4">
-      <EditFields defaults={defaults} companyOptions={companyOptions} itemOptions={itemOptions} unitOptions={unitOptions} />
+      <EditFields defaults={defaults} itemOptions={itemOptions} unitOptions={unitOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
       {state?.success && <p className={successTextClass}>Saved.</p>}
       <button type="submit" disabled={pending} className={submitClass}>

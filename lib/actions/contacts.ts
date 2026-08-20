@@ -1,9 +1,9 @@
 "use server";
 
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { contacts, companies } from "@/lib/db/schema";
+import { contacts, companies, documents, chequeRegister } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
@@ -38,7 +38,7 @@ const contactColumns = {
   taxNumber: contacts.taxNumber,
   creditLimit: contacts.creditLimit,
   isActive: contacts.isActive,
-  company: companies.name,
+  company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
 };
 
 export async function listContacts() {
@@ -319,6 +319,102 @@ export async function updateContact(contactId: string, _prevState: ActionResult 
     revalidatePath("/purchases/suppliers");
     revalidatePath("/contacts");
     await recordAudit({ action: "update", entity: "contact", entityId: contactId, summary: data.displayName, companyId: data.companyId });
+    return { success: true };
+  });
+}
+
+// --- Merge contacts ----------------------------------------------------------
+
+export interface ContactMergeCandidate {
+  id: string;
+  displayName: string;
+  companyId: string | null;
+  company: string;
+  phone: string | null;
+  email: string | null;
+  documents: number;
+  cheques: number;
+}
+
+export async function listContactMergeCandidates(): Promise<ContactMergeCandidate[]> {
+  const session = await getSession();
+  requireContactPermission(session, "view");
+
+  const rows = await db
+    .select({
+      id: contacts.id,
+      displayName: contacts.displayName,
+      companyId: contacts.companyId,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name}, 'Global')`,
+      phone: contacts.phone,
+      email: contacts.email,
+      documents: sql<number>`(select count(*) from ${documents} d where d.contact_id = ${contacts.id})`,
+      cheques: sql<number>`(select count(*) from ${chequeRegister} cr where cr.contact_id = ${contacts.id})`,
+    })
+    .from(contacts)
+    .leftJoin(companies, eq(companies.id, contacts.companyId))
+    .where(or(
+      await companyInPermissionScope(contacts.companyId, session, "customers"),
+      await companyInPermissionScope(contacts.companyId, session, "suppliers"),
+    ))
+    .orderBy(contacts.displayName);
+
+  return rows.map((r) => ({ ...r, documents: Number(r.documents), cheques: Number(r.cheques) }));
+}
+
+export async function mergeContacts(
+  _prevState: ActionResult | undefined,
+  formData: FormData,
+): Promise<ActionResult> {
+  return guard("Couldn't merge the contacts.", async () => {
+    const session = await getLiveSession();
+    requireContactPermission(session, "edit");
+
+    const survivorId = String(formData.get("survivorId") ?? "");
+    const displayName = String(formData.get("displayName") ?? "").trim();
+    let contactIds: string[];
+    try {
+      contactIds = JSON.parse(String(formData.get("contactIds") ?? "[]"));
+    } catch {
+      return { error: "Nothing to merge." };
+    }
+
+    if (contactIds.length < 2) return { error: "Pick at least two contacts to merge." };
+    if (!survivorId || !contactIds.includes(survivorId)) return { error: "Pick which contact survives the merge." };
+    if (!displayName) return { error: "The surviving contact needs a name." };
+
+    const rows = await db
+      .select({ id: contacts.id, companyId: contacts.companyId })
+      .from(contacts)
+      .where(and(inArray(contacts.id, contactIds), await companyInScope(contacts.companyId)));
+    if (rows.length !== contactIds.length) return { error: "One of these contacts no longer exists, or isn't in your scope." };
+    if (new Set(rows.map((r) => r.companyId)).size > 1) return { error: "These contacts belong to different scopes — merge within one company or global." };
+    const companyId = rows[0]?.companyId;
+    if (companyId) {
+      requireContactPermission(session, "edit", companyId);
+      requireContactPermission(session, "delete", companyId);
+    }
+
+    const loserIds = contactIds.filter((id) => id !== survivorId);
+
+    await db.transaction(async (tx) => {
+      await tx.update(documents).set({ contactId: survivorId }).where(and(inArray(documents.contactId, loserIds), ne(documents.contactId, survivorId)));
+      await tx.update(chequeRegister).set({ contactId: survivorId }).where(and(inArray(chequeRegister.contactId, loserIds), ne(chequeRegister.contactId, survivorId)));
+      await tx.delete(contacts).where(and(inArray(contacts.id, loserIds), ne(contacts.id, survivorId)));
+      await tx.update(contacts).set({ displayName }).where(eq(contacts.id, survivorId));
+    });
+
+    invalidateLookups(CACHE.contacts);
+    revalidatePath("/contacts");
+    revalidatePath("/ledger");
+    await recordAudit({
+      action: "merge",
+      entity: "contact",
+      entityId: survivorId,
+      summary: displayName,
+      companyId,
+      detail: `${loserIds.length} duplicate(s) folded in`,
+    });
     return { success: true };
   });
 }

@@ -92,7 +92,7 @@ export async function listPayments(filters: PaymentFilters = {}) {
       documentDate: documents.documentDate,
       grandTotal: documents.grandTotal,
       companyId: documents.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       contactId: documents.contactId,
       contact: contacts.displayName,
       // Bank, branch and account title — the same label the picker shows, so a

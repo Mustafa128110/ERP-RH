@@ -102,7 +102,7 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
       id: documents.id,
       number: documents.number,
       companyId: documents.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       customer: contacts.displayName,
       documentDate: documents.documentDate,
       validUntil: documents.validUntil,

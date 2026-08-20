@@ -67,10 +67,10 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       itemId: items.id,
       itemName: items.name,
       sku: items.sku,
-      companyName: companies.name,
+      companyName: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       companyId: items.companyId,
       locationId: documentLines.locationId,
-      locationName: locations.name,
+      locationName: sql<string>`coalesce(${locations.code}, ${locations.name})`,
       unit: sql<string>`coalesce(${units.symbol}, ${units.name}, '—')`,
       onHand: sql<string>`sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity})`,
       costSum: sql<string>`sum(case when ${inventoryTransactions.movement} = 1 then ${inventoryTransactions.totalCost} else 0 end)`,
@@ -95,7 +95,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
             : undefined,
       ),
     )
-    .groupBy(items.id, items.name, items.sku, items.companyId, companies.name, documentLines.locationId, locations.name, units.symbol, units.name);
+    .groupBy(items.id, items.name, items.sku, items.companyId, companies.shortName, companies.name, documentLines.locationId, locations.code, locations.name, units.symbol, units.name);
 
   const companySettings = await settingsForCompanies([...new Set(rows.map((row) => row.companyId))], ["low_stock_qty"]);
 

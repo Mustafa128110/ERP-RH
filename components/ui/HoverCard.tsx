@@ -36,18 +36,33 @@ export function HoverCard({
 }) {
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const GAP = 6;
   const EDGE = 8;
 
+  // Close the panel, unless the mouse is hovering the panel itself.
+  // The timer gives the mouse time to cross from trigger to panel.
+  function scheduleClose() {
+    closeTimer.current = setTimeout(() => {
+      setPos(null);
+    }, 120);
+  }
+
+  function cancelClose() {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
   function show() {
+    cancelClose();
     const rect = ref.current?.getBoundingClientRect();
     if (!rect) return;
 
     if (placement === "right") {
-      // Beside the trigger, flipping to its left only when the panel wouldn't
-      // fit — and pinned inside the viewport top and bottom, so an icon at
-      // either end of the rail still shows its whole label.
       const flipLeft = rect.right + GAP + panelWidth + EDGE > window.innerWidth;
       setPos({
         left: flipLeft ? Math.max(EDGE, rect.left - GAP - panelWidth) : rect.right + GAP,
@@ -62,7 +77,6 @@ export function HoverCard({
     const flipUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
 
     setPos({
-      // Pull back in when the trigger is close to the right edge.
       left: Math.max(EDGE, Math.min(rect.left, window.innerWidth - panelWidth - EDGE)),
       top: flipUp ? undefined : rect.bottom + GAP,
       bottom: flipUp ? window.innerHeight - rect.top + GAP : undefined,
@@ -76,7 +90,7 @@ export function HoverCard({
     <span
       ref={ref}
       onMouseEnter={show}
-      onMouseLeave={() => setPos(null)}
+      onMouseLeave={scheduleClose}
       onFocus={show}
       onBlur={() => setPos(null)}
       className={triggerClassName}
@@ -85,9 +99,12 @@ export function HoverCard({
       {pos &&
         createPortal(
           <div
+            ref={panelRef}
             role="tooltip"
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
             style={{ left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
-            className={`pointer-events-none fixed z-50 overflow-hidden rounded-lg border border-sand bg-white p-3 text-sm text-ink shadow-xl ${panelClassName ?? ""}`}
+            className={`fixed z-50 overflow-hidden rounded-lg border border-sand bg-white p-3 text-sm text-ink shadow-xl ${panelClassName ?? ""}`}
           >
             {children}
           </div>,

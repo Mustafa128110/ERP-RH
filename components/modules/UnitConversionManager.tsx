@@ -31,7 +31,6 @@ const columns: ColumnDef[] = [
 interface FormOptions {
   itemOptions: { id: string; name: string; sku: string }[];
   unitOptions: { id: string; name: string; symbol: string | null }[];
-  companyOptions: { id: string; name: string }[];
 }
 
 type ModalState = { kind: "batch" } | { kind: "edit"; id: string } | null;
@@ -90,13 +89,13 @@ export function UnitConversionManager({
         searchPlaceholder="Search conversions…"
       />
 
-      {modal?.kind === "batch" && <UnitConversionBatchAddDialog {...options} onClose={() => setModal(null)} onDone={close} />}
+      {modal?.kind === "batch" &&              <UnitConversionBatchAddDialog itemOptions={options.itemOptions} unitOptions={options.unitOptions} onClose={() => setModal(null)} onDone={close} />}
 
       {modal?.kind === "edit" && (
         <Dialog title="Edit Unit Conversion" onClose={close}>
           {detail ? (
             <div className="flex flex-col gap-4">
-              <UnitConversionEditForm conversionId={modal.id} defaults={detail} {...options} onDone={close} />
+              <UnitConversionEditForm conversionId={modal.id} defaults={detail} itemOptions={options.itemOptions} unitOptions={options.unitOptions} onDone={close} />
               <div className="rounded border border-error/30 bg-error-tint p-4">
                 <DeleteUnitConversionButton conversionId={modal.id} onDone={close} />
               </div>

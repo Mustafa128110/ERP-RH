@@ -42,7 +42,7 @@ export async function listMarketPurchaseRequests() {
     .select({
       id: marketPurchaseRequests.id,
       companyId: marketPurchaseRequests.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       saleDocumentId: marketPurchaseRequests.saleDocumentId,
       saleNumber: documents.number,
       saleDate: documents.documentDate,

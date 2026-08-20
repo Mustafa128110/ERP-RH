@@ -53,7 +53,7 @@ export async function listStockTransfers() {
         number: documents.number,
         documentDate: documents.documentDate,
         status: documents.status,
-        company: companies.name,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))

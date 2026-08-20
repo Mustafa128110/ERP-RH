@@ -56,7 +56,7 @@ export async function listStockAdjustments(companyId?: string) {
         documentDate: documents.documentDate,
         status: documents.status,
         reason: documents.reason,
-        company: companies.name,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))

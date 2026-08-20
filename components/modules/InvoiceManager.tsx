@@ -2,15 +2,12 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { getInvoice, getSale, listChequesForSales, type SaleItemRow } from "@/lib/actions/sales";
+import { getInvoice, getSale, listChequesForSales } from "@/lib/actions/sales";
 import { SaleFormPage } from "@/components/modules/SaleForm";
-import { SaleItemsHover } from "@/components/modules/SaleItemsHover";
 import { DataTable } from "@/components/ui/DataTable";
+import { DetailHover } from "@/components/ui/DetailHover";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ListFilters } from "@/components/ui/ListFilters";
-import { StockFilter } from "@/components/modules/StockFilters";
-import { SALE_TYPES } from "@/lib/sale-constants";
 import { money } from "@/lib/format";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
@@ -45,9 +42,12 @@ type SaleDetail = NonNullable<Awaited<ReturnType<typeof getSale>>>;
 // then the money, then how it stands. Age and type come after that — they
 // qualify a row you've already found rather than help you find it — and the two
 // download buttons sit at the far end.
+type InvoiceItem = { name: string; qty: string; rate: string };
+
 const columns: ColumnDef[] = [
   { key: "date", label: "Date" },
   { key: "customer", label: "Customer" },
+  { key: "company", label: "Company" },
   { key: "total", label: "Total", align: "right" },
   { key: "paid", label: "Paid", align: "right" },
   { key: "balance", label: "Balance", align: "right" },
@@ -66,16 +66,14 @@ export function InvoiceManager({
   outstanding,
   filtered,
   formOptions,
-  itemsById,
+  itemsBySaleId,
 }: {
   rows: Row[];
   count: number;
   outstanding: number;
   filtered: boolean;
   formOptions: SaleFormOptions;
-  // Line items per invoice id. A Row only holds primitives, so the hover panel
-  // reads them from here rather than off the row.
-  itemsById: Record<string, SaleItemRow[]>;
+  itemsBySaleId?: Map<string, InvoiceItem[]>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<SaleDetail | null>(null);
@@ -142,14 +140,6 @@ export function InvoiceManager({
     }
   }
 
-  // Hovering the number shows what was on the invoice — item names and
-  // quantities — so "what was SI-0007?" is answered without opening it.
-  const numberColumn: ColumnDef = {
-    key: "number",
-    label: "Invoice #",
-    render: (row) => <SaleItemsHover number={String(row.number)} items={itemsById[String(row.id)] ?? []} />,
-  };
-
   // Appended here rather than in the module-level list because they need the
   // per-row pending state.
   const downloadColumn = (format: "pdf" | "png", pendingId: string | null): ColumnDef => ({
@@ -175,6 +165,32 @@ export function InvoiceManager({
     ),
   });
 
+  // Customer column with a hover showing the items on that invoice.
+  const customerCol: ColumnDef = {
+    key: "customer",
+    label: "Customer",
+    render: (row) => {
+      const id = String(row.id);
+      const items = itemsBySaleId?.get(id);
+      if (!items || items.length === 0) return String(row.customer ?? "—");
+      return (
+        <DetailHover trigger={<span>{String(row.customer ?? "—")}</span>} width={320}>
+          <div className="flex flex-col gap-0.5 text-sm">
+            {items.map((it, i) => (
+              <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-x-4">
+                <span className="truncate text-ink">{it.name}</span>
+                <span className="tabular-nums text-steel">{it.qty}</span>
+                <span className="text-right tabular-nums text-ink">{it.rate}</span>
+              </div>
+            ))}
+          </div>
+        </DetailHover>
+      );
+    },
+  };
+
+  const allColumns = columns.map((c) => (c.key === "customer" ? customerCol : c));
+
   const subtitle =
     selected.length > 0
       ? `${selected.length} of ${count} invoice(s) selected`
@@ -182,26 +198,10 @@ export function InvoiceManager({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title="Invoices" subtitle={subtitle}>
-        <ListFilters>
-          <StockFilter
-            param="saleType"
-            allLabel="All Types"
-            options={SALE_TYPES.map((t) => ({ id: t.value, name: t.label }))}
-          />
-          <StockFilter
-            param="status"
-            allLabel="All Invoices"
-            options={[
-              { id: "outstanding", name: "Outstanding" },
-              { id: "paid", name: "Settled" },
-            ]}
-          />
-        </ListFilters>
-      </PageHeader>
+      <PageHeader title="Invoices" subtitle={subtitle} />
 
       <DataTable
-        columns={[numberColumn, ...columns, downloadColumn("pdf", pdfId), downloadColumn("png", pngId)]}
+        columns={[...allColumns, downloadColumn("pdf", pdfId), downloadColumn("png", pngId)]}
         rows={rows}
         idKey="id"
         onRowClick={(row) => void openEdit(String(row.id))}

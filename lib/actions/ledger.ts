@@ -3,7 +3,7 @@
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies } from "@/lib/db/schema";
+import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
@@ -22,6 +22,23 @@ export interface ContactPayment {
   direction: "made" | "received";
 }
 
+export interface ContactDocumentItem {
+  itemName: string;
+  quantity: string;
+  unitPrice: string;
+  lineTotal: string;
+}
+
+export interface ContactDocument {
+  id: string;
+  number: string;
+  status: string;
+  grandTotal: string;
+  paidAmount: string;
+  isPaid: boolean;
+  items: ContactDocumentItem[];
+}
+
 export interface ContactLedgerBalance {
   contactId: string;
   displayName: string;
@@ -33,6 +50,9 @@ export interface ContactLedgerBalance {
   // The most recent few, newest first — what the hover panel on the contact name
   // shows, so "have we paid them lately?" is answered without leaving the page.
   recentPayments: ContactPayment[];
+  // Last 6 sales invoices for "Owes Us" hover, and last 6 purchases for "We Owe" hover.
+  recentInvoices: ContactDocument[];
+  recentPurchases: ContactDocument[];
 }
 
 // Ledger entries carry no contactId directly — they hang off the document,
@@ -64,13 +84,14 @@ async function loadLedgerBalances(
   return cachedPageRead(`${session.userId}:ledger:${permissionModule}:${cacheScope}`, async () => {
 
   // Neither query depends on the other's rows, so they share one round trip.
-  const [rows, paymentRows] = await Promise.all([
+  const docScope = await companyInPermissionScope(documents.companyId, session, permissionModule);
+  const [rows, paymentRows, invoiceHeaders, purchaseHeaders] = await Promise.all([
     db
       .select({
         contactId: contacts.id,
         displayName: contacts.displayName,
         companyId: ledgerEntries.companyId,
-        company: companies.name,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
         credit: ledgerEntries.credit,
         debit: ledgerEntries.debit,
       })
@@ -105,21 +126,68 @@ async function loadLedgerBalances(
         ),
       )
       .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
+
+    // Last 6 sales invoices per contact for "Owes Us" hover.
+    db
+      .select({
+        companyId: documents.companyId,
+        contactId: documents.contactId,
+        id: documents.id,
+        number: documents.number,
+        status: documents.status,
+        grandTotal: documents.grandTotal,
+        paidAmount: documents.paidAmount,
+        isPaid: documents.isPaid,
+        documentDate: documents.documentDate,
+        createdAt: documents.createdAt,
+      })
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(
+        eq(documentTypes.code, "SALES_INVOICE"),
+        eq(documents.status, "posted"),
+        isNotNull(documents.contactId),
+        docScope,
+      ))
+      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
+
+    // Last 6 purchases per contact for "We Owe" hover.
+    db
+      .select({
+        companyId: documents.companyId,
+        contactId: documents.contactId,
+        id: documents.id,
+        number: documents.number,
+        status: documents.status,
+        grandTotal: documents.grandTotal,
+        paidAmount: documents.paidAmount,
+        isPaid: documents.isPaid,
+        documentDate: documents.documentDate,
+        createdAt: documents.createdAt,
+      })
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(
+        eq(documentTypes.code, "PURCHASE_INVOICE"),
+        eq(documents.status, "posted"),
+        isNotNull(documents.contactId),
+        docScope,
+      ))
+      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
   ]);
 
-  const paymentsByContact = new Map<string, ContactPayment[]>();
+  // Split payments into made/received, 6 per direction per contact.
+  const paymentsMadeByContact = new Map<string, ContactPayment[]>();
+  const paymentsReceivedByContact = new Map<string, ContactPayment[]>();
   for (const p of paymentRows) {
     const key = `${p.companyId}:${p.contactId}`;
-    const list = paymentsByContact.get(key) ?? [];
-    if (list.length < 5) {
-      list.push({
-        date: p.date,
-        number: p.number,
-        amount: p.amount,
-        direction: p.code === "PAYMENT_MADE" ? "made" : "received",
-      });
+    const dir = p.code === "PAYMENT_MADE" ? "made" : "received";
+    const map = dir === "made" ? paymentsMadeByContact : paymentsReceivedByContact;
+    const list = map.get(key) ?? [];
+    if (list.length < 6) {
+      list.push({ date: p.date, number: p.number, amount: p.amount, direction: dir });
     }
-    paymentsByContact.set(key, list);
+    map.set(key, list);
   }
 
   // Keyed by company as well as contact: a contact belongs to one company, but
@@ -136,16 +204,74 @@ async function loadLedgerBalances(
       credit: 0,
       debit: 0,
       balance: 0,
-      recentPayments: paymentsByContact.get(key) ?? [],
+      recentPayments: [...(paymentsMadeByContact.get(key) ?? []), ...(paymentsReceivedByContact.get(key) ?? [])],
+      recentInvoices: [],
+      recentPurchases: [],
     };
     entry.credit += Number(r.credit ?? 0);
     entry.debit += Number(r.debit ?? 0);
     byContact.set(key, entry);
   }
 
-  // A-Z by contact. Sorted by balance before, which made a name impossible to
-  // find without scanning the whole list — the balance is what you read once
-  // you're on the row, not how you get to it.
+  // Group invoice headers by contact, top 6 per contact.
+  const invoicesByContact = new Map<string, typeof invoiceHeaders>();
+  for (const h of invoiceHeaders) {
+    const key = `${h.companyId}:${h.contactId}`;
+    const list = invoicesByContact.get(key) ?? [];
+    if (list.length < 6) list.push(h);
+    invoicesByContact.set(key, list);
+  }
+
+  // Group purchase headers by contact, top 6 per contact.
+  const purchasesByContact = new Map<string, typeof purchaseHeaders>();
+  for (const h of purchaseHeaders) {
+    const key = `${h.companyId}:${h.contactId}`;
+    const list = purchasesByContact.get(key) ?? [];
+    if (list.length < 6) list.push(h);
+    purchasesByContact.set(key, list);
+  }
+
+  // Collect all document ids that need line items.
+  const allDocIds = [
+    ...invoiceHeaders.map((h) => h.id),
+    ...purchaseHeaders.map((h) => h.id),
+  ];
+
+  // Fetch line items for all invoices and purchases in one query.
+  const lineRows = allDocIds.length > 0 ? await db
+    .select({
+      documentId: documentLines.documentId,
+      itemName: items.name,
+      quantity: documentLines.quantity,
+      unitPrice: documentLines.unitPrice,
+      lineTotal: documentLines.lineTotal,
+      unitSymbol: units.symbol,
+    })
+    .from(documentLines)
+    .innerJoin(items, eq(items.id, documentLines.itemId))
+    .leftJoin(units, eq(units.id, documentLines.unitId))
+    .where(inArray(documentLines.documentId, allDocIds))
+    .orderBy(documentLines.lineNo) : [];
+
+  // Group items by document.
+  const itemsByDoc = new Map<string, ContactDocumentItem[]>();
+  for (const l of lineRows) {
+    const arr = itemsByDoc.get(l.documentId) ?? [];
+    arr.push({ itemName: l.itemName, quantity: String(l.quantity), unitPrice: String(l.unitPrice), lineTotal: String(l.lineTotal) });
+    itemsByDoc.set(l.documentId, arr);
+  }
+
+  // Build recentInvoices and recentPurchases per contact.
+  for (const [key, docs] of invoicesByContact) {
+    const entry = byContact.get(key);
+    if (entry) entry.recentInvoices = docs.map((d) => ({ id: d.id, number: d.number, status: d.status, grandTotal: String(d.grandTotal), paidAmount: String(d.paidAmount), isPaid: d.isPaid, items: itemsByDoc.get(d.id) ?? [] }));
+  }
+  for (const [key, docs] of purchasesByContact) {
+    const entry = byContact.get(key);
+    if (entry) entry.recentPurchases = docs.map((d) => ({ id: d.id, number: d.number, status: d.status, grandTotal: String(d.grandTotal), paidAmount: String(d.paidAmount), isPaid: d.isPaid, items: itemsByDoc.get(d.id) ?? [] }));
+  }
+
+  // A-Z by contact.
   return Array.from(byContact.values())
     .map((e) => ({ ...e, balance: e.credit - e.debit }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));

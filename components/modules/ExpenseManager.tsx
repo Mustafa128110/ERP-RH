@@ -14,7 +14,6 @@ import { listChequesForExpenses } from "@/lib/actions/expenses";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
 import { useCachedOptions } from "@/lib/client-cache";
-import { StatusPill } from "@/components/ui/StatusPill";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
@@ -91,17 +90,17 @@ const buildColumns = (byRowId: Map<string, DayGroup<Expense>>): ColumnDef[] => [
       );
     },
   },
-  { key: "company", label: "Company" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "method", label: "Method" },
+  { key: "company", label: "Company" },
   { key: "user", label: "Created By" },
-  { key: "status", label: "Status", render: (row) => <StatusPill value={String(row.status)} /> },
 ];
 
 export function ExpenseManager({
   expenses,
   filtered,
   companyOptions,
+  companyCodeMap,
   categoryOptions,
   contactOptions,
   bankAccountOptions,
@@ -113,6 +112,7 @@ export function ExpenseManager({
   // Whether any filter is on, so an empty list can say why it's empty.
   filtered?: boolean;
   companyOptions: Option[];
+  companyCodeMap?: Map<string, string>;
   categoryOptions: ScopedOption[];
   // Only used by the cheque quick-add, which files the cheque against a party.
   contactOptions: ScopedOption[];
@@ -161,13 +161,14 @@ export function ExpenseManager({
       id: key,
       date: formatDate(first.expenseDate),
       category: members.length > 1 ? `${first.category} (${members.length})` : first.category,
-      company: first.company,
+      company: companyCodeMap?.get(first.companyId) ?? first.company,
       amount: money(total),
       // One method named, or the fact that they differ — naming the first would
       // claim the rest were paid the same way.
       method: methods.size === 1 ? [...methods][0] : "Mixed",
       user: users.size === 1 ? [...users][0] : "Several",
       status: first.status === "cancelled" ? "Cancelled" : "Posted",
+      documentId: first.documentId,
       // Not columns — read on hover. Carried on the row anyway so the table's
       // search box finds an expense by what was written on it, and so a note on
       // any member of a group still matches the line it folded into.

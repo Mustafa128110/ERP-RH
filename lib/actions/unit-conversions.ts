@@ -1,12 +1,12 @@
 "use server";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { unitConversions, units, items } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInPermissionScope } from "@/lib/auth/scope";
+
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
@@ -28,8 +28,7 @@ export async function listUnitConversions() {
     })
     .from(unitConversions)
     .leftJoin(items, eq(items.id, unitConversions.itemId))
-    .leftJoin(units, eq(units.id, unitConversions.fromUnitId))
-    .where(await companyInPermissionScope(unitConversions.companyId, session, "unit_conversions"));
+    .leftJoin(units, eq(units.id, unitConversions.fromUnitId));
 }
 
 export async function getUnitConversion(id: string) {
@@ -38,28 +37,19 @@ export async function getUnitConversion(id: string) {
   const [row] = await db
     .select()
     .from(unitConversions)
-    .where(and(eq(unitConversions.id, id), await companyInPermissionScope(unitConversions.companyId, session, "unit_conversions")))
+    .where(eq(unitConversions.id, id))
     .limit(1);
   return row ?? null;
 }
 
 function readForm(formData: FormData) {
   return {
-    companyId: String(formData.get("companyId") ?? "") || null,
+    companyId: null as string | null,
     itemId: String(formData.get("itemId") ?? ""),
     fromUnitId: String(formData.get("fromUnitId") ?? ""),
     toUnitId: String(formData.get("toUnitId") ?? ""),
     multiplier: String(formData.get("multiplier") ?? ""),
   };
-}
-
-async function itemsMatchCompanies(rows: { itemId: string; companyId: string | null }[]): Promise<boolean> {
-  const ids = [...new Set(rows.map((row) => row.itemId))];
-  const found = ids.length > 0
-    ? await db.select({ id: items.id, companyId: items.companyId }).from(items).where(inArray(items.id, ids))
-    : [];
-  const companyById = new Map(found.map((item) => [item.id, item.companyId]));
-  return rows.every((row) => row.companyId !== null && companyById.get(row.itemId) === row.companyId);
 }
 
 async function baseUnitsMatch(rows: { itemId: string; toUnitId: string }[]): Promise<boolean> {
@@ -90,10 +80,8 @@ export async function createUnitConversion(_prevState: ActionResult | undefined,
       const session = await getLiveSession();
 
       const values = readForm(formData);
-      if (!values.companyId) return { error: "Company is required." };
-      requirePermission(session, "unit_conversions", "create", { companyId: values.companyId });
+      requirePermission(session, "unit_conversions", "create");
       if (!values.itemId || !values.fromUnitId || !values.toUnitId) return { error: "Item and both units are required." };
-      if (!(await itemsMatchCompanies([values]))) return { error: "The selected item doesn't belong to that company." };
       if (values.fromUnitId === values.toUnitId) return { error: "From and to units must be different." };
       const multiplier = Number(values.multiplier);
       if (!Number.isFinite(multiplier) || multiplier <= 0) return { error: "Multiplier must be a positive number." };
@@ -106,7 +94,7 @@ export async function createUnitConversion(_prevState: ActionResult | undefined,
 
       invalidateLookups(CACHE.items);
       revalidatePath("/inventory/unit-conversions");
-      await recordAudit({ action: "create", entity: "unit conversion", summary: `${values.multiplier}x`, companyId: values.companyId });
+      await recordAudit({ action: "create", entity: "unit conversion", summary: `${values.multiplier}x` });
       return { success: true };
     },
     { [DUPLICATE]: "A conversion for this item/from-unit/to-unit combination already exists." },
@@ -114,7 +102,7 @@ export async function createUnitConversion(_prevState: ActionResult | undefined,
 }
 
 export interface UnitConversionBatchRow {
-  companyId: string | null;
+  companyId: null;
   itemId: string;
   fromUnitId: string;
   toUnitId: string;
@@ -131,12 +119,8 @@ export async function createUnitConversionsBatch(rows: UnitConversionBatchRow[])
       if (valid.length === 0) {
         return { error: "Add at least one row with an item, two different units, and a positive multiplier." };
       }
-      if (valid.some((row) => !row.companyId)) return { error: "Company is required on every conversion." };
-      if (!(await itemsMatchCompanies(valid))) return { error: "One of the selected items doesn't belong to its conversion's company." };
       if (!(await baseUnitsMatch(valid))) return { error: "Every To unit must be that product's base stock unit." };
-      for (const companyId of new Set(valid.map((row) => row.companyId!))) {
-        requirePermission(session, "unit_conversions", "create", { companyId });
-      }
+      requirePermission(session, "unit_conversions", "create");
 
       await db.transaction(async (tx) => {
         await assignMissingBaseUnits(tx, valid);
@@ -149,7 +133,6 @@ export async function createUnitConversionsBatch(rows: UnitConversionBatchRow[])
         action: "create",
         entity: "unit conversion",
         summary: `${valid.length} conversion${valid.length === 1 ? "" : "s"} created`,
-        companyId: new Set(valid.map((row) => row.companyId)).size === 1 ? valid[0].companyId : undefined,
       });
       return { success: true };
     },
@@ -164,27 +147,24 @@ export async function updateUnitConversion(id: string, _prevState: ActionResult 
       const session = await getLiveSession();
 
       const values = readForm(formData);
-      if (!values.companyId) return { error: "Company is required." };
-      requirePermission(session, "unit_conversions", "edit", { companyId: values.companyId });
+      requirePermission(session, "unit_conversions", "edit");
       if (!values.itemId || !values.fromUnitId || !values.toUnitId) return { error: "Item and both units are required." };
-      if (!(await itemsMatchCompanies([values]))) return { error: "The selected item doesn't belong to that company." };
       if (values.fromUnitId === values.toUnitId) return { error: "From and to units must be different." };
       const multiplier = Number(values.multiplier);
       if (!Number.isFinite(multiplier) || multiplier <= 0) return { error: "Multiplier must be a positive number." };
       if (!(await baseUnitsMatch([values]))) return { error: "The To unit must be this product's base stock unit." };
 
       const [existing] = await db
-        .select({ companyId: unitConversions.companyId })
+        .select({ id: unitConversions.id })
         .from(unitConversions)
-        .where(and(eq(unitConversions.id, id), await companyInPermissionScope(unitConversions.companyId, session, "unit_conversions", "edit")))
+        .where(eq(unitConversions.id, id))
         .limit(1);
       if (!existing) return { error: "Unit conversion not found." };
-      if (existing.companyId !== values.companyId) return { error: "A unit conversion can't be moved to another company." };
       await db.update(unitConversions).set({ ...values, multiplier: values.multiplier }).where(eq(unitConversions.id, id));
 
       invalidateLookups(CACHE.items);
       revalidatePath("/inventory/unit-conversions");
-      await recordAudit({ action: "update", entity: "unit conversion", entityId: id, summary: `${values.multiplier}x`, companyId: values.companyId });
+      await recordAudit({ action: "update", entity: "unit conversion", entityId: id, summary: `${values.multiplier}x` });
       return { success: true };
     },
     { [DUPLICATE]: "A conversion for this item/from-unit/to-unit combination already exists." },
@@ -198,12 +178,12 @@ export async function deleteUnitConversion(_prevState: ActionResult | undefined,
 
     const id = String(formData.get("id") ?? "");
     const [existing] = await db
-      .select({ companyId: unitConversions.companyId })
+      .select({ id: unitConversions.id })
       .from(unitConversions)
-      .where(and(eq(unitConversions.id, id), await companyInPermissionScope(unitConversions.companyId, session, "unit_conversions", "delete")))
+      .where(eq(unitConversions.id, id))
       .limit(1);
-    if (!existing?.companyId) return { error: "Unit conversion not found." };
-    requirePermission(session, "unit_conversions", "delete", { companyId: existing.companyId });
+    if (!existing) return { error: "Unit conversion not found." };
+    requirePermission(session, "unit_conversions", "delete");
     await db.delete(unitConversions).where(eq(unitConversions.id, id));
 
     invalidateLookups(CACHE.items);

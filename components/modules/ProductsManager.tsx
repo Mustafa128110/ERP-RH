@@ -16,6 +16,7 @@ import type { ColumnDef, Row } from "@/lib/table";
 
 // No S.No column here — DataTable numbers every row itself.
 const columns: ColumnDef[] = [
+  { key: "sku", label: "SKU", hideOnMobile: true },
   {
     key: "name",
     label: "Item Name",

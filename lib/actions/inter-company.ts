@@ -250,7 +250,7 @@ export async function listInterCompanySales() {
       reason: documents.reason,
       number: documents.number,
       companyId: documents.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       documentDate: documents.documentDate,
       status: documents.status,
       grandTotal: documents.grandTotal,

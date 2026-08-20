@@ -59,7 +59,7 @@ export async function listStockMovements(filters: MovementFilters = {}): Promise
       date: documents.documentDate,
       itemName: items.name,
       sku: items.sku,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       location: locations.name,
       type: documentTypes.name,
       typeCode: documentTypes.code,

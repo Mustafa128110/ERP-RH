@@ -18,6 +18,9 @@ export type ColumnDef = {
   label: string;
   align?: "left" | "right";
   badge?: boolean;
+  // Hide on small screens: the column is still in the search index (so the
+  // value is findable) but not rendered on mobile.
+  hideOnMobile?: boolean;
   // Escape hatch for a cell that needs more than the stringified value — Row only
   // holds primitives, so anything richer (the sales list's hover panel) comes from
   // here, closing over the caller's own data.

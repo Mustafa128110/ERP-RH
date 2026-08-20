@@ -72,6 +72,8 @@ const PATHS: Record<string, ReactNode> = {
       <circle cx="19" cy="12" r="1.3" />
     </>
   ),
+  arrowDown: <path d="M12 5v14M5 12l7 7 7-7" />,
+  arrowUp: <path d="M12 19V5M5 12l7-7 7 7" />,
 };
 
 export type IconName = keyof typeof PATHS;

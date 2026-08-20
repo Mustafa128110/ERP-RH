@@ -6,7 +6,6 @@ import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { DetailHover } from "@/components/ui/DetailHover";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
@@ -41,54 +40,19 @@ interface PaymentRow {
   code: string;
 }
 
-// `render` closes over the grouped payments so the number cell can list them —
-// Row only holds primitives, and a group's members are a list.
-const buildColumns = (byRowId: Map<string, DayGroup<PaymentRow>>): ColumnDef[] => [
+const buildColumns = (): ColumnDef[] => [
   {
-    key: "number",
-    label: "Number",
-    // The row shows the amount and the method; what it doesn't show is the whole
-    // of a payment at a glance — which way it went, whose account it moved
-    // through, under which company. Hovering the number answers that without
-    // opening the record.
-    //
-    // A row standing for several payments to one party on one day is asked a
-    // different question, so it gets the other panel: what each of them was, and
-    // what they came to.
-    render: (row) => {
-      const members = byRowId.get(String(row.id))?.members ?? [];
-      return members.length > 1 ? (
-        <DetailHover
-          trigger={String(row.number)}
-          heading={`${row.contact} — ${row.date}`}
-          width={340}
-          lines={members.map((m) => ({
-            text: m.number,
-            note: m.paymentMethod ?? undefined,
-            value: money(m.grandTotal),
-          }))}
-          footer={`Total ${row.amount}`}
-        />
-      ) : (
-        <DetailHover
-          trigger={String(row.number)}
-          heading={String(row.number)}
-          rows={[
-            { label: row.type === "Made" ? "Paid to" : "Received from", value: String(row.contact) },
-            { label: "Amount", value: String(row.amount) },
-            { label: "Through", value: String(row.method) },
-            { label: "Company", value: String(row.company) },
-            { label: "Date", value: String(row.date) },
-          ]}
-        />
-      );
-    },
+    key: "type",
+    label: "Type",
+    render: (row) => (
+      <span title={String(row.type)} className={String(row.type) === "Received" ? "text-emerald-600" : "text-red-500"}>
+        <Icon name={String(row.type) === "Received" ? "arrowUp" : "arrowDown"} className="h-4 w-4" />
+      </span>
+    ),
   },
-  { key: "type", label: "Type", badge: true },
   { key: "contact", label: "Contact" },
-  { key: "date", label: "Date" },
-  { key: "method", label: "Method" },
   { key: "amount", label: "Amount", align: "right" },
+  { key: "method", label: "Method" },
   { key: "company", label: "Company" },
 ];
 
@@ -163,7 +127,7 @@ export function PaymentManager({
     (p) => p.grandTotal,
   );
   const byRowId = new Map(groups.map((g) => [g.key, g]));
-  const columns = buildColumns(byRowId);
+  const columns = buildColumns();
 
   const rows: Row[] = groups.map(({ key, members, total }) => {
     const first = members[0];

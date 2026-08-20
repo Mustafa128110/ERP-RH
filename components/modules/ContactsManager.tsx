@@ -1,8 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/ContactForm";
+import { MergeContactsDialog } from "@/components/modules/MergeContactsDialog";
 import { getContact } from "@/lib/actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -48,7 +50,7 @@ const columns: ColumnDef[] = [
 
 type Option = { id: string; name: string };
 type ContactDetail = Awaited<ReturnType<typeof getContact>> | null;
-type ModalState = { kind: "batch" } | { kind: "edit"; id: string } | { kind: "batchEdit" } | null;
+type ModalState = { kind: "batch" } | { kind: "edit"; id: string } | { kind: "batchEdit" } | { kind: "merge" } | null;
 
 export function ContactsManager({ rows, companyOptions }: { rows: Row[]; companyOptions: Option[] }) {
   const [modal, setModal] = useState<ModalState>(null);
@@ -78,6 +80,7 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
     setDetail(await getContact(id));
   }
 
+  const router = useRouter();
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
@@ -98,6 +101,15 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
         >
           <Icon name="edit" />
           {selected.length > 0 && <span className="text-sm font-medium tabular-nums">{selected.length}</span>}
+        </button>
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "merge" })}
+          aria-label="Merge contacts"
+          title="Merge duplicate contacts"
+          className={iconButtonClass}
+        >
+          <Icon name="merge" />
         </button>
         <button
           type="button"
@@ -142,6 +154,10 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
             <p className="text-sm text-steel">Loading…</p>
           )}
         </Dialog>
+      )}
+
+      {modal?.kind === "merge" && (
+        <MergeContactsDialog onClose={() => setModal(null)} onDone={() => { setModal(null); router.refresh(); }} />
       )}
     </div>
   );

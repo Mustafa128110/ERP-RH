@@ -4,24 +4,30 @@ import type { ContactPayment } from "@/lib/actions/ledger";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { formatDate, money } from "@/lib/format";
 
-// Same idea as the sales list's item panel: the ledger row has the balance, but
-// "when did we last pay them, and how much" is what you actually want while
-// scanning it. Hovering the contact name answers it without leaving the page.
-export function ContactPaymentsHover({ name, payments }: { name: string; payments: ContactPayment[] }) {
-  if (payments.length === 0) return <>{name}</>;
+// Shows last 6 payments made and last 6 received for a contact in the ledger.
+export function ContactPaymentsHover({ name, paymentsMade, paymentsReceived }: {
+  name: string;
+  paymentsMade: ContactPayment[];
+  paymentsReceived: ContactPayment[];
+}) {
+  if (paymentsMade.length === 0 && paymentsReceived.length === 0) return <>{name}</>;
+
+  const all = [...paymentsMade, ...paymentsReceived];
 
   return (
-    <DetailHover
-      trigger={name}
-      heading={`Last ${payments.length} payment${payments.length === 1 ? "" : "s"}`}
-      lines={payments.map((p) => ({
-        text: formatDate(p.date),
-        // Which way the money went — a contact can be paid on one invoice and
-        // pay us on another.
-        note: p.direction === "made" ? "paid them" : "received",
-        value: money(p.amount),
-      }))}
-      width={288}
-    />
+    <DetailHover trigger={name} width={320}>
+      <div className="flex flex-col gap-0.5 text-sm">
+        {all.map((p, i) => (
+          <div key={i} className="grid grid-cols-[auto_1fr_auto_auto] gap-x-3">
+            <span className="text-steel tabular-nums">{formatDate(p.date)}</span>
+            <span className={p.direction === "made" ? "text-red-500" : "text-emerald-600"}>
+              {p.direction === "made" ? "paid" : "received"}
+            </span>
+            <span className="text-right tabular-nums text-ink">{money(p.amount)}</span>
+            <span className="text-right tabular-nums text-steel text-xs">{p.number}</span>
+          </div>
+        ))}
+      </div>
+    </DetailHover>
   );
 }

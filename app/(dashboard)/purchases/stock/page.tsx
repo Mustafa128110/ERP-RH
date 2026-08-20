@@ -1,12 +1,17 @@
 import { listStockPurchases } from "@/lib/actions/purchases";
 import { getPurchaseFormOptions } from "@/lib/queries/lookups";
 import { StockPurchaseManager } from "@/components/modules/StockPurchaseManager";
+import { getSession } from "@/lib/auth/session";
 import { formatDate, money, qty } from "@/lib/format";
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ company?: string }> }) {
-  const { company } = await searchParams;
-  const [purchases, options] = await Promise.all([listStockPurchases(company || undefined), getPurchaseFormOptions()]);
+export default async function Page() {
+  const [purchases, options, session] = await Promise.all([listStockPurchases(), getPurchaseFormOptions(), getSession()]);
 
+  // Only show locations the user has warehouse access for
+  const warehouseIds = session?.warehouseIds ?? [];
+  const filteredLocationOptions = warehouseIds.length > 0
+    ? options.locationOptions.filter((l) => warehouseIds.includes(l.id))
+    : options.locationOptions;
 
   const rows = purchases.map((p) => ({
     id: p.id,
@@ -34,5 +39,5 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
     })),
   }));
 
-  return <StockPurchaseManager rows={rows} companyId={company || undefined} {...options} />;
+  return <StockPurchaseManager rows={rows} {...options} locationOptions={filteredLocationOptions} />;
 }

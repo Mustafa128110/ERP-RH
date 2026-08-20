@@ -44,7 +44,7 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
     .select({
       id: expenses.id,
       companyId: expenses.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       expenseCategoryId: expenses.expenseCategoryId,
       category: expenseCategories.name,
       bankAccountId: expenses.bankAccountId,

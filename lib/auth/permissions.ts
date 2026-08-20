@@ -44,7 +44,9 @@ export function requirePermission(
   if (scope?.companyId && !session.companyIds.includes(scope.companyId)) {
     throw new PermissionError(`No access to company ${scope.companyId}`);
   }
-  if (scope?.warehouseId && !session.warehouseIds.includes(scope.warehouseId)) {
+  // Empty warehouseIds means unrestricted — the user wasn't assigned to
+  // specific warehouses, so they can access all of them.
+  if (scope?.warehouseId && session.warehouseIds.length > 0 && !session.warehouseIds.includes(scope.warehouseId)) {
     throw new PermissionError(`No access to warehouse ${scope.warehouseId}`);
   }
 }

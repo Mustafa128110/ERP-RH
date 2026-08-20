@@ -205,7 +205,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     .select({
       id: items.id,
       companyId: items.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       sku: items.sku,
       name: items.name,
       urduName: items.urduName,
@@ -764,7 +764,7 @@ export async function listMergeCandidates(): Promise<MergeCandidate[]> {
       name: items.name,
       sku: items.sku,
       companyId: items.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       lines: sql<number>`(select count(*) from ${documentLines} dl where dl.item_id = ${items.id})`,
       movements: sql<number>`(
         select count(*) from inventory_transactions it
@@ -897,7 +897,7 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
     db
       .select({
         id: items.id,
-        company: companies.name,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
         name: items.name,
         sku: items.sku,
         urduName: items.urduName,

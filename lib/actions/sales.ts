@@ -93,9 +93,11 @@ export async function listSales(filters: SalesFilters = {}) {
         shippingTotal: documents.shippingTotal,
         saleType: documents.saleType,
         customer: contacts.displayName,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .innerJoin(companies, eq(companies.id, documents.companyId))
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
       // The name filter lives here rather than in `scope`: the lines query below
       // doesn't join contacts, and it doesn't need to — extra lines for filtered
