@@ -4,13 +4,14 @@ import { useActionState, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createStockTransfer, updateStockTransfer } from "@/lib/actions/stock-transfers";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
 import { todayISO } from "@/lib/format";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -22,7 +23,9 @@ type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string };
 
-// One draft per form: only one transfer is ever being typed.
+// One draft per form: only one transfer is ever being typed. The user id is
+// appended at the call site (transfer:<uid>) so a shared browser never offers
+// one user's half-typed transfer to another.
 const TRANSFER_DRAFT_KEY = "transfer";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "" });
@@ -94,6 +97,11 @@ export function StockTransferFormPage({
   // Controlled (not defaultValue) so a draft captures the date too — a transfer
   // typed half-way is only worth offering back if the whole transfer returns.
   const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
+  // The draft key is composed per render from the logged-in user — SessionSeed
+  // (in the layout) sets the id before children render, so the first render
+  // already carries the scoped key.
+  const userId = useClientUserId();
+  const transferDraftKey = userId ? `${TRANSFER_DRAFT_KEY}:${userId}` : TRANSFER_DRAFT_KEY;
 
   // --- Draft ----------------------------------------------------------------
   // New transfers are entered back to back, so a created one clears the form; a
@@ -103,7 +111,7 @@ export function StockTransferFormPage({
   const draftState = { lines, companyId, fromLocationId, toLocationId, documentDate };
   type TransferDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<TransferDraft>(TRANSFER_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<TransferDraft>(transferDraftKey, {
     state: draftState,
     enabled: !isEdit,
     hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
@@ -130,10 +138,19 @@ export function StockTransferFormPage({
   // the same transaction as the transfer, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: TransferActionState, formData: FormData) => {
-    const result: TransferActionState = isEdit ? await updateStockTransfer(transferId!, prev, formData) : await createStockTransfer(prev, formData);
+    // A transport failure must not throw into the error boundary — that would
+    // lose the form (and its operation id), and a restored draft would mint a
+    // fresh id and post the transfer twice. Keep the form alive; a replayed
+    // Save is then refused server-side as a duplicate.
+    let result: TransferActionState;
+    try {
+      result = isEdit ? await updateStockTransfer(transferId!, prev, formData) : await createStockTransfer(prev, formData);
+    } catch {
+      return { error: TRANSPORT_ERROR_MESSAGE };
+    }
     if (result?.success) {
       // Saved — the local copy has nothing left to protect.
-      clearDraft(TRANSFER_DRAFT_KEY);
+      clearDraft(transferDraftKey);
       if (onDone) onDone();
       else if (!isEdit) resetForm();
     }

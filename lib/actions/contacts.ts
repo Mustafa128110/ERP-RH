@@ -1,27 +1,29 @@
 "use server";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { contacts, companies } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { contacts, companies, documents, chequeRegister } from "@/lib/db/schema";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import type { AuthSession } from "@/lib/auth/session";
 
 // Contacts are unified — no supplier/customer split. A write is allowed if the
 // user can create/edit in either the customers or suppliers module, so both a
 // Salesman (customers) and a purchaser (suppliers) can add contacts.
-function requireContactPermission(session: Parameters<typeof requirePermission>[0], action: string) {
+function requireContactPermission(session: AuthSession | null, action: string, companyId?: string): asserts session is AuthSession {
+  const scope = companyId ? { companyId } : undefined;
   try {
-    requirePermission(session, "customers", action);
+    requirePermission(session, "customers", action, scope);
     return;
   } catch {
     // fall through — try suppliers, which throws if that's missing too
   }
-  requirePermission(session, "suppliers", action);
+  requirePermission(session, "suppliers", action, scope);
 }
 
 const contactColumns = {
@@ -36,12 +38,21 @@ const contactColumns = {
   taxNumber: contacts.taxNumber,
   creditLimit: contacts.creditLimit,
   isActive: contacts.isActive,
-  company: companies.name,
+  company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
 };
 
-export async function listSuppliers() {
+export async function listContacts() {
   const session = await getSession();
   requireContactPermission(session, "view");
+  const scopeIds = await getScopeCompanyIds();
+  const permittedIds = scopeIds.filter((companyId) =>
+    ["customers.view", "suppliers.view"].some(
+      (key) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+    ),
+  );
+  const documentScope = permittedIds.length > 0
+    ? sql`d.company_id IN (${sql.join(permittedIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+    : sql`false`;
 
   // Two queries, run together rather than one after the other. The activity
   // summary is a grouped pass over documents keyed by contact — joining it into
@@ -53,7 +64,12 @@ export async function listSuppliers() {
       .select(contactColumns)
       .from(contacts)
       .leftJoin(companies, eq(contacts.companyId, companies.id))
-      .where(await companyInScope(contacts.companyId)),
+      .where(
+        or(
+          await companyInPermissionScope(contacts.companyId, session, "customers"),
+          await companyInPermissionScope(contacts.companyId, session, "suppliers"),
+        ),
+      ),
     // The two balances come off ledger_entries, the same rows the Ledger screen
     // reads, so a contact's figure here and there is one number arrived at once.
     // Summing (grand_total - paid_amount) over the invoices instead — which is
@@ -76,6 +92,7 @@ export async function listSuppliers() {
         JOIN document_types dt ON dt.id = d.document_type_id
         LEFT JOIN ledger_entries l ON l.document_id = d.id
        WHERE d.contact_id IS NOT NULL
+         AND ${documentScope}
        GROUP BY d.contact_id`),
   ]);
 
@@ -99,7 +116,15 @@ export async function getContact(id: string) {
     .select(contactColumns)
     .from(contacts)
     .leftJoin(companies, eq(contacts.companyId, companies.id))
-    .where(eq(contacts.id, id));
+    .where(
+      and(
+        eq(contacts.id, id),
+        or(
+          await companyInPermissionScope(contacts.companyId, session, "customers"),
+          await companyInPermissionScope(contacts.companyId, session, "suppliers"),
+        ),
+      ),
+    );
   return row ?? null;
 }
 
@@ -140,11 +165,17 @@ export async function createContactsBatch(
   return guard(
     "Couldn't save the contacts.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       const valid = rows.filter((r) => r.displayName.trim());
       if (valid.length === 0) return { error: "Add at least one contact with a name." };
 
       requireContactPermission(session, "create");
+      // Every company the batch files under must be one the user belongs to and
+      // can create contacts in — a row carrying a forged or stale companyId is
+      // refused rather than silently filed there.
+      for (const companyId of new Set(valid.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requireContactPermission(session, "create", companyId);
+      }
 
       const created = await db
         .insert(contacts)
@@ -152,6 +183,7 @@ export async function createContactsBatch(
         .returning({ id: contacts.id, name: contacts.displayName, companyId: contacts.companyId });
       invalidateLookups(CACHE.contacts);
       revalidatePath("/purchases/suppliers");
+      revalidatePath("/contacts");
       await recordAudit({ action: "create", entity: "contact", summary: created.map((c) => c.name).slice(0, 5).join(", ") });
       return { created };
     },
@@ -205,8 +237,13 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
   return guard(
     "Couldn't save the contacts.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requireContactPermission(session, "edit");
+      // Every company the batch moves rows into must be one the user can act
+      // on; the UPDATE below is also scoped, so an out-of-scope row never matches.
+      for (const companyId of new Set(rows.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requireContactPermission(session, "edit", companyId);
+      }
 
       const blank = rows.findIndex((r) => !r.displayName.trim());
       if (blank !== -1) return { error: `Row ${blank + 1}: a contact needs a name.` };
@@ -238,6 +275,9 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
         sql`, `,
       );
 
+      // The scope rides on the existing row's company, so a ticked id from a
+      // stale page can't reach a contact outside the user's companies.
+      const scope = await companyInScope(contacts.companyId);
       await db.execute(sql`
         UPDATE contacts AS c
         SET display_name = v.display_name,
@@ -251,11 +291,12 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
             credit_limit = v.credit_limit,
             is_active    = v.is_active
         FROM (VALUES ${values}) AS v(id, display_name, company_id, company_name, phone, email, address, city, tax_number, credit_limit, is_active)
-        WHERE c.id = v.id
+        WHERE c.id = v.id AND ${scope}
       `);
 
       invalidateLookups(CACHE.contacts);
       revalidatePath("/purchases/suppliers");
+      revalidatePath("/contacts");
       await recordAudit({ action: "update", entity: "contact", summary: `${rows.length} contact(s) edited` });
       return { saved: rows.length };
     },
@@ -265,15 +306,115 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
 
 export async function updateContact(contactId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the contact.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     const data = readContactForm(formData);
     requireContactPermission(session, "edit");
+    // A non-global company in the submission must be one the user can act on.
+    if (data.companyId) requireContactPermission(session, "edit", data.companyId);
     if (!data.displayName) return { error: "Name is required." };
 
-    await db.update(contacts).set(data).where(eq(contacts.id, contactId));
+    // Scoped so a guessed id can't reach a contact outside the user's companies.
+    await db.update(contacts).set(data).where(and(eq(contacts.id, contactId), await companyInScope(contacts.companyId)));
     invalidateLookups(CACHE.contacts);
     revalidatePath("/purchases/suppliers");
+    revalidatePath("/contacts");
     await recordAudit({ action: "update", entity: "contact", entityId: contactId, summary: data.displayName, companyId: data.companyId });
+    return { success: true };
+  });
+}
+
+// --- Merge contacts ----------------------------------------------------------
+
+export interface ContactMergeCandidate {
+  id: string;
+  displayName: string;
+  companyId: string | null;
+  company: string;
+  phone: string | null;
+  email: string | null;
+  documents: number;
+  cheques: number;
+}
+
+export async function listContactMergeCandidates(): Promise<ContactMergeCandidate[]> {
+  const session = await getSession();
+  requireContactPermission(session, "view");
+
+  const rows = await db
+    .select({
+      id: contacts.id,
+      displayName: contacts.displayName,
+      companyId: contacts.companyId,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name}, 'Global')`,
+      phone: contacts.phone,
+      email: contacts.email,
+      documents: sql<number>`(select count(*) from ${documents} d where d.contact_id = ${contacts.id})`,
+      cheques: sql<number>`(select count(*) from ${chequeRegister} cr where cr.contact_id = ${contacts.id})`,
+    })
+    .from(contacts)
+    .leftJoin(companies, eq(companies.id, contacts.companyId))
+    .where(or(
+      await companyInPermissionScope(contacts.companyId, session, "customers"),
+      await companyInPermissionScope(contacts.companyId, session, "suppliers"),
+    ))
+    .orderBy(contacts.displayName);
+
+  return rows.map((r) => ({ ...r, documents: Number(r.documents), cheques: Number(r.cheques) }));
+}
+
+export async function mergeContacts(
+  _prevState: ActionResult | undefined,
+  formData: FormData,
+): Promise<ActionResult> {
+  return guard("Couldn't merge the contacts.", async () => {
+    const session = await getLiveSession();
+    requireContactPermission(session, "edit");
+
+    const survivorId = String(formData.get("survivorId") ?? "");
+    const displayName = String(formData.get("displayName") ?? "").trim();
+    let contactIds: string[];
+    try {
+      contactIds = JSON.parse(String(formData.get("contactIds") ?? "[]"));
+    } catch {
+      return { error: "Nothing to merge." };
+    }
+
+    if (contactIds.length < 2) return { error: "Pick at least two contacts to merge." };
+    if (!survivorId || !contactIds.includes(survivorId)) return { error: "Pick which contact survives the merge." };
+    if (!displayName) return { error: "The surviving contact needs a name." };
+
+    const rows = await db
+      .select({ id: contacts.id, companyId: contacts.companyId })
+      .from(contacts)
+      .where(and(inArray(contacts.id, contactIds), await companyInScope(contacts.companyId)));
+    if (rows.length !== contactIds.length) return { error: "One of these contacts no longer exists, or isn't in your scope." };
+    if (new Set(rows.map((r) => r.companyId)).size > 1) return { error: "These contacts belong to different scopes — merge within one company or global." };
+    const companyId = rows[0]?.companyId;
+    if (companyId) {
+      requireContactPermission(session, "edit", companyId);
+      requireContactPermission(session, "delete", companyId);
+    }
+
+    const loserIds = contactIds.filter((id) => id !== survivorId);
+
+    await db.transaction(async (tx) => {
+      await tx.update(documents).set({ contactId: survivorId }).where(and(inArray(documents.contactId, loserIds), ne(documents.contactId, survivorId)));
+      await tx.update(chequeRegister).set({ contactId: survivorId }).where(and(inArray(chequeRegister.contactId, loserIds), ne(chequeRegister.contactId, survivorId)));
+      await tx.delete(contacts).where(and(inArray(contacts.id, loserIds), ne(contacts.id, survivorId)));
+      await tx.update(contacts).set({ displayName }).where(eq(contacts.id, survivorId));
+    });
+
+    invalidateLookups(CACHE.contacts);
+    revalidatePath("/contacts");
+    revalidatePath("/ledger");
+    await recordAudit({
+      action: "merge",
+      entity: "contact",
+      entityId: survivorId,
+      summary: displayName,
+      companyId,
+      detail: `${loserIds.length} duplicate(s) folded in`,
+    });
     return { success: true };
   });
 }

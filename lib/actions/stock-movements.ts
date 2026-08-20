@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { companies, contacts, documentLines, documentTypes, documents, inventoryTransactions, items, locations, units, users } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope } from "@/lib/auth/scope";
 
 // Every movement of stock, in and out, in the order it happened. This page used
 // to be four rows invented in lib/modules.ts; the data behind it has existed all
@@ -59,7 +59,7 @@ export async function listStockMovements(filters: MovementFilters = {}): Promise
       date: documents.documentDate,
       itemName: items.name,
       sku: items.sku,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       location: locations.name,
       type: documentTypes.name,
       typeCode: documentTypes.code,
@@ -84,7 +84,7 @@ export async function listStockMovements(filters: MovementFilters = {}): Promise
     .leftJoin(users, eq(users.id, documents.createdBy))
     .where(
       and(
-        await companyInScope(inventoryTransactions.companyId),
+        await companyInPermissionScope(inventoryTransactions.companyId, session, "stock"),
         // Narrows within the scope, never widens it.
         filters.company ? eq(inventoryTransactions.companyId, filters.company) : undefined,
         filters.location ? eq(documentLines.locationId, filters.location) : undefined,
@@ -135,7 +135,7 @@ export async function movementTypes(): Promise<{ id: string; name: string }[]> {
     .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
     .innerJoin(documents, eq(documents.id, documentLines.documentId))
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(await companyInScope(inventoryTransactions.companyId))
+    .where(await companyInPermissionScope(inventoryTransactions.companyId, session, "stock"))
     .orderBy(documentTypes.name);
 
   return rows.map((r) => ({ id: r.code, name: r.name }));
@@ -166,7 +166,7 @@ export async function itemStockCard(itemId: string, locationId?: string) {
       and(
         eq(documentLines.itemId, itemId),
         locationId ? eq(documentLines.locationId, locationId) : undefined,
-        await companyInScope(inventoryTransactions.companyId),
+        await companyInPermissionScope(inventoryTransactions.companyId, session, "stock"),
       ),
     )
     .orderBy(documents.documentDate, inventoryTransactions.createdAt);

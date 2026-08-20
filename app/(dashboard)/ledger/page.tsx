@@ -2,7 +2,6 @@ import { listLedgerBalances } from "@/lib/actions/ledger";
 import { INVOICE_COMPANY_NAME } from "@/lib/invoice-pdf";
 import { getCompanies, getContactOptions } from "@/lib/queries/lookups";
 import { LedgerManager } from "@/components/modules/LedgerManager";
-import { StockFilter } from "@/components/modules/StockFilters";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ company?: string }> }) {
   const [{ company }, balances, companyRows, contactRows] = await Promise.all([
@@ -30,9 +29,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
         taxNumber: outward?.taxNumber ?? null,
       }}
       contactOptions={contactRows.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" }))}
-      // key: this element crosses into a children array inside LedgerManager,
-      // and React can't infer a key for an element built out here.
-      filter={<StockFilter key="company-filter" param="company" allLabel="All Companies" options={companyRows.map((c) => ({ id: c.id, name: c.name }))} />}
+      filter={undefined}
     />
   );
 }

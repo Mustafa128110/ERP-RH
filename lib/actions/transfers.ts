@@ -4,17 +4,18 @@ import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { bankAccounts, cashAccounts, chequeRegister, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
-import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
-import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { adjustSettlementBalance } from "@/lib/actions/settlement";
+import { ensureDocumentType, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
+import { adjustSettlementBalancesBatch } from "@/lib/actions/settlement";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { linkCheque } from "@/lib/actions/cheque-link";
+import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 
 // Moving money between the company's own accounts — cash drawer to bank, bank to
 // cash, one drawer to another. No contact, nothing owed either way, so it writes
@@ -26,7 +27,7 @@ import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/
 // tied together through documents.reason, the same way an inter-company sale
 // pairs its invoice with its purchase.
 //
-// ponytail: reason as the join key, matching lib/actions/inter-company.ts. A real
+// Design note: reason as the join key, matching lib/actions/inter-company.ts. A real
 // linked_document_id column would serve both, if a third thing ever needs it.
 const TRANSFER_REASON = "Cash Transfer";
 const outReason = (key: string) => `${TRANSFER_REASON} out ${key}`;
@@ -68,7 +69,7 @@ export async function listCashTransfers(): Promise<CashTransferRow[]> {
       reason: documents.reason,
       documentDate: documents.documentDate,
       amount: documents.grandTotal,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       // Bank, branch and account title, as everywhere else an account is named.
       bankAccount: sql<string>`${sql.raw(BANK_ACCOUNT_LABEL_SQL())}`,
       cashAccount: cashAccounts.name,
@@ -78,7 +79,7 @@ export async function listCashTransfers(): Promise<CashTransferRow[]> {
     .innerJoin(companies, eq(companies.id, documents.companyId))
     .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
     .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), await companyInScope(documents.companyId)))
+    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), eq(documents.status, "posted"), await companyInPermissionScope(documents.companyId, session, "accounts")))
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
   // "Cash Transfer <side> <key>" — the key pairs the two halves, the side says
@@ -114,9 +115,7 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
   return guard(
     "Couldn't record the transfer.",
     async () => {
-      const session = await getSession();
-      // Moves money between accounts, so it needs the permission that edits them.
-      requirePermission(session, "accounts", "edit");
+      const session = await getLiveSession();
 
       const companyId = String(formData.get("companyId") ?? "");
       const documentDate = String(formData.get("documentDate") ?? "");
@@ -129,6 +128,10 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
 
       if (!companyId) return { error: "Company is required." };
       if (!documentDate) return { error: "Date is required." };
+      // Moves money between accounts, so it needs the permission that edits
+      // them — scoped to the submitted company (membership + per-company
+      // permission).
+      requirePermission(session, "accounts", "edit", { companyId });
       if (!fromValue || !toValue) return { error: "Pick the account the money leaves and the one it lands in." };
       if (fromValue === toValue) return { error: "Pick two different accounts." };
       if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter an amount greater than zero." };
@@ -154,40 +157,49 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       await db.transaction(async (tx) => {
         // First statement: claim the operation id, or abort as a duplicate.
         if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
-        for (const side of [
+        const numbers = await nextDocumentNumberRange(documentType.series, 2, tx);
+        const sides = [
           { reason: outReason(key), account: from, direction: "out" as const },
           { reason: inReason(key), account: to, direction: "in" as const },
-        ]) {
-          const number = await nextDocumentNumber(documentType.series, tx);
-          const [doc] = await tx
-            .insert(documents)
-            .values({
-              companyId,
-              documentTypeId: documentType.id,
-              number,
-              status: "posted",
-              documentDate,
-              subtotal: total,
-              grandTotal: total,
-              reason: side.reason,
-              bankAccountId: side.account.bankAccountId,
-              cashAccountId: side.account.cashAccountId,
-              createdBy: session.userId,
-            })
-            .returning({ id: documents.id });
+        ].map((side, index) => ({ ...side, number: numbers[index]!, documentId: crypto.randomUUID() }));
 
-          await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
-          await adjustSettlementBalance(tx, side.direction, total, side.account.bankAccountId, side.account.cashAccountId, side.account.chequeId, 1);
+        await tx.insert(documents).values(
+          sides.map((side) => ({
+            id: side.documentId,
+            companyId,
+            documentTypeId: documentType.id,
+            number: side.number,
+            status: "posted" as const,
+            documentDate,
+            subtotal: total,
+            grandTotal: total,
+            reason: side.reason,
+            bankAccountId: side.account.bankAccountId,
+            cashAccountId: side.account.cashAccountId,
+            createdBy: session.userId,
+          })),
+        );
+        await tx.insert(documentNumberLedger).values(
+          sides.map((side) => ({ companyId, documentTypeId: documentType.id, number: side.number, documentId: side.documentId })),
+        );
+        await adjustSettlementBalancesBatch(
+          tx,
+          sides.map((side) => ({
+            direction: side.direction,
+            amount: total,
+            bankAccountId: side.account.bankAccountId,
+            cashAccountId: side.account.cashAccountId,
+            chequeId: side.account.chequeId,
+            sign: 1,
+            companyId,
+          })),
+        );
 
-          // The cheque went out with the money: tied to the document it settled
-          // and marked spent, so it leaves the register's working list and
-          // can't be picked again for something else.
-          if (side.account.chequeId) {
-            await tx
-              .update(chequeRegister)
-              .set({ documentId: doc.id, status: chequeStatusAfterSettling(side.direction) })
-              .where(eq(chequeRegister.id, side.account.chequeId));
-          }
+        // Only the outgoing side can be a cheque. The guarded link consumes it
+        // after both documents and balance movements have been prepared.
+        const chequeSide = sides.find((side) => side.account.chequeId);
+        if (chequeSide?.account.chequeId) {
+          await linkCheque(tx, chequeSide.account.chequeId, chequeSide.documentId, chequeSide.direction, companyId);
         }
       });
 
@@ -202,30 +214,49 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
 }
 
 export async function deleteCashTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete — one of these documents is still referenced elsewhere.", async () => {
-    const session = await getSession();
+  return guard("Couldn't cancel this transfer.", async () => {
+    const session = await getLiveSession();
     requirePermission(session, "accounts", "delete");
 
     const documentId = String(formData.get("documentId") ?? "");
-    const [outDoc] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1);
+    // Read scoped: a guessed id from an unauthorized company is "not found".
+    const [outDoc] = await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), await companyInScope(documents.companyId)))
+      .limit(1);
     if (!outDoc?.reason?.startsWith(`${TRANSFER_REASON} `)) return { error: "Transfer not found." };
+    requirePermission(session, "accounts", "delete", { companyId: outDoc.companyId });
 
     const key = outDoc.reason.split(" ")[3];
-    const [inDoc] = await db.select().from(documents).where(eq(documents.reason, inReason(key))).limit(1);
+    const [inDoc] = await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.reason, inReason(key)), eq(documents.status, "posted"), await companyInScope(documents.companyId)))
+      .limit(1);
     if (!inDoc) return { error: "The other half of this transfer is missing — delete each document on its own." };
 
+    let changed = false;
     await db.transaction(async (tx) => {
-      // Put the money back exactly where it was: the opposite sign on both sides.
-      await adjustSettlementBalance(tx, "out", outDoc.grandTotal, outDoc.bankAccountId, outDoc.cashAccountId, null, -1);
-      await adjustSettlementBalance(tx, "in", inDoc.grandTotal, inDoc.bankAccountId, inDoc.cashAccountId, null, -1);
-      // No lines and no ledger rows to clear — a transfer writes neither.
-      await tx.delete(documents).where(inArray(documents.id, [outDoc.id, inDoc.id]));
+      const ids = [outDoc.id, inDoc.id];
+      const locked = await tx.select({ id: documents.id }).from(documents).where(and(inArray(documents.id, ids), eq(documents.status, "posted"))).for("update");
+      if (locked.length !== 2) return;
+      const [linkedCheque] = await tx.select({ id: chequeRegister.id }).from(chequeRegister).where(inArray(chequeRegister.documentId, ids)).limit(1).for("update");
+      // Put both sides back in one set-based settlement statement.
+      await adjustSettlementBalancesBatch(tx, [
+        { direction: "out", amount: outDoc.grandTotal, bankAccountId: outDoc.bankAccountId, cashAccountId: outDoc.cashAccountId, chequeId: linkedCheque?.id ?? null, sign: -1, companyId: outDoc.companyId },
+        { direction: "in", amount: inDoc.grandTotal, bankAccountId: inDoc.bankAccountId, cashAccountId: inDoc.cashAccountId, chequeId: null, sign: -1, companyId: inDoc.companyId },
+      ]);
+      if (linkedCheque) await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, linkedCheque.id));
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(inArray(documents.id, ids));
+      changed = true;
     });
+    if (!changed) return { error: "Transfer not found — it may already be cancelled." };
 
     invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
     revalidatePath("/accounts");
     revalidatePath("/dashboard");
-    await recordAudit({ action: "delete", entity: "cash transfer", entityId: outDoc.id, summary: outDoc.number, companyId: outDoc.companyId });
+    await recordAudit({ action: "cancel", entity: "cash transfer", entityId: outDoc.id, summary: outDoc.number, companyId: outDoc.companyId });
     return { success: true };
   });
 }

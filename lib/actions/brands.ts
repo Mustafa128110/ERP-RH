@@ -4,15 +4,15 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { getLiveSession, getSession } from "@/lib/auth/session";
+import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 
 export async function listBrands() {
   const session = await getSession();
-  requirePermission(session, "brands", "view");
+  requireGlobalPermission(session, "brands", "view");
   return db.select().from(brands);
 }
 
@@ -28,8 +28,8 @@ export interface BrandBatchRow {
 
 export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateResult<{ id: string; name: string }>> {
   return guard("Couldn't save the brands.", async () => {
-    const session = await getSession();
-    requirePermission(session, "brands", "create");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "brands", "create");
 
     const valid = rows.filter((r) => r.name.trim());
     if (valid.length === 0) return { error: "Add at least one brand with a name." };
@@ -44,8 +44,8 @@ export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateRe
 
 export async function updateBrand(brandId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the brand.", async () => {
-    const session = await getSession();
-    requirePermission(session, "brands", "edit");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "brands", "edit");
 
     const values = readBrandForm(formData);
     if (!values.name) return { error: "Name is required." };
@@ -60,8 +60,8 @@ export async function updateBrand(brandId: string, _prevState: ActionResult | un
 
 export async function deleteBrand(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this brand is still referenced by items.", async () => {
-    const session = await getSession();
-    requirePermission(session, "brands", "delete");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "brands", "delete");
 
     const brandId = String(formData.get("brandId") ?? "");
     await db.delete(brands).where(eq(brands.id, brandId));

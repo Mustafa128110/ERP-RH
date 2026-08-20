@@ -154,7 +154,7 @@ export function ExpenseBatchAddDialog({
       initialRows={1}
       autoAppend
       draftKey={userId ? `expense-batch:${userId}` : "expense-batch"}
-      headers={["Category", "Amount", "Settle via", "Account", "Company", "Note"]}
+      headers={["Company", "Category", "Amount", "Settle via", "Account", "Note"]}
       toolbar={
         <label className="flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Date</span>
@@ -177,66 +177,6 @@ export function ExpenseBatchAddDialog({
       }}
       renderRow={(row, _index, update) => (
         <>
-          {/* 1. Category */}
-          <td className={batchCellClass}>
-            <ComboBox
-              value={row.expenseCategoryText}
-              options={categoryOptions.filter((c) => c.companyId === row.companyId)}
-              placeholder="Fuel, Rent…"
-              className={batchInputClass}
-              onChange={(name) =>
-                update({
-                  expenseCategoryText: name,
-                  expenseCategoryId: categoryOptions.find((c) => c.companyId === row.companyId && c.name === name)?.id ?? "",
-                })
-              }
-            />
-          </td>
-          {/* 2. Amount */}
-          <td className={batchCellClass}>
-            <input type="number" step="0.1" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />
-          </td>
-          {/* 3. Settle via */}
-          <td className={batchCellClass}>
-            {/* Changing settle-via clears the picked account, since the old id
-                belongs to a different list. */}
-            <select
-              value={row.settlementType}
-              onChange={(e) => update({ settlementType: e.target.value as SettlementType, settlementId: "" })}
-              className={batchInputClass}
-            >
-              <option value="account">Account</option>
-              <option value="cash">Cash</option>
-              <option value="cheque">Cheque</option>
-            </select>
-          </td>
-          {/* 4. Account */}
-          <td className={batchCellClass}>
-            {/* Settling by cheque needs the cheque to exist in the register, so
-                a cheque row gets a "+" that puts one there without leaving the
-                batch half-entered. */}
-            <div className="flex gap-1.5">
-              <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
-                <option value="">—</option>
-                {settlementList(row.settlementType, row.companyId).map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
-              {row.settlementType === "cheque" && (
-                <ChequeQuickAddButton
-                  companyOptions={companyOptions}
-                  {...chequeDialogOptions(contactOptions, bankAccountOptions)}
-                  onCreated={(created) => {
-                    setChequeOpts((previous) => [...created, ...previous]);
-                    if (created[0]?.companyId === row.companyId) update({ settlementId: created[0].id });
-                  }}
-                />
-              )}
-            </div>
-          </td>
-          {/* 5. Company */}
           <td className={batchCellClass}>
             <select
               value={row.companyId}
@@ -264,7 +204,61 @@ export function ExpenseBatchAddDialog({
               ))}
             </select>
           </td>
-          {/* 6. Note */}
+          <td className={batchCellClass}>
+            <ComboBox
+              value={row.expenseCategoryText}
+              options={categoryOptions.filter((c) => c.companyId === row.companyId)}
+              placeholder="Fuel, Rent…"
+              className={batchInputClass}
+              onChange={(name) =>
+                update({
+                  expenseCategoryText: name,
+                  expenseCategoryId: categoryOptions.find((c) => c.companyId === row.companyId && c.name === name)?.id ?? "",
+                })
+              }
+            />
+          </td>
+          <td className={batchCellClass}>
+            <input type="number" step="0.1" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className={batchInputClass} />
+          </td>
+          <td className={batchCellClass}>
+            {/* Changing settle-via clears the picked account, since the old id
+                belongs to a different list. */}
+            <select
+              value={row.settlementType}
+              onChange={(e) => update({ settlementType: e.target.value as SettlementType, settlementId: "" })}
+              className={batchInputClass}
+            >
+              <option value="account">Account</option>
+              <option value="cash">Cash</option>
+              <option value="cheque">Cheque</option>
+            </select>
+          </td>
+          <td className={batchCellClass}>
+            {/* Settling by cheque needs the cheque to exist in the register, so
+                a cheque row gets a "+" that puts one there without leaving the
+                batch half-entered. */}
+            <div className="flex gap-1.5">
+              <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
+                <option value="">—</option>
+                {settlementList(row.settlementType, row.companyId).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              {row.settlementType === "cheque" && (
+                <ChequeQuickAddButton
+                  companyOptions={companyOptions}
+                  {...chequeDialogOptions(contactOptions, bankAccountOptions)}
+                  onCreated={(created) => {
+                    setChequeOpts((previous) => [...created, ...previous]);
+                    if (created[0]?.companyId === row.companyId) update({ settlementId: created[0].id });
+                  }}
+                />
+              )}
+            </div>
+          </td>
           <td className={batchCellClass}>
             <input value={row.notes} onChange={(e) => update({ notes: e.target.value })} className={batchInputClass} />
           </td>

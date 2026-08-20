@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -10,10 +9,11 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
-import { ExpenseEditForm, DeleteExpenseButton, ExpenseBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/ExpenseForm";
+import { ExpenseEditForm, DeleteExpenseButton, ExpenseBatchAddDialog, type BankOption, type CashOption, type ChequeOption } from "@/components/modules/ExpenseForm";
 import { listChequesForExpenses } from "@/lib/actions/expenses";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
+import { useCachedOptions } from "@/lib/client-cache";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
@@ -33,6 +33,8 @@ interface Expense {
   notes: string | null;
   attachmentUrl: string | null;
   createdByName: string | null;
+  documentId: string | null;
+  status: "draft" | "pending" | "approved" | "posted" | "cancelled";
 }
 
 type ModalState =
@@ -88,9 +90,9 @@ const buildColumns = (byRowId: Map<string, DayGroup<Expense>>): ColumnDef[] => [
       );
     },
   },
-  { key: "company", label: "Company" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "method", label: "Method" },
+  { key: "company", label: "Company" },
   { key: "user", label: "Created By" },
 ];
 
@@ -98,6 +100,7 @@ export function ExpenseManager({
   expenses,
   filtered,
   companyOptions,
+  companyCodeMap,
   categoryOptions,
   contactOptions,
   bankAccountOptions,
@@ -109,23 +112,32 @@ export function ExpenseManager({
   // Whether any filter is on, so an empty list can say why it's empty.
   filtered?: boolean;
   companyOptions: Option[];
+  companyCodeMap?: Map<string, string>;
   categoryOptions: ScopedOption[];
   // Only used by the cheque quick-add, which files the cheque against a party.
   contactOptions: ScopedOption[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   // The filter controls, built by the page — they drive query params, so the
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
 }) {
+  // Seed the client reference cache from the live options (so an offline batch
+  // dialog can still fill its pickers) and fall back to the cached copy when the
+  // page rendered empty. Live always wins when present.
+  const cachedCompany = useCachedOptions("companies", companyOptions);
+  const cachedCategories = useCachedOptions("expenseCategories", categoryOptions);
+  const cachedContacts = useCachedOptions("contacts", contactOptions);
+  const cachedBank = useCachedOptions("bankAccounts", bankAccountOptions);
+  const cachedCash = useCachedOptions("cashAccounts", cashAccountOptions);
+  const cachedCheques = useCachedOptions("cheques", chequeOptions);
+
   const [modal, setModal] = useState<ModalState>(null);
-  const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
-  const router = useRouter();
+  const [editChequeOptions, setEditChequeOptions] = useState<ChequeOption[]>(chequeOptions);
 
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   // A day's several expenses under one category read as one line, so the list
@@ -133,7 +145,7 @@ export function ExpenseManager({
   // their amounts together.
   const groups = groupSameDay(
     expenses,
-    (e) => `${e.companyId}|${e.expenseCategoryId}|${e.expenseDate}`,
+    (e) => `${e.companyId}|${e.expenseCategoryId}|${e.expenseDate}|${e.status}`,
     (e) => e.amount,
   );
   const byRowId = new Map(groups.map((g) => [g.key, g]));
@@ -149,12 +161,14 @@ export function ExpenseManager({
       id: key,
       date: formatDate(first.expenseDate),
       category: members.length > 1 ? `${first.category} (${members.length})` : first.category,
-      company: first.company,
+      company: companyCodeMap?.get(first.companyId) ?? first.company,
       amount: money(total),
       // One method named, or the fact that they differ — naming the first would
       // claim the rest were paid the same way.
       method: methods.size === 1 ? [...methods][0] : "Mixed",
       user: users.size === 1 ? [...users][0] : "Several",
+      status: first.status === "cancelled" ? "Cancelled" : "Posted",
+      documentId: first.documentId,
       // Not columns — read on hover. Carried on the row anyway so the table's
       // search box finds an expense by what was written on it, and so a note on
       // any member of a group still matches the line it folded into.
@@ -194,7 +208,10 @@ export function ExpenseManager({
         onRowClick={(row) => {
           const group = byRowId.get(String(row.id));
           if (!group) return;
-          if (group.members.length === 1) openEdit(group.members[0]);
+          if (group.members.length === 1) {
+            const expense = group.members[0];
+            if (expense.status === "posted" && !expense.documentId) openEdit(expense);
+          }
           else setModal({ kind: "choose", group });
         }}
         emptyMessage={filtered ? "No expenses match these filters." : "No expenses yet."}
@@ -203,12 +220,12 @@ export function ExpenseManager({
 
       {modal?.kind === "batch" && (
         <ExpenseBatchAddDialog
-          companyOptions={companyOptions}
-          categoryOptions={categoryOptions}
-          contactOptions={contactOptions}
-          bankAccountOptions={bankAccountOptions}
-          cashAccountOptions={cashAccountOptions}
-          chequeOptions={chequeOptions}
+          companyOptions={cachedCompany.value}
+          categoryOptions={cachedCategories.value}
+          contactOptions={cachedContacts.value}
+          bankAccountOptions={cachedBank.value}
+          cashAccountOptions={cachedCash.value}
+          chequeOptions={cachedCheques.value}
           onClose={() => setModal(null)}
           onDone={close}
         />
@@ -224,10 +241,10 @@ export function ExpenseManager({
               <li key={e.id}>
                 <button
                   type="button"
-                  onClick={() => openEdit(e)}
+                  onClick={() => e.status === "posted" && !e.documentId && openEdit(e)}
                   className="flex w-full items-baseline justify-between gap-4 border-b border-sand px-1 py-3 text-left hover:bg-brass-100"
                 >
-                  <span className="min-w-0 truncate text-ink">{e.notes ?? e.paymentMethod ?? "—"}</span>
+                  <span className="min-w-0 truncate text-ink">{e.notes ?? e.paymentMethod ?? "—"}{e.documentId ? " · linked document" : ""}</span>
                   <span className="shrink-0 tabular-nums text-ink">{money(e.amount)}</span>
                 </button>
               </li>

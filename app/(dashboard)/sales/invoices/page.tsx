@@ -30,8 +30,8 @@ export default async function Page({
   const filtered = Boolean(status) || Object.values(listFilters).some(Boolean);
 
   const invoices = sales
-    .map((s) => ({ ...s, balance: Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }))
-    .filter((s) => (status === "outstanding" ? s.balance > 0 : status === "paid" ? s.balance <= 0 : true))
+    .map((s) => ({ ...s, balance: s.status === "cancelled" ? 0 : Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }))
+    .filter((s) => (status === "outstanding" ? s.status === "posted" && s.balance > 0 : status === "paid" ? s.status === "posted" && s.balance <= 0 : true))
     // Outstanding first and oldest of those at the top — the one that has been
     // waiting longest is the one to chase. Settled invoices sit below, newest
     // first, where they're only ever looked up by number.
@@ -44,23 +44,31 @@ export default async function Page({
 
   const outstanding = invoices.reduce((sum, s) => sum + Math.max(s.balance, 0), 0);
 
+  // Items per invoice for the customer hover panel.
+  const itemsBySaleId = new Map(
+    sales.map((s) => [
+      s.id,
+      s.items.map((it) => ({
+        name: it.itemName,
+        qty: `${Number(it.quantity)}${it.unitSymbol ? ' ' + it.unitSymbol : ''}`.trim(),
+        rate: money(it.unitPrice),
+      })),
+    ]),
+  );
+
   const rows: Row[] = invoices.map((s) => ({
     id: s.id,
     number: s.number,
     customer: s.customer ?? "—",
+    company: s.company ?? "—",
     saleType: saleTypeLabel(s.saleType),
     date: formatDate(s.documentDate),
     age: s.balance > 0 ? `${s.age}d` : "—",
     total: money(s.grandTotal),
     paid: money(s.paidAmount),
     balance: s.balance > 0 ? money(s.balance) : "—",
-    status: s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
+    status: s.status === "cancelled" ? "Cancelled" : s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
   }));
-
-  // listSales already returns each invoice's lines, so the hover panel on the
-  // number costs no extra query — they just can't ride on a Row, which holds
-  // primitives only.
-  const itemsById = Object.fromEntries(invoices.map((s) => [s.id, s.items]));
 
   return (
     <InvoiceManager
@@ -69,7 +77,7 @@ export default async function Page({
       outstanding={outstanding}
       filtered={filtered}
       formOptions={formOptions}
-      itemsById={itemsById}
+      itemsBySaleId={itemsBySaleId}
     />
   );
 }

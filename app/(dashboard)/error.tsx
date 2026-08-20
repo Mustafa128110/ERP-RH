@@ -18,12 +18,11 @@ export default function DashboardError({ error, reset }: { error: Error & { dige
 
   useEffect(() => {
     console.error(error);
-    // If the service worker cached this page's last response — a 200 error
-    // page looks like a success — tell it to drop the poisoned copy, so the
-    // next load goes back to the network instead of serving the error forever.
+    // Clear old cache generations left by earlier builds. Current service
+    // workers never cache authenticated pages or RSC payloads.
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.getRegistration().then((registration) => {
-        registration?.active?.postMessage({ type: "erp:clear-page", url: window.location.href });
+        registration?.active?.postMessage({ type: "erp:clear-cache" });
       });
     }
   }, [error]);

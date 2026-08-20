@@ -4,6 +4,7 @@ import { useState } from "react";
 import { exportSnapshot } from "@/lib/actions/backups";
 import type { SnapshotTable } from "@/lib/backup-constants";
 import { secondaryActionClass } from "@/components/ui/form-styles";
+import { toCsv } from "@/lib/csv";
 
 // Excel reads a CSV with no BOM as ANSI and mangles anything non-Latin — which
 // here means every Urdu product name. Same reason CsvActions writes one.
@@ -16,11 +17,10 @@ function download(text: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function toCsv(rows: Record<string, string>[]): string {
+function recordsToCsv(rows: Record<string, string>[]): string {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0]);
-  const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  return [headers.map(cell).join(","), ...rows.map((r) => headers.map((h) => cell(r[h] ?? "")).join(","))].join("\n");
+  return toCsv([headers, ...rows.map((row) => headers.map((header) => row[header] ?? ""))]);
 }
 
 const stamp = () => new Date().toLocaleDateString("en-CA");
@@ -36,7 +36,7 @@ export function SnapshotExport({ tables, sizes }: { tables: SnapshotTable[]; siz
       const result = await exportSnapshot(key);
       if (result.error) return setMessage(result.error);
       if (!result.rows || result.rows.length === 0) return setMessage(`${label}: nothing to export yet.`);
-      download(toCsv(result.rows), `${key}-${stamp()}.csv`);
+      download(recordsToCsv(result.rows), `${key}-${stamp()}.csv`);
     } catch {
       setMessage(`${label}: the export failed. Try again — nothing was changed.`);
     } finally {

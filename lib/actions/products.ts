@@ -15,12 +15,12 @@ import {
   unitConversions,
   units,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, getBrands, getCategories, getCompanies, getLocations, getSuppliers, getUnits, invalidateLookups } from "@/lib/queries/lookups";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
-import { SKU_SCOPE, formatSku, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
+import { SKU_SCOPE, formatSku, nextSequenceRange, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
 import { ensureDocumentType } from "@/lib/actions/document-numbering";
 import { createStockPurchase } from "@/lib/actions/purchases";
 import { createStockAdjustment } from "@/lib/actions/stock-adjustments";
@@ -31,6 +31,7 @@ import { purchaseRowError, recordsQty, writesDocument } from "@/lib/product-edit
 import { queryProductRates, type ProductRateRow } from "@/lib/queries/products";
 import { guard, describeDbError, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { cachedPageRead } from "@/lib/read-cache";
 
 export type { ProductRateRow } from "@/lib/queries/products";
 
@@ -40,7 +41,10 @@ export type { ProductRateRow } from "@/lib/queries/products";
 export async function listProductsWithRates(): Promise<ProductRateRow[]> {
   const session = await getSession();
   requirePermission(session, "products", "view");
-  return queryProductRates(await getScopeCompanyIds());
+  const companyIds = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("products.view") || session.permissionsByCompany.get(companyId)?.has("products.view"),
+  );
+  return cachedPageRead(`${session.userId}:products:${[...companyIds].sort().join(",")}`, () => queryProductRates(companyIds));
 }
 
 // The SKU the batch dialog shows as each row's placeholder before you save. A
@@ -78,40 +82,53 @@ export async function createProductsBatch(
   return guard(
     "Couldn't save the products.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "products", "create");
 
       // SKU is no longer required to submit a row — a blank one gets the next RH-
       // number, so a batch can be pasted in with just names.
       const valid = rows.filter((r) => r.name.trim() && r.companyId);
       if (valid.length === 0) return { error: "Add at least one product with a name and company." };
+      // Every company the batch files under must be one the user belongs to and
+      // can create products in — a row carrying a forged or stale companyId is
+      // refused rather than filed into another set of books.
+      for (const companyId of new Set(valid.map((r) => r.companyId))) {
+        requirePermission(session, "products", "create", { companyId });
+      }
 
       const created = await db.transaction(async (tx) => {
-        // Distinct typed names resolved once each, not once per row: a price
-        // list with four hundred rows under one brand used to do four hundred
-        // lookups for that brand, each its own round trip inside the
-        // transaction. That is what made a long CSV import crawl.
-        const categoryIds = new Map<string, string | null>();
-        const brandIds = new Map<string, string | null>();
-
-        const withSkus = [];
-        for (const r of valid) {
-          // A typed-but-unmatched category or brand becomes the record, inside
-          // the same transaction as the product — a failed batch leaves no
-          // orphan category behind.
-          const { categoryName, brandName, ...fields } = r;
-          const categoryKey = r.categoryId ?? `name:${(categoryName ?? "").trim()}`;
-          const brandKey = r.brandId ?? `name:${(brandName ?? "").trim()}`;
-          if (!categoryIds.has(categoryKey)) categoryIds.set(categoryKey, await resolveCategoryId(tx, r.categoryId, categoryName ?? ""));
-          if (!brandIds.has(brandKey)) brandIds.set(brandKey, await resolveBrandId(tx, r.brandId, brandName ?? ""));
-
-          withSkus.push({
-            ...fields,
-            categoryId: categoryIds.get(categoryKey)!,
-            brandId: brandIds.get(brandKey)!,
-            sku: r.sku.trim() || formatSku(await nextSequenceValue(SKU_SCOPE, tx)),
-          });
-        }
+        // Resolve every distinct typed category/brand and reserve every blank
+        // SKU in a fixed number of statements. A 400-row paste now has the same
+        // round-trip count as a two-row batch.
+        const categoryNames = [...new Set(valid.filter((row) => !row.categoryId).map((row) => row.categoryName?.trim()).filter((name): name is string => Boolean(name)))];
+        const brandNames = [...new Set(valid.filter((row) => !row.brandId).map((row) => row.brandName?.trim()).filter((name): name is string => Boolean(name)))];
+        const blankSkuCount = valid.filter((row) => !row.sku.trim()).length;
+        const [knownCategories, knownBrands, skuValues] = await Promise.all([
+          categoryNames.length ? tx.select({ id: categories.id, name: categories.name }).from(categories).where(inArray(categories.name, categoryNames)) : Promise.resolve([]),
+          brandNames.length ? tx.select({ id: brands.id, name: brands.name }).from(brands).where(inArray(brands.name, brandNames)) : Promise.resolve([]),
+          nextSequenceRange(SKU_SCOPE, blankSkuCount, tx),
+        ]);
+        const categoryByName = new Map(knownCategories.map((row) => [row.name, row.id]));
+        const brandByName = new Map(knownBrands.map((row) => [row.name, row.id]));
+        const missingCategories = categoryNames.filter((name) => !categoryByName.has(name));
+        const missingBrands = brandNames.filter((name) => !brandByName.has(name));
+        const [insertedCategories, insertedBrands] = await Promise.all([
+          missingCategories.length
+            ? tx.insert(categories).values(missingCategories.map((name) => ({ name }))).onConflictDoUpdate({ target: categories.name, set: { name: sql`excluded.name` } }).returning({ id: categories.id, name: categories.name })
+            : Promise.resolve([]),
+          missingBrands.length
+            ? tx.insert(brands).values(missingBrands.map((name) => ({ name }))).onConflictDoUpdate({ target: brands.name, set: { name: sql`excluded.name` } }).returning({ id: brands.id, name: brands.name })
+            : Promise.resolve([]),
+        ]);
+        for (const row of insertedCategories) categoryByName.set(row.name, row.id);
+        for (const row of insertedBrands) brandByName.set(row.name, row.id);
+        let skuIndex = 0;
+        const withSkus = valid.map(({ categoryName, brandName, ...fields }) => ({
+          ...fields,
+          categoryId: fields.categoryId ?? categoryByName.get(categoryName?.trim() ?? "") ?? null,
+          brandId: fields.brandId ?? brandByName.get(brandName?.trim() ?? "") ?? null,
+          sku: fields.sku.trim() || formatSku(skuValues[skuIndex++]),
+        }));
         return tx.insert(items).values(withSkus).returning({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId });
       });
 
@@ -188,7 +205,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     .select({
       id: items.id,
       companyId: items.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       sku: items.sku,
       name: items.name,
       urduName: items.urduName,
@@ -203,7 +220,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     .innerJoin(companies, eq(companies.id, items.companyId))
     .leftJoin(categories, eq(categories.id, items.categoryId))
     .leftJoin(brands, eq(brands.id, items.brandId))
-    .where(and(inArray(items.id, itemIds), await companyInScope(items.companyId)))
+    .where(and(inArray(items.id, itemIds), await companyInPermissionScope(items.companyId, session, "products")))
     .orderBy(items.name);
   if (rows.length === 0) return empty;
 
@@ -212,7 +229,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
   // Same derivation as the stock list (lib/actions/stock.ts) — SUM(movement *
   // base_quantity) — grouped by location and unit rather than rolled up, because
   // that's the grain an adjustment is written at.
-  const stockRows = await db
+  const stockRowsPromise = db
     .select({
       itemId: documentLines.itemId,
       locationId: documentLines.locationId,
@@ -238,7 +255,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     ids.map((id) => sql`${id}`),
     sql`, `,
   );
-  const rateRows = await db.execute<{
+  const rateRowsPromise = db.execute<{
     id: string;
     purchase_rate_1: string | null;
     sales_rate: string | null;
@@ -266,13 +283,11 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       LIMIT 1
     ) c ON true
     WHERE rl.id IN (${idList})`);
-  const ratesById = new Map(rateRows.map((r) => [r.id, r]));
-
   // Who it was last bought from and in what unit. DISTINCT ON keeps the first
   // row per item under the ORDER BY, which is the newest line — the same "last
   // purchase wins" rule the rate columns follow. Stock receipts count alongside
   // purchase invoices: both are this item arriving.
-  const lastPurchaseRows = await db.execute<{
+  const lastPurchaseRowsPromise = db.execute<{
     item_id: string;
     contact_id: string | null;
     unit_id: string | null;
@@ -285,9 +300,23 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     WHERE dl.item_id IN (${idList})
       AND dt.code IN ('PURCHASE_INVOICE', 'STOCK_OPENING')
     ORDER BY dl.item_id, d.document_date DESC, dl.line_no DESC`);
-  const lastPurchaseById = new Map(lastPurchaseRows.map((r) => [r.item_id, r]));
-
-  const [supplierOpts, unitOpts, locationOpts] = await Promise.all([getSuppliers(), getUnits(), getLocations()]);
+  const [stockRows, rateRows, lastPurchaseRows, supplierOpts, unitOpts, locationOpts] = await Promise.all([
+    stockRowsPromise,
+    rateRowsPromise,
+    lastPurchaseRowsPromise,
+    getContactOptions(),
+    getUnits(),
+    getLocations(),
+  ]);
+  const ratesById = new Map(rateRows.map((row) => [row.id, row]));
+  const lastPurchaseById = new Map(lastPurchaseRows.map((row) => [row.item_id, row]));
+  const stockByItem = new Map<string, ProductEditRow["stock"]>();
+  for (const row of stockRows) {
+    if (!row.itemId || Number(row.onHand) === 0) continue;
+    const stock = stockByItem.get(row.itemId) ?? [];
+    stock.push({ ...row, onHand: Number(row.onHand) });
+    stockByItem.set(row.itemId, stock);
+  }
 
   return {
     rows: rows.map((r) => ({
@@ -300,7 +329,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       lastPurchaseDate: lastPurchaseById.get(r.id)?.document_date ?? null,
       purchaseRate: ratesById.get(r.id)?.purchase_rate_1 ?? null,
       salesRate: ratesById.get(r.id)?.sales_rate ?? null,
-      stock: stockRows.filter((s) => s.itemId === r.id).map((s) => ({ ...s, onHand: Number(s.onHand) })).filter((s) => s.onHand !== 0),
+      stock: stockByItem.get(r.id) ?? [],
     })),
     supplierOptions: supplierOpts.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId })),
     unitOptions: unitOpts.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name })),
@@ -375,7 +404,7 @@ export async function updateProductsBatch(
   rows: ProductEditInput[],
 ): Promise<ActionResult> {
   return guard("Couldn't save the products.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "products", "edit");
     // Rows added in the dialog create products, which is a different permission
     // from editing the ones already there.
@@ -418,10 +447,16 @@ export async function updateProductsBatch(
       (shared.mode === "purchase" && rows.some(recordsQty)) || (shared.mode === "adjust" && rows.some((r) => r.targetQty.trim() !== ""));
     if (movesStock && !shared.locationId) {
       return { error: shared.mode === "adjust" ? "Pick the location whose stock levels you're setting." : "Pick the location the goods arrived at." };
-    }
-    if (shared.mode === "adjust" && writesDocuments) {
-      if (!ADJUSTMENT_REASONS.includes(shared.reason as AdjustmentReason)) return { error: "Pick a reason for the stock adjustments." };
-    }
+    }      if (shared.mode === "adjust" && writesDocuments) {
+        if (!ADJUSTMENT_REASONS.includes(shared.reason as AdjustmentReason)) return { error: "Pick a reason for the stock adjustments." };
+      }
+
+      // Rows added in the dialog create products — products.create in each new
+      // product's company. Existing rows are already covered: saveProductRow
+      // updates only rows inside the user's company scope.
+      for (const companyId of new Set(rows.filter((r) => !r.id).map((r) => r.companyId).filter(Boolean))) {
+        requirePermission(session, "products", "create", { companyId });
+      }
 
     // The catalogue half, all rows in one transaction. Each row used to save in
     // two transactions of its own, which broke the promise made four paragraphs
@@ -429,7 +464,7 @@ export async function updateProductsBatch(
     // and the user had no way to tell which. One transaction means the grid either
     // lands whole or not at all, and the twenty rows cost one commit instead of
     // forty.
-    const scope = await companyInScope(items.companyId);
+    const scope = await companyInPermissionScope(items.companyId, session, "products", "edit");
     const saved: SavedProductRow[] = [];
     const rowFailure = await db
       .transaction(async (tx) => {
@@ -561,17 +596,13 @@ async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProdu
     groups.set(key, [...(groups.get(key) ?? []), s]);
   }
 
-  for (const group of groups.values()) {
+  const errors = await Promise.all([...groups.values()].map(async (group) => {
     const { companyId, row: first } = group[0];
     // Delegated to createStockPurchase rather than reimplemented: it is what
     // allocates the document number, writes the lines and posts the +1 inventory
     // movements. Whether any of it reaches the ledger is decided by the document
     // type's own affects* flags, which is why the type below is the whole of the
     // difference between this and a real purchase.
-    //
-    // ponytail: one round trip per document, in sequence. Fine for a grid
-    // someone filled in by hand; revisit if a batch ever runs to hundreds of
-    // suppliers.
     //
     // A stock receipt, not a purchase invoice. Editing a product is catalogue
     // work: it records what arrived and what it cost, so the quantity lands in
@@ -625,9 +656,10 @@ async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProdu
 
     const result = await createStockPurchase(undefined, purchaseForm);
     if (result.error) return `${rowLabel(group)} saved, but the stock wasn't recorded: ${result.error}`;
-  }
+    return null;
+  }));
 
-  return null;
+  return errors.find((error): error is string => Boolean(error)) ?? null;
 }
 
 // The mirror of the above: location, date and reason are shared by the whole
@@ -638,27 +670,36 @@ async function recordAdjustments(shared: ProductBatchEditShared, saved: SavedPro
   // fall through to "every location".
   const locationId = locationIdOrNull(shared.locationId);
 
+  const targets = saved.filter((row) => row.row.targetQty.trim() !== "");
+  if (targets.length === 0) return null;
+
+  // One grouped read for the whole grid. The previous loop issued one aggregate
+  // statement per product, so twenty corrected rows paid twenty remote round
+  // trips before the adjustment document could even be created.
+  const currentRows = await db
+    .select({
+      itemId: documentLines.itemId,
+      unitId: documentLines.unitId,
+      onHand: sql<string>`coalesce(sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity}), 0)`,
+    })
+    .from(inventoryTransactions)
+    .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
+    .where(
+      and(
+        inArray(documentLines.itemId, [...new Set(targets.map((row) => row.itemId))]),
+        locationId ? eq(documentLines.locationId, locationId) : isNull(documentLines.locationId),
+      ),
+    )
+    .groupBy(documentLines.itemId, documentLines.unitId);
+
+  const stockKey = (itemId: string, unitId: string | null) => `${itemId}:${unitId ?? "unassigned"}`;
+  const onHandByItemUnit = new Map(
+    currentRows.filter((row) => row.itemId).map((row) => [stockKey(row.itemId!, row.unitId), Number(row.onHand)]),
+  );
+
   const groups = new Map<string, { rows: SavedProductRow[]; lines: unknown[] }>();
-  for (const s of saved) {
-    if (s.row.targetQty.trim() === "") continue;
-
-    // The delta is measured here, not in the browser: the grid's "current" was
-    // read when it opened, and a sale posted in between would make a client-side
-    // subtraction adjust to the wrong number. Same grain as the adjustment line —
-    // this one location, this one unit.
-    const [current] = await db
-      .select({ onHand: sql<string>`coalesce(sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity}), 0)` })
-      .from(inventoryTransactions)
-      .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
-      .where(
-        and(
-          eq(documentLines.itemId, s.itemId),
-          locationId ? eq(documentLines.locationId, locationId) : isNull(documentLines.locationId),
-          s.unitId ? eq(documentLines.unitId, s.unitId) : isNull(documentLines.unitId),
-        ),
-      );
-
-    const delta = Number(s.row.targetQty) - Number(current?.onHand ?? 0);
+  for (const s of targets) {
+    const delta = Number(s.row.targetQty) - (onHandByItemUnit.get(stockKey(s.itemId, s.unitId)) ?? 0);
     // Already at the target — a line of zero would be a paper trail recording
     // that nothing happened.
     if (delta === 0) continue;
@@ -723,7 +764,7 @@ export async function listMergeCandidates(): Promise<MergeCandidate[]> {
       name: items.name,
       sku: items.sku,
       companyId: items.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       lines: sql<number>`(select count(*) from ${documentLines} dl where dl.item_id = ${items.id})`,
       movements: sql<number>`(
         select count(*) from inventory_transactions it
@@ -733,7 +774,7 @@ export async function listMergeCandidates(): Promise<MergeCandidate[]> {
     })
     .from(items)
     .innerJoin(companies, eq(companies.id, items.companyId))
-    .where(await companyInScope(items.companyId))
+    .where(await companyInPermissionScope(items.companyId, session, "products"))
     .orderBy(items.name);
 
   return rows.map((r) => ({ ...r, lines: Number(r.lines), movements: Number(r.movements) }));
@@ -743,7 +784,8 @@ export async function mergeProducts(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
-  const session = await getSession();
+  return guard("Couldn't merge the products.", async () => {
+  const session = await getLiveSession();
   // Rewrites one product and destroys the others, so it needs both.
   requirePermission(session, "products", "edit");
   requirePermission(session, "products", "delete");
@@ -762,11 +804,20 @@ export async function mergeProducts(
   if (!survivorId || !itemIds.includes(survivorId)) return { error: "Pick which product survives the merge." };
   if (!name || !sku) return { error: "The surviving product needs a name and a SKU." };
 
-  const rows = await db.select({ id: items.id, companyId: items.companyId }).from(items).where(inArray(items.id, itemIds));
-  if (rows.length !== itemIds.length) return { error: "One of these products no longer exists." };
+  // Read scoped: a guessed id from an unauthorized company is "not found", and
+  // the merge permission is checked against the merged company below.
+  const rows = await db
+    .select({ id: items.id, companyId: items.companyId })
+    .from(items)
+    .where(and(inArray(items.id, itemIds), await companyInScope(items.companyId)));
+  if (rows.length !== itemIds.length) return { error: "One of these products no longer exists, or isn't in your company scope." };
   // Catalogs are per company and so is stock. Folding an M52 row into a Royal
   // one would move stock between two sets of books without a document saying so.
   if (new Set(rows.map((r) => r.companyId)).size > 1) return { error: "These products belong to different companies — merge within one company." };
+  // The scoped read already proved membership; re-check both permissions for
+  // the company the merged product will live in.
+  requirePermission(session, "products", "edit", { companyId: rows[0].companyId });
+  requirePermission(session, "products", "delete", { companyId: rows[0].companyId });
 
   const loserIds = itemIds.filter((id) => id !== survivorId);
 
@@ -823,6 +874,7 @@ export async function mergeProducts(
     detail: `${loserIds.length} duplicate(s) folded in`,
   });
   return { success: true };
+  });
 }
 
 // --- CSV import / export ---------------------------------------------------
@@ -845,7 +897,7 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
     db
       .select({
         id: items.id,
-        company: companies.name,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
         name: items.name,
         sku: items.sku,
         urduName: items.urduName,
@@ -858,7 +910,7 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
       .innerJoin(companies, eq(companies.id, items.companyId))
       .leftJoin(categories, eq(categories.id, items.categoryId))
       .leftJoin(brands, eq(brands.id, items.brandId))
-      .where(await companyInScope(items.companyId))
+      .where(await companyInPermissionScope(items.companyId, session, "products"))
       .orderBy(items.name),
     // The four rate columns are derived, so they come from the same place the
     // products list reads them from rather than being recomputed here.
@@ -892,7 +944,8 @@ export async function exportProductsCsv(): Promise<Record<string, string>[]> {
 export async function importProductsCsv(
   rows: Record<string, string>[],
 ): Promise<{ error?: string; created?: number }> {
-  const session = await getSession();
+  return guard("Couldn't import the products.", async () => {
+  const session = await getLiveSession();
   requirePermission(session, "products", "create");
   if (rows.length === 0) return { error: "That file has no rows." };
 
@@ -941,4 +994,5 @@ export async function importProductsCsv(
   const result = await createProductsBatch(batch);
   if (result.error) return { error: result.error };
   return { created: result.created?.length ?? 0 };
+  });
 }

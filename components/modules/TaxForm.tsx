@@ -67,7 +67,7 @@ export function TaxBatchAddDialog({ onClose, onDone }: { onClose: () => void; on
         const values: TaxBatchRow[] = rows.map((r) => ({ name: r.name.trim(), rate: r.rate, isActive: r.isActive }));
         return createTaxesBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="GST" />

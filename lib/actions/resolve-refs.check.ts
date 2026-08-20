@@ -46,13 +46,33 @@ function fakeTx(table: ContactRow[]) {
 }
 
 async function main() {
-  // --- An already-picked id wins over anything typed ---
+  // --- An already-picked id wins over anything typed, once verified ---
+  // A submitted id is untrusted: it must point at this company's contact or a
+  // global one (the same predicate the name path matches), so the id costs one
+  // verification SELECT but no INSERT.
   {
-    const { tx, selects, inserted } = fakeTx([]);
+    const { tx, selects, inserted } = fakeTx([{ id: "picked", companyId: royal, displayName: "Existing" }]);
     const ids = await resolveContactIds(tx, [{ companyId: royal, contactId: "picked", contactName: "Ignored" }]);
     assert.deepEqual(ids, ["picked"]);
-    assert.equal(selects.length, 0, "nothing to look up, so no round trip at all");
+    assert.equal(selects.length, 1, "one verification SELECT for the submitted id");
     assert.equal(inserted.length, 0);
+  }
+
+  // --- A global contact id is valid in any company ---
+  {
+    const { tx } = fakeTx([{ id: "global-acme", companyId: null, displayName: "Acme" }]);
+    const ids = await resolveContactIds(tx, [{ companyId: m52, contactId: "global-acme", contactName: "Ignored" }]);
+    assert.deepEqual(ids, ["global-acme"]);
+  }
+
+  // --- A foreign company's contact id is refused, not silently attached ---
+  {
+    const { tx } = fakeTx([{ id: "m52-only", companyId: m52, displayName: "M52 Supplier" }]);
+    await assert.rejects(
+      resolveContactIds(tx, [{ companyId: royal, contactId: "m52-only", contactName: "" }]),
+      /doesn't belong to this company/,
+      "a forged or stale id from another company is refused",
+    );
   }
 
   // --- Blank rows resolve to null, not to a contact named "" ---
@@ -107,7 +127,10 @@ async function main() {
 
   // --- Ids come back aligned with the rows they were asked for ---
   {
-    const { tx } = fakeTx([{ id: "existing-b", companyId: royal, displayName: "B" }]);
+    const { tx } = fakeTx([
+      { id: "picked-id", companyId: royal, displayName: "Picked" },
+      { id: "existing-b", companyId: royal, displayName: "B" },
+    ]);
     const ids = await resolveContactIds(tx, [
       { companyId: royal, contactId: null, contactName: "A" },
       { companyId: royal, contactId: "picked-id", contactName: null },

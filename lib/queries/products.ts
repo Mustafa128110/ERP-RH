@@ -72,7 +72,7 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
     purchase_rate_3: string | null;
     sales_rate: string | null;
   }>(sql`
-    SELECT rl.id, rl.name, i.sku, co.name AS company, i.category_id,
+    SELECT rl.id, rl.name, i.sku, coalesce(co.short_name, co.name) AS company, i.category_id,
            cat.name AS category, br.name AS brand, oh.on_hand,
            coalesce(rl.purchase_rate_1, c.unit_cost) AS purchase_rate_1,
            rl.purchase_rate_2, rl.purchase_rate_3,

@@ -2,7 +2,7 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { recordAudit } from "@/lib/actions/audit";
@@ -109,13 +109,17 @@ function documentLineRows(companies: string, code: string) {
 // value is stringified here so a numeric column can't arrive as a JS number and
 // pick up exponent notation on the way into a spreadsheet.
 export async function exportSnapshot(key: string): Promise<{ error?: string; rows?: Record<string, string>[] }> {
-  const session = await getSession();
+  // Exports hand over the whole financial picture, so the gate is read live — a
+  // revoked user must not keep downloading it from a stale instance cache.
+  const session = await getLiveSession();
   requirePermission(session, "backups", "create");
 
   const query = QUERIES[key];
   if (!query) return { error: "Unknown export." };
 
-  const ids = await getScopeCompanyIds();
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("backups.create") || session.permissionsByCompany.get(companyId)?.has("backups.create"),
+  );
   if (ids.length === 0) return { error: "You don't have access to any company." };
   // Interpolated as literals rather than parameters because it sits inside an
   // IN list built with sql.raw; the ids come from the session, never from input.
@@ -135,7 +139,9 @@ export async function snapshotSizes(): Promise<Record<string, number>> {
   const session = await getSession();
   requirePermission(session, "backups", "view");
 
-  const ids = await getScopeCompanyIds();
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has("backups.view") || session.permissionsByCompany.get(companyId)?.has("backups.view"),
+  );
   if (ids.length === 0) return {};
   const list = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
 

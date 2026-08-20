@@ -38,3 +38,31 @@ export async function averageCost(tx: Tx, itemId: string, locationId: string | n
   const row = rows[0];
   return Number(row?.at_location ?? row?.overall ?? 0);
 }
+
+export async function averageCosts(tx: Tx, rows: { itemId: string | null; locationId: string | null }[]): Promise<number[]> {
+  if (rows.length === 0) return [];
+  const values = sql.join(
+    rows.map((row, index) => sql`(${index}::int, ${row.itemId}::uuid, ${row.locationId}::uuid)`),
+    sql`, `,
+  );
+  const costs = await tx.execute<{ position: number; unit_cost: string | null }>(sql`
+    WITH input(position, item_id, location_id) AS (VALUES ${values})
+    SELECT i.position,
+      coalesce(
+        sum(it.total_cost) FILTER (WHERE dl.location_id IS NOT DISTINCT FROM i.location_id)
+          / nullif(sum(it.base_quantity) FILTER (WHERE dl.location_id IS NOT DISTINCT FROM i.location_id), 0),
+        sum(it.total_cost) / nullif(sum(it.base_quantity), 0),
+        0
+      ) AS unit_cost
+    FROM input i
+    LEFT JOIN document_lines dl ON dl.item_id = i.item_id
+    LEFT JOIN inventory_transactions it
+      ON it.document_line_id = dl.id
+     AND it.movement = 1
+     AND it.total_cost IS NOT NULL
+    GROUP BY i.position, i.location_id
+    ORDER BY i.position
+  `);
+  const byPosition = new Map(costs.map((row) => [Number(row.position), Number(row.unit_cost ?? 0)]));
+  return rows.map((_, index) => byPosition.get(index) ?? 0);
+}

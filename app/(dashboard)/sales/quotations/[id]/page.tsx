@@ -44,16 +44,20 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           documentDate: quotation.documentDate,
           validUntil: quotation.validUntil,
           discountTotal: quotation.discountTotal,
-          taxTotal: quotation.taxTotal,
+          taxId: quotation.taxId,
           shippingTotal: quotation.shippingTotal,
           lines: quotation.lines,
         }}
         lines={quotation.lines}
-        convertible={convertible}
+        convertible={quotation.documentStatus === "pending" && convertible}
+        cancelled={quotation.documentStatus === "cancelled"}
         companyOptions={options.companyOptions}
         customerOptions={options.customerOptions}
         itemOptions={options.itemOptions}
         unitOptions={options.unitOptions}
+        taxOptions={options.taxOptions}
+        conversionOptions={options.conversionOptions}
+        taxSettings={options.taxSettings}
       />
 
       {conversions.length > 0 && (

@@ -3,14 +3,18 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createQuotation, updateQuotation, deleteQuotation, type QuotationLine } from "@/lib/actions/quotations";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, submitClass, deleteButtonClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, submitClass, deleteButtonClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
+import { useSync } from "@/components/layout/SyncProvider";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
+import { calculateTax } from "@/lib/tax-calculation";
+import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
 
 // Deliberately not SaleForm with the money parts hidden. A quotation has no
 // payment, no settlement account, no previous-balance line and no stock — a
@@ -28,7 +32,8 @@ const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-type ItemOption = ScopedOption & { salesRate: string | null };
+type ItemOption = ScopedOption & { salesRate: string | null; baseUnitId: string | null; taxable: boolean };
+type TaxOption = { id: string; name: string; rate: string };
 
 type Line = {
   itemId: string;
@@ -42,7 +47,9 @@ type Line = {
   convertedQuantity: string;
 };
 
-// One draft per form: only one quotation is ever being typed.
+// One draft per form: only one quotation is ever being typed. The user id is
+// appended at the call site (quotation:<uid>) so a shared browser never offers
+// one user's half-typed quotation to another.
 const QUOTATION_DRAFT_KEY = "quotation";
 
 const BLANK_ROWS = 8;
@@ -54,7 +61,8 @@ export type QuotationDefaults = {
   documentDate: string;
   validUntil: string;
   discountTotal: string;
-  taxTotal: string;
+  taxTotal?: string;
+  taxId?: string | null;
   shippingTotal: string;
   lines: QuotationLine[];
 };
@@ -64,6 +72,9 @@ export function QuotationForm({
   customerOptions,
   itemOptions,
   unitOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
   quotationId,
   defaults,
   onDone,
@@ -72,6 +83,9 @@ export function QuotationForm({
   customerOptions: ScopedOption[];
   itemOptions: ItemOption[];
   unitOptions: Option[];
+  taxOptions: TaxOption[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
   quotationId?: string;
   defaults?: QuotationDefaults;
   // When the form lives in a popup (the list page's add dialog), a successful
@@ -80,6 +94,11 @@ export function QuotationForm({
 }) {
   const router = useRouter();
   const isEdit = !!quotationId;
+  // The draft key is composed per render from the logged-in user — SessionSeed
+  // (in the layout) sets the id before children render, so the first render
+  // already carries the scoped key.
+  const userId = useClientUserId();
+  const quotationDraftKey = userId ? `${QUOTATION_DRAFT_KEY}:${userId}` : QUOTATION_DRAFT_KEY;
 
   const [companyId, setCompanyId] = useState(defaults?.companyId ?? companyOptions[0]?.id ?? "");
   const [contactId, setContactId] = useState(defaults?.contactId ?? "");
@@ -89,7 +108,7 @@ export function QuotationForm({
   const [documentDate, setDocumentDate] = useState(defaults?.documentDate ?? todayISO());
   const [validUntil, setValidUntil] = useState(defaults?.validUntil ?? "");
   const [discount, setDiscount] = useState(defaults?.discountTotal && Number(defaults.discountTotal) ? defaults.discountTotal : "");
-  const [tax, setTax] = useState(defaults?.taxTotal && Number(defaults.taxTotal) ? defaults.taxTotal : "");
+  const [taxId, setTaxId] = useState(defaults?.taxId ?? taxSettings[companyId]?.default_sales_tax_id ?? "");
   const [shipping, setShipping] = useState(defaults?.shippingTotal && Number(defaults.shippingTotal) ? defaults.shippingTotal : "");
 
   const [lines, setLines] = useState<Line[]>(() => {
@@ -118,10 +137,10 @@ export function QuotationForm({
   // restoring a stale copy over one is how someone else's changes disappear.
   // The hook (components/ui/useDraft.tsx) owns the store read, the
   // offer/restore/discard logic and the save-on-change effect.
-  const draftState = { companyId, contactId, contactText, documentDate, validUntil, discount, tax, shipping, lines };
+  const draftState = { companyId, contactId, contactText, documentDate, validUntil, discount, taxId, shipping, lines };
   type QuotationDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(QUOTATION_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(quotationDraftKey, {
     state: draftState,
     enabled: !isEdit,
     hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
@@ -132,24 +151,42 @@ export function QuotationForm({
       setDocumentDate(d.documentDate);
       setValidUntil(d.validUntil);
       setDiscount(d.discount);
-      setTax(d.tax);
+      setTaxId(d.taxId);
       setShipping(d.shipping);
       setLines(d.lines);
     },
   });
 
+  const { enqueue } = useSync();
+
+  // Set when "Queue for later" could not be written to local storage — the
+  // quotation stays on screen (and in its draft) instead of the queue silently
+  // failing to take it.
+  const [queueError, setQueueError] = useState<string | null>(null);
+
   // One id per open form: sent with every submit, claimed by the server inside
   // the same transaction as the quotation, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
+  // Wrapped so a transport failure (response lost after the server committed)
+  // becomes an inline error instead of throwing into the error boundary — that
+  // would lose the form and its operation id, and a restored draft would mint a
+  // fresh id and post the quotation twice. The form survives; a replayed Save is
+  // refused server-side as a duplicate.
   const [state, action, pending] = useActionState(
-    isEdit ? updateQuotation.bind(null, quotationId) : createQuotation,
+    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
+      try {
+        return isEdit ? await updateQuotation(quotationId, prev, formData) : await createQuotation(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+    },
     undefined,
   );
 
   useEffect(() => {
     if (state?.success) {
       // Saved — the local copy has nothing left to protect.
-      clearDraft(QUOTATION_DRAFT_KEY);
+      clearDraft(quotationDraftKey);
       if (onDone) onDone();
       else router.push("/sales/quotations");
     }
@@ -178,22 +215,84 @@ export function QuotationForm({
     update(index, {
       itemText: name,
       itemId: match?.id ?? "",
-      ...(match?.salesRate && !lines[index].unitPrice ? { unitPrice: match.salesRate } : {}),
+      unitId: match?.baseUnitId ?? "",
+      unitText: unitOptions.find((unit) => unit.id === match?.baseUnitId)?.name ?? "",
+      ...(match?.salesRate && !lines[index].unitPrice ? { unitPrice: priceForUnit(match.salesRate, 1) } : {}),
     });
+  }
+
+  function pickUnit(index: number, name: string) {
+    const unitId = unitOptions.find((unit) => unit.name === name)?.id ?? "";
+    const item = itemOptions.find((option) => option.id === lines[index].itemId);
+    const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+    update(index, { unitText: name, unitId, unitPrice: item ? priceForUnit(item.salesRate, multiplier) : lines[index].unitPrice });
   }
 
   const filled = lines.filter((l) => (l.itemId || l.itemText.trim()) && Number(l.quantity) > 0);
   const subtotal = round1(filled.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   // One box takes rupees or a percentage ("250" or "5%"), same as the sale form.
   const discountAmount = resolveAdjustment(discount, subtotal);
-  const taxAmount = resolveAdjustment(tax, subtotal);
   const shippingAmount = resolveAdjustment(shipping, subtotal);
-  const grandTotal = round1(subtotal - discountAmount + taxAmount + shippingAmount);
+  const selectedTax = taxOptions.find((tax) => tax.id === taxId);
+  const taxInclusive = taxSettings[companyId]?.tax_prices_include_tax === "true";
+  const taxCalculation = calculateTax(
+    filled.map((line) => ({ lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0), taxable: itemOptions.find((item) => item.id === line.itemId)?.taxable ?? false })),
+    discountAmount,
+    shippingAmount,
+    Number(selectedTax?.rate ?? 0),
+    taxInclusive,
+  );
+  const grandTotal = taxCalculation.grandTotal;
 
   // Any line already invoiced locks the whole quotation: the server refuses the
   // edit (it would rewrite lines an invoice is built on), so saying so here beats
   // letting someone retype it and be told no at the end.
   const locked = lines.some((l) => Number(l.convertedQuantity) > 0);
+
+  // Queue for later: serialise exactly what the hidden inputs send, so the sync
+  // engine can rebuild the same FormData createQuotation reads. The queue mints
+  // its own stable operation id; the draft is cleared because the work now lives
+  // in the queue, not on screen.
+  const linesJson = JSON.stringify(
+    filled.map((l) => ({
+      itemId: l.itemId,
+      itemName: l.itemId ? "" : l.itemText.trim(),
+      unitId: l.unitId,
+      unitName: l.unitId ? "" : l.unitText.trim(),
+      quantity: l.quantity,
+      unitPrice: l.unitPrice || "0",
+    })),
+  );
+  const queueQuotation = () => {
+    const result = enqueue(
+      "quotation",
+      `Quotation · ${money(grandTotal)}${contactText ? ` for ${contactText}` : ""}`,
+      {
+        companyId,
+        contactId,
+        contactName: contactId ? "" : contactText,
+        documentDate,
+        validUntil,
+        discountTotal: String(discountAmount),
+        taxId,
+        shippingTotal: String(shippingAmount),
+        linesJson,
+      },
+    );
+    // A queue that could not be written leaves the form exactly as it is: the
+    // draft stays (it is the only copy), nothing navigates away, and the user
+    // is told the work is not stored safely.
+    if (!result?.persisted) {
+      setQueueError(
+        "This browser could not save a copy of this quotation (storage is full or blocked). Keep this page open — it is not stored safely yet.",
+      );
+      return;
+    }
+    setQueueError(null);
+    clearDraft(quotationDraftKey);
+    if (onDone) onDone();
+    else router.push("/sales/quotations");
+  };
 
   return (
     <form action={action} className="flex h-full min-h-0 flex-col gap-4">
@@ -204,22 +303,9 @@ export function QuotationForm({
           on a sale line — so both go up and the server decides. */}
       <input type="hidden" name="contactName" value={contactId ? "" : contactText} />
       <input type="hidden" name="discountTotal" value={String(discountAmount)} />
-      <input type="hidden" name="taxTotal" value={String(taxAmount)} />
+      <input type="hidden" name="taxId" value={taxId} />
       <input type="hidden" name="shippingTotal" value={String(shippingAmount)} />
-      <input
-        type="hidden"
-        name="linesJson"
-        value={JSON.stringify(
-          filled.map((l) => ({
-            itemId: l.itemId,
-            itemName: l.itemId ? "" : l.itemText.trim(),
-            unitId: l.unitId,
-            unitName: l.unitId ? "" : l.unitText.trim(),
-            quantity: l.quantity,
-            unitPrice: l.unitPrice || "0",
-          })),
-        )}
-      />
+      <input type="hidden" name="linesJson" value={linesJson} />
 
       {/* An unfinished quotation from before — a crash, a closed tab, a reload.
           Offered, never applied on its own. */}
@@ -241,6 +327,7 @@ export function QuotationForm({
                 setCompanyId(e.target.value);
                 setContactId("");
                 setContactText("");
+                if (!isEdit) setTaxId(taxSettings[e.target.value]?.default_sales_tax_id ?? "");
               }}
               disabled={locked}
               className={fieldClass}
@@ -319,7 +406,7 @@ export function QuotationForm({
                 <td className={tdClass}>
                   <ComboBox
                     value={line.unitText}
-                    onChange={(name) => update(r, { unitText: name, unitId: unitOptions.find((u) => u.name === name)?.id ?? "" })}
+                    onChange={(name) => pickUnit(r, name)}
                     options={unitOptions}
                     className={cellInput}
                     inputProps={{ "data-cell": `${r}-1`, disabled: locked }}
@@ -371,7 +458,10 @@ export function QuotationForm({
           </label>
           <label className={labelClass}>
             <span className={labelTextClass}>Tax</span>
-            <input value={tax} onChange={(e) => setTax(e.target.value)} placeholder="0 or 17%" data-shortcut="t" disabled={locked} className={`${fieldClass} sm:w-28`} />
+            <select value={taxId} onChange={(event) => setTaxId(event.target.value)} data-shortcut="t" disabled={locked} className={`${fieldClass} sm:w-48`}>
+              <option value="">No tax</option>
+              {taxOptions.map((tax) => <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>)}
+            </select>
           </label>
           <label className={labelClass}>
             <span className={labelTextClass}>Shipping</span>
@@ -393,7 +483,22 @@ export function QuotationForm({
 
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             {state?.error && <p className={errorTextClass}>{state.error}</p>}
+            {queueError && <p className={errorTextClass}>{queueError}</p>}
             {isEdit && !locked && <DeleteQuotationButton quotationId={quotationId} />}
+            {/* New quotations only: queueing an edit would send a copy of a
+                saved document, and a sync replay of that is a second quotation
+                nobody asked for. */}
+            {!isEdit && (
+              <button
+                type="button"
+                onClick={queueQuotation}
+                disabled={locked || filled.length === 0}
+                className="h-11 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"
+                title="Keep this quotation locally and send it when the connection returns"
+              >
+                Queue for later
+              </button>
+            )}
             <button type="submit" disabled={pending || locked} className={submitClass}>
               {pending ? "Saving…" : isEdit ? "Save Quotation" : "Create Quotation"}
             </button>
@@ -421,14 +526,14 @@ export function DeleteQuotationButton({ quotationId }: { quotationId: string }) 
         type="button"
         disabled={pending}
         onClick={() => {
-          if (!confirm("Delete this quotation? Invoices already raised from it are kept.")) return;
+          if (!confirm("Cancel this quotation? It will remain in history and invoices already raised from it are kept.")) return;
           const data = new FormData();
           data.set("documentId", quotationId);
           action(data);
         }}
         className={deleteButtonClass}
       >
-        {pending ? "Deleting…" : "Delete"}
+        {pending ? "Cancelling…" : "Cancel quotation"}
       </button>
       {state?.error && <p className={`mt-1 ${errorTextClass}`}>{state.error}</p>}
     </span>

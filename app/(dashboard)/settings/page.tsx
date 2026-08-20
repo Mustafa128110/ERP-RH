@@ -7,6 +7,7 @@ import { StockFilter } from "@/components/modules/StockFilters";
 import { SALE_TYPES } from "@/lib/sale-constants";
 import { requireSession } from "@/lib/auth/session";
 import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
+import { getTaxes } from "@/lib/queries/lookups";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
   // gating the route is what lets a salesman who cannot configure a company
   // still turn the lights down — without it, the only screen holding the
   // theme switch is the one screen they aren't allowed to open.
-  const [{ company }, session, overview] = await Promise.all([
+  const [{ company }, session, overview, taxRows] = await Promise.all([
     searchParams,
     requireSession(),
     settingsOverview().catch(() => null),
+    getTaxes().catch(() => []),
   ]);
 
   // Settings are per company, so one has to be chosen. Default to the first the
@@ -60,7 +62,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
             <div className="rounded-lg border border-sand bg-white p-5">
               <h2 className="mb-4 text-sm font-semibold text-navy-800">{selected ? `${selected.name} settings` : "Settings"}</h2>
               {selected ? (
-                <SettingsForm companyId={selected.id} defs={SETTING_DEFS} values={values} />
+                <SettingsForm companyId={selected.id} defs={SETTING_DEFS} values={values} taxOptions={taxRows.map((tax) => ({ id: tax.id, name: tax.name, rate: tax.rate }))} />
               ) : (
                 <p className="text-sm text-steel">You don&apos;t have access to any company yet, so there is nothing to configure.</p>
               )}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { createLedgerEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/actions/ledger";
 import { Dialog } from "@/components/ui/Dialog";
@@ -9,8 +8,9 @@ import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { ContactPaymentsHover } from "@/components/modules/ContactPaymentsHover";
+import { LedgerDocHover } from "@/components/modules/LedgerDocHover";
 import { DateField } from "@/components/ui/DateField";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import { money, todayISO } from "@/lib/format";
@@ -33,12 +33,30 @@ const buildColumns = (byRowId: Map<string, ContactLedgerBalance>): ColumnDef[] =
     label: "Contact",
     render: (row) => {
       const balance = byRowId.get(String(row.id));
-      return balance ? <ContactPaymentsHover name={balance.displayName} payments={balance.recentPayments} /> : String(row.displayName);
+      return balance ? <ContactPaymentsHover name={balance.displayName} paymentsMade={balance.recentPayments.filter((p) => p.direction === "made")} paymentsReceived={balance.recentPayments.filter((p) => p.direction === "received")} /> : String(row.displayName);
     },
   },
   { key: "company", label: "Company" },
-  { key: "creditBalance", label: "We Owe", align: "right" },
-  { key: "debtBalance", label: "Owes Us", align: "right" },
+  {
+    key: "creditBalance",
+    label: "We Owe",
+    align: "right",
+    render: (row) => {
+      const balance = byRowId.get(String(row.id));
+      if (!balance || balance.recentPurchases.length === 0) return String(row.creditBalance);
+      return <LedgerDocHover docs={balance.recentPurchases} trigger={String(row.creditBalance)} />;
+    },
+  },
+  {
+    key: "debtBalance",
+    label: "Owes Us",
+    align: "right",
+    render: (row) => {
+      const balance = byRowId.get(String(row.id));
+      if (!balance || balance.recentInvoices.length === 0) return String(row.debtBalance);
+      return <LedgerDocHover docs={balance.recentInvoices} trigger={String(row.debtBalance)} />;
+    },
+  },
 ];
 
 // Sent to the contact to be checked against their own book, so it goes out one
@@ -75,7 +93,6 @@ export function LedgerManager({
   filter?: React.ReactNode;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
-  const router = useRouter();
   // Whose statement is being taken, and as what. Null except for the moment the
   // document is mounted off-screen and photographed.
   const [sheet, setSheet] = useState<{ format: "pdf" | "png"; contact: ContactLedgerBalance } | null>(null);
@@ -131,7 +148,6 @@ export function LedgerManager({
 
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   const byRowId = new Map(balances.map((b) => [`${b.companyId}:${b.contactId}`, b]));
@@ -230,8 +246,17 @@ function LedgerEntryForm({
   // One id per open form: sent with every submit, claimed by the server inside
   // the same transaction as the entry, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
+  // Wrapped so a transport failure (response lost after the server committed)
+  // becomes an inline error instead of throwing into the error boundary — the
+  // form stays, and a replayed Save is refused server-side as a duplicate.
   const [state, action, pending] = useActionState(
-    isEdit ? setContactBalance.bind(null, balance.companyId, balance.contactId) : createLedgerEntry,
+    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
+      try {
+        return isEdit ? await setContactBalance(balance.companyId, balance.contactId, prev, formData) : await createLedgerEntry(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+    },
     undefined,
   );
   const [companyId, setCompanyId] = useState(

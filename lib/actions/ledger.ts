@@ -3,22 +3,40 @@
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units } from "@/lib/db/schema";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId } from "@/lib/actions/resolve-refs";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { recordAudit } from "@/lib/actions/audit";
+import { cachedPageRead } from "@/lib/read-cache";
 
 export interface ContactPayment {
   date: string;
   number: string;
   amount: string;
   direction: "made" | "received";
+}
+
+export interface ContactDocumentItem {
+  itemName: string;
+  quantity: string;
+  unitPrice: string;
+  lineTotal: string;
+}
+
+export interface ContactDocument {
+  id: string;
+  number: string;
+  status: string;
+  grandTotal: string;
+  paidAmount: string;
+  isPaid: boolean;
+  items: ContactDocumentItem[];
 }
 
 export interface ContactLedgerBalance {
@@ -32,6 +50,9 @@ export interface ContactLedgerBalance {
   // The most recent few, newest first — what the hover panel on the contact name
   // shows, so "have we paid them lately?" is answered without leaving the page.
   recentPayments: ContactPayment[];
+  // Last 6 sales invoices for "Owes Us" hover, and last 6 purchases for "We Owe" hover.
+  recentInvoices: ContactDocument[];
+  recentPurchases: ContactDocument[];
 }
 
 // Ledger entries carry no contactId directly — they hang off the document,
@@ -44,16 +65,33 @@ export interface ContactLedgerBalance {
 // negative one is a receivable.
 export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
   const session = await getSession();
-  requirePermission(session, "purchases", "view");
+  requirePermission(session, "accounts", "view");
+  return loadLedgerBalances(session, "accounts");
+}
+
+export async function listPaymentLedgerBalances(): Promise<ContactLedgerBalance[]> {
+  const session = await getSession();
+  requirePermission(session, "payments", "view");
+  return loadLedgerBalances(session, "payments");
+}
+
+async function loadLedgerBalances(
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  permissionModule: "accounts" | "payments",
+): Promise<ContactLedgerBalance[]> {
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:ledger:${permissionModule}:${cacheScope}`, async () => {
 
   // Neither query depends on the other's rows, so they share one round trip.
-  const [rows, paymentRows] = await Promise.all([
+  const docScope = await companyInPermissionScope(documents.companyId, session, permissionModule);
+  const [rows, paymentRows, invoiceHeaders, purchaseHeaders] = await Promise.all([
     db
       .select({
         contactId: contacts.id,
         displayName: contacts.displayName,
         companyId: ledgerEntries.companyId,
-        company: companies.name,
+        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
         credit: ledgerEntries.credit,
         debit: ledgerEntries.debit,
       })
@@ -63,7 +101,7 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
       // This used to read every company's entries regardless of who was signed in
       // or what the topbar was set to — the only list in the app that didn't scope.
-      .where(await companyInScope(ledgerEntries.companyId)),
+      .where(await companyInPermissionScope(ledgerEntries.companyId, session, permissionModule)),
 
     // Every payment against a contact, newest first — sliced to five per contact
     // below. Both directions: a contact can be owed money on one invoice and owe
@@ -82,26 +120,74 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
       .where(
         and(
           inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
+          eq(documents.status, "posted"),
           isNotNull(documents.contactId),
-          await companyInScope(documents.companyId),
+          await companyInPermissionScope(documents.companyId, session, permissionModule),
         ),
       )
       .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
+
+    // Last 6 sales invoices per contact for "Owes Us" hover.
+    db
+      .select({
+        companyId: documents.companyId,
+        contactId: documents.contactId,
+        id: documents.id,
+        number: documents.number,
+        status: documents.status,
+        grandTotal: documents.grandTotal,
+        paidAmount: documents.paidAmount,
+        isPaid: documents.isPaid,
+        documentDate: documents.documentDate,
+        createdAt: documents.createdAt,
+      })
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(
+        eq(documentTypes.code, "SALES_INVOICE"),
+        eq(documents.status, "posted"),
+        isNotNull(documents.contactId),
+        docScope,
+      ))
+      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
+
+    // Last 6 purchases per contact for "We Owe" hover.
+    db
+      .select({
+        companyId: documents.companyId,
+        contactId: documents.contactId,
+        id: documents.id,
+        number: documents.number,
+        status: documents.status,
+        grandTotal: documents.grandTotal,
+        paidAmount: documents.paidAmount,
+        isPaid: documents.isPaid,
+        documentDate: documents.documentDate,
+        createdAt: documents.createdAt,
+      })
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(
+        eq(documentTypes.code, "PURCHASE_INVOICE"),
+        eq(documents.status, "posted"),
+        isNotNull(documents.contactId),
+        docScope,
+      ))
+      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
   ]);
 
-  const paymentsByContact = new Map<string, ContactPayment[]>();
+  // Split payments into made/received, 6 per direction per contact.
+  const paymentsMadeByContact = new Map<string, ContactPayment[]>();
+  const paymentsReceivedByContact = new Map<string, ContactPayment[]>();
   for (const p of paymentRows) {
     const key = `${p.companyId}:${p.contactId}`;
-    const list = paymentsByContact.get(key) ?? [];
-    if (list.length < 5) {
-      list.push({
-        date: p.date,
-        number: p.number,
-        amount: p.amount,
-        direction: p.code === "PAYMENT_MADE" ? "made" : "received",
-      });
+    const dir = p.code === "PAYMENT_MADE" ? "made" : "received";
+    const map = dir === "made" ? paymentsMadeByContact : paymentsReceivedByContact;
+    const list = map.get(key) ?? [];
+    if (list.length < 6) {
+      list.push({ date: p.date, number: p.number, amount: p.amount, direction: dir });
     }
-    paymentsByContact.set(key, list);
+    map.set(key, list);
   }
 
   // Keyed by company as well as contact: a contact belongs to one company, but
@@ -118,19 +204,78 @@ export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
       credit: 0,
       debit: 0,
       balance: 0,
-      recentPayments: paymentsByContact.get(key) ?? [],
+      recentPayments: [...(paymentsMadeByContact.get(key) ?? []), ...(paymentsReceivedByContact.get(key) ?? [])],
+      recentInvoices: [],
+      recentPurchases: [],
     };
     entry.credit += Number(r.credit ?? 0);
     entry.debit += Number(r.debit ?? 0);
     byContact.set(key, entry);
   }
 
-  // A-Z by contact. Sorted by balance before, which made a name impossible to
-  // find without scanning the whole list — the balance is what you read once
-  // you're on the row, not how you get to it.
+  // Group invoice headers by contact, top 6 per contact.
+  const invoicesByContact = new Map<string, typeof invoiceHeaders>();
+  for (const h of invoiceHeaders) {
+    const key = `${h.companyId}:${h.contactId}`;
+    const list = invoicesByContact.get(key) ?? [];
+    if (list.length < 6) list.push(h);
+    invoicesByContact.set(key, list);
+  }
+
+  // Group purchase headers by contact, top 6 per contact.
+  const purchasesByContact = new Map<string, typeof purchaseHeaders>();
+  for (const h of purchaseHeaders) {
+    const key = `${h.companyId}:${h.contactId}`;
+    const list = purchasesByContact.get(key) ?? [];
+    if (list.length < 6) list.push(h);
+    purchasesByContact.set(key, list);
+  }
+
+  // Collect all document ids that need line items.
+  const allDocIds = [
+    ...invoiceHeaders.map((h) => h.id),
+    ...purchaseHeaders.map((h) => h.id),
+  ];
+
+  // Fetch line items for all invoices and purchases in one query.
+  const lineRows = allDocIds.length > 0 ? await db
+    .select({
+      documentId: documentLines.documentId,
+      itemName: items.name,
+      quantity: documentLines.quantity,
+      unitPrice: documentLines.unitPrice,
+      lineTotal: documentLines.lineTotal,
+      unitSymbol: units.symbol,
+    })
+    .from(documentLines)
+    .innerJoin(items, eq(items.id, documentLines.itemId))
+    .leftJoin(units, eq(units.id, documentLines.unitId))
+    .where(inArray(documentLines.documentId, allDocIds))
+    .orderBy(documentLines.lineNo) : [];
+
+  // Group items by document.
+  const itemsByDoc = new Map<string, ContactDocumentItem[]>();
+  for (const l of lineRows) {
+    const arr = itemsByDoc.get(l.documentId) ?? [];
+    arr.push({ itemName: l.itemName, quantity: String(l.quantity), unitPrice: String(l.unitPrice), lineTotal: String(l.lineTotal) });
+    itemsByDoc.set(l.documentId, arr);
+  }
+
+  // Build recentInvoices and recentPurchases per contact.
+  for (const [key, docs] of invoicesByContact) {
+    const entry = byContact.get(key);
+    if (entry) entry.recentInvoices = docs.map((d) => ({ id: d.id, number: d.number, status: d.status, grandTotal: String(d.grandTotal), paidAmount: String(d.paidAmount), isPaid: d.isPaid, items: itemsByDoc.get(d.id) ?? [] }));
+  }
+  for (const [key, docs] of purchasesByContact) {
+    const entry = byContact.get(key);
+    if (entry) entry.recentPurchases = docs.map((d) => ({ id: d.id, number: d.number, status: d.status, grandTotal: String(d.grandTotal), paidAmount: String(d.paidAmount), isPaid: d.isPaid, items: itemsByDoc.get(d.id) ?? [] }));
+  }
+
+  // A-Z by contact.
   return Array.from(byContact.values())
     .map((e) => ({ ...e, balance: e.credit - e.debit }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
+  });
 }
 
 // A balance that didn't come from a sale or a purchase — an opening balance
@@ -229,16 +374,18 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
   return guard(
     "Couldn't add the ledger entry.",
     async () => {
-      const session = await getSession();
-      // There is no `ledger` module in the permission catalog and no ledger.create.
-      // accounts.create is the nearest finance-write permission — Admin holds it,
-      // Salesman doesn't, which is the intended split.
-      requirePermission(session, "accounts", "create");
+      const session = await getLiveSession();
 
       const { companyId, documentDate, contactId, contactName, direction, amount, note, error } = readEntryForm(formData);
       if (!companyId) return { error: "Company is required." };
       if (!contactId && !contactName) return { error: "Pick a contact or type a new name." };
       if (error) return { error };
+      // There is no `ledger` module in the permission catalog and no ledger.create.
+      // accounts.create is the nearest finance-write permission — Admin holds it,
+      // Salesman doesn't, which is the intended split. Scoped to the submitted
+      // company, so a forged companyId can't post into a set of books the user
+      // can't act on.
+      requirePermission(session, "accounts", "create", { companyId });
 
       await writeJournalEntry(
         {
@@ -281,8 +428,11 @@ export async function setContactBalance(
   return guard(
     "Couldn't save the balance.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "accounts", "create");
+      const session = await getLiveSession();
+      // Scoped to the company this balance lives in — membership + per-company
+      // permission, so a stale or forged company id can't post a correction
+      // into another set of books.
+      requirePermission(session, "accounts", "create", { companyId });
 
       const { documentDate, direction, amount, note, error } = readEntryForm(formData);
       if (error) return { error };
@@ -321,6 +471,14 @@ export async function setContactBalance(
 
       invalidateLookups(CACHE.documentTypes, CACHE.cheques);
       revalidatePath("/ledger");
+      await recordAudit({
+        action: "update",
+        entity: "contact balance",
+        entityId: contactId,
+        summary: `Balance set to ${direction === "we_owe" ? amount : -amount}`,
+        companyId,
+        detail: note || "Balance correction",
+      });
       return { success: true };
     },
     { [DUPLICATE]: "Can't save — a journal entry number is already in use for this company." },

@@ -13,7 +13,7 @@ import { formatDate, toISODate } from "@/lib/format";
 // holding YYYY-MM-DD, which is what the server actions and Postgres `date`
 // columns already expect. Nothing downstream changes.
 //
-// ponytail: text + hidden pair rather than a calendar widget. The native picker
+// Design note: text + hidden pair rather than a calendar widget. The native picker
 // still does the picking; this only owns the formatting.
 export function DateField({
   name,

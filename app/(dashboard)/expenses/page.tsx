@@ -9,7 +9,6 @@ import {
 } from "@/lib/queries/lookups";
 import { ExpenseManager } from "@/components/modules/ExpenseManager";
 import { ListFilters } from "@/components/ui/ListFilters";
-import { StockFilter } from "@/components/modules/StockFilters";
 
 export default async function Page({
   searchParams,
@@ -27,20 +26,21 @@ export default async function Page({
     getAvailableCheques(),
   ]);
 
+  const companyCodeMap = new Map(companyRows.map((c) => [c.id, c.shortName ?? c.name]));
+
   return (
     <ExpenseManager
       expenses={expenses}
       filtered={Object.values(filters).some(Boolean)}
       companyOptions={companyRows}
+      companyCodeMap={companyCodeMap}
       categoryOptions={categoryRows}
       contactOptions={contactRows.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" }))}
       bankAccountOptions={bankAccountOptions}
       cashAccountOptions={cashAccountOptions}
       chequeOptions={chequeOptions}
       filters={
-        <ListFilters key="filters">
-          <StockFilter param="company" allLabel="All Companies" options={companyRows.map((c) => ({ id: c.id, name: c.name }))} />
-        </ListFilters>
+        <ListFilters key="filters" />
       }
     />
   );

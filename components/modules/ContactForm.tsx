@@ -169,7 +169,7 @@ export function ContactBatchAddDialog({
         }));
         return createContactsBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <input value={row.displayName} onChange={(e) => update({ displayName: e.target.value })} className={batchInputClass} placeholder="Name" />
@@ -411,7 +411,7 @@ export function ContactsBatchEditDialog({
                   </td>
                   <td className="border border-sand text-center">
                     <button type="button" onClick={() => removeRow(i)} className="text-steel hover:text-error" aria-label={`Remove ${row.displayName}`}>
-                      âœ•
+                      ×
                     </button>
                   </td>
                 </tr>

@@ -15,7 +15,7 @@ import "server-only";
 // backstop for anything that learns to write behind our back (a migration, a
 // psql session, a future action nobody wired up).
 //
-// ponytail: per-instance Map. Correct for the single server this runs on. Behind
+// Design note: per-instance Map. Correct for the single server this runs on. Behind
 // a load balancer each instance would keep its own copy and invalidation would
 // only clear the instance that served the mutation — move to Redis at that point,
 // or set TTL to 0 and take the round trip back.

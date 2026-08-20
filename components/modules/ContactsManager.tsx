@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/SupplierForm";
+import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/ContactForm";
+import { MergeContactsDialog } from "@/components/modules/MergeContactsDialog";
 import { getContact } from "@/lib/actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -49,9 +50,9 @@ const columns: ColumnDef[] = [
 
 type Option = { id: string; name: string };
 type ContactDetail = Awaited<ReturnType<typeof getContact>> | null;
-type ModalState = { kind: "batch" } | { kind: "edit"; id: string } | { kind: "batchEdit" } | null;
+type ModalState = { kind: "batch" } | { kind: "edit"; id: string } | { kind: "batchEdit" } | { kind: "merge" } | null;
 
-export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; companyOptions: Option[] }) {
+export function ContactsManager({ rows, companyOptions }: { rows: Row[]; companyOptions: Option[] }) {
   const [modal, setModal] = useState<ModalState>(null);
   // The table only carries display columns; the full record is fetched when a
   // row is opened, so the list query stays light.
@@ -60,12 +61,10 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
   // exists — tick the half-filled ones and finish them in one grid instead of
   // opening each in turn. Same tick column and Ctrl+Enter as the products list.
   const [selected, setSelected] = useState<string[]>([]);
-  const router = useRouter();
 
   function close() {
     setModal(null);
     setDetail(null);
-    router.refresh();
   }
 
   function closeBatchEdit() {
@@ -73,7 +72,6 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
     // The saved rows are no longer the ones that needed fixing, so leaving them
     // ticked invites a second pass over work already done.
     setSelected([]);
-    router.refresh();
   }
 
   async function openEdit(row: Row) {
@@ -82,6 +80,7 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
     setDetail(await getContact(id));
   }
 
+  const router = useRouter();
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
@@ -102,6 +101,15 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
         >
           <Icon name="edit" />
           {selected.length > 0 && <span className="text-sm font-medium tabular-nums">{selected.length}</span>}
+        </button>
+        <button
+          type="button"
+          onClick={() => setModal({ kind: "merge" })}
+          aria-label="Merge contacts"
+          title="Merge duplicate contacts"
+          className={iconButtonClass}
+        >
+          <Icon name="merge" />
         </button>
         <button
           type="button"
@@ -146,6 +154,10 @@ export function SuppliersManager({ rows, companyOptions }: { rows: Row[]; compan
             <p className="text-sm text-steel">Loading…</p>
           )}
         </Dialog>
+      )}
+
+      {modal?.kind === "merge" && (
+        <MergeContactsDialog onClose={() => setModal(null)} onDone={() => { setModal(null); router.refresh(); }} />
       )}
     </div>
   );

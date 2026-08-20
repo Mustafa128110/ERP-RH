@@ -4,8 +4,8 @@ import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { roles, permissions, rolePermissions, userRoles } from "@/lib/db/schema";
-import { getSession, invalidateSessions } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { getLiveSession, getSession, invalidateSessions } from "@/lib/auth/session";
+import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 
@@ -18,7 +18,7 @@ export interface RoleListItem {
 
 export async function listRoles(): Promise<RoleListItem[]> {
   const session = await getSession();
-  requirePermission(session, "roles", "view");
+  requireGlobalPermission(session, "roles", "view");
 
   // One query: each role with how many permissions it grants and how many users
   // hold it. Left joins so a role with neither still shows up as zero.
@@ -53,7 +53,7 @@ export interface PermissionCatalog {
 
 export async function getPermissionCatalog(): Promise<PermissionCatalog> {
   const session = await getSession();
-  requirePermission(session, "roles", "view");
+  requireGlobalPermission(session, "roles", "view");
 
   const all = await db.select().from(permissions);
 
@@ -81,7 +81,7 @@ export async function getPermissionCatalog(): Promise<PermissionCatalog> {
 // pre-tick the grid when editing.
 export async function getRolePermissionKeys(roleId: string): Promise<string[]> {
   const session = await getSession();
-  requirePermission(session, "roles", "view");
+  requireGlobalPermission(session, "roles", "view");
 
   const rows = await db
     .select({ module: permissions.module, action: permissions.action })
@@ -117,12 +117,15 @@ export async function createRole(_prevState: ActionResult | undefined, formData:
   return guard(
     "Couldn't create the role.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "roles", "create");
+      const session = await getLiveSession();
+      requireGlobalPermission(session, "roles", "create");
 
       const name = String(formData.get("name") ?? "").trim();
       const keys = readPermissionKeys(formData);
       if (!name) return { error: "Role name is required." };
+      if (keys.some((key) => !session.globalPermissions.has(key))) {
+        return { error: "You cannot put permissions into a role that you do not hold globally." };
+      }
 
       const permissionIds = await idsForKeys(keys);
 
@@ -149,12 +152,15 @@ export async function updateRole(roleId: string, _prevState: ActionResult | unde
   return guard(
     "Couldn't save the role.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "roles", "edit");
+      const session = await getLiveSession();
+      requireGlobalPermission(session, "roles", "edit");
 
       const name = String(formData.get("name") ?? "").trim();
       const keys = readPermissionKeys(formData);
       if (!name) return { error: "Role name is required." };
+      if (keys.some((key) => !session.globalPermissions.has(key))) {
+        return { error: "You cannot put permissions into a role that you do not hold globally." };
+      }
 
       const permissionIds = await idsForKeys(keys);
 
@@ -182,8 +188,8 @@ export async function updateRole(roleId: string, _prevState: ActionResult | unde
 
 export async function deleteRole(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't delete the role.", async () => {
-    const session = await getSession();
-    requirePermission(session, "roles", "edit");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "roles", "edit");
 
     const roleId = String(formData.get("roleId") ?? "");
 
@@ -206,5 +212,3 @@ export async function deleteRole(_prevState: ActionResult | undefined, formData:
     return { success: true };
   });
 }
-
-

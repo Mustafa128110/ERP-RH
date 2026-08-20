@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import type { CategoryNode } from "@/lib/actions/categories";
 import { saveCategoryTree, createCategoriesBatch } from "@/lib/actions/categories";
@@ -70,7 +69,6 @@ export function CategoryManager({ roots }: { roots: CategoryNode[] }) {
   const [tree, setTree] = useState<CategoryNode[]>(roots);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const router = useRouter();
 
   // Reset the working tree whenever the server sends a fresh copy (after an
   // inline add, a save, or an edit) — the sanctioned "adjust state during
@@ -86,7 +84,6 @@ export function CategoryManager({ roots }: { roots: CategoryNode[] }) {
 
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   function move(dragId: string, targetParentId: string | null) {
@@ -96,7 +93,6 @@ export function CategoryManager({ roots }: { roots: CategoryNode[] }) {
 
   async function addChild(parentId: string, name: string) {
     await createCategoriesBatch([{ name, parentId }]);
-    router.refresh();
   }
 
   async function save() {
@@ -105,7 +101,6 @@ export function CategoryManager({ roots }: { roots: CategoryNode[] }) {
     setSaving(false);
     if (res.success) {
       setDirty(false);
-      router.refresh();
     }
   }
 

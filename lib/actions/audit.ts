@@ -1,16 +1,16 @@
 import "server-only";
 import { and, desc, eq, gte, ilike, lte, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { auditLogs, users } from "@/lib/db/schema";
+import { auditLogs } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope } from "@/lib/auth/scope";
 
 // Not "use server": nothing here is called from the browser. The writer runs
 // inside the actions that mutate, the reader from the audit-logs page.
 
 export type AuditEntry = {
-  action: "create" | "update" | "delete" | "merge" | "import";
+  action: "create" | "update" | "delete" | "merge" | "import" | "cancel" | "approve";
   // What kind of record changed, lowercase and singular: "sale", "product".
   entity: string;
   entityId?: string | null;
@@ -74,7 +74,7 @@ export async function listAuditLogs(filters: AuditFilters = {}): Promise<AuditRo
   const session = await getSession();
   requirePermission(session, "audit", "view");
 
-  const where: (SQL | undefined)[] = [await companyInScope(auditLogs.companyId)];
+  const where: (SQL | undefined)[] = [await companyInPermissionScope(auditLogs.companyId, session, "audit")];
   if (filters.entity) where.push(eq(auditLogs.entity, filters.entity));
   if (filters.action) where.push(eq(auditLogs.action, filters.action as AuditEntry["action"]));
   if (filters.user) where.push(ilike(auditLogs.userName, `%${filters.user}%`));
@@ -107,7 +107,7 @@ export async function getAuditFacets(): Promise<{ entities: string[]; users: str
   const session = await getSession();
   requirePermission(session, "audit", "view");
 
-  const scope = await companyInScope(auditLogs.companyId);
+  const scope = await companyInPermissionScope(auditLogs.companyId, session, "audit");
   const [entities, names] = await Promise.all([
     db.selectDistinct({ entity: auditLogs.entity }).from(auditLogs).where(scope).orderBy(auditLogs.entity),
     db.selectDistinct({ userName: auditLogs.userName }).from(auditLogs).where(scope).orderBy(auditLogs.userName),
@@ -134,7 +134,12 @@ export async function historyFor(entity: string, entityId: string, summary?: str
       detail: auditLogs.detail,
     })
     .from(auditLogs)
-    .leftJoin(users, eq(users.id, auditLogs.userId))
-    .where(and(eq(auditLogs.entity, entity), summary ? or(eq(auditLogs.entityId, entityId), eq(auditLogs.summary, summary)) : eq(auditLogs.entityId, entityId)))
+    .where(
+      and(
+        await companyInPermissionScope(auditLogs.companyId, session, "audit"),
+        or(eq(auditLogs.entityId, entityId), summary ? eq(auditLogs.summary, summary) : undefined),
+        eq(auditLogs.entity, entity),
+      ),
+    )
     .orderBy(auditLogs.createdAt);
 }

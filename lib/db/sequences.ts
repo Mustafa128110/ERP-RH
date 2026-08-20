@@ -32,6 +32,22 @@ export async function nextSequenceValue(scope: string, tx: Db = db): Promise<num
   return Number(row.allocated);
 }
 
+// Reserve a contiguous block in the same single atomic statement. Batch grids
+// must not turn N blank SKUs into N network round trips inside one transaction.
+export async function nextSequenceRange(scope: string, count: number, tx: Db = db): Promise<number[]> {
+  if (count <= 0) return [];
+  const [row] = await tx
+    .insert(numberSequences)
+    .values({ scope, nextValue: count + 1 })
+    .onConflictDoUpdate({
+      target: numberSequences.scope,
+      set: { nextValue: sql`${numberSequences.nextValue} + ${count}` },
+    })
+    .returning({ first: sql<number>`${numberSequences.nextValue} - ${count}` });
+  const first = Number(row.first);
+  return Array.from({ length: count }, (_, index) => first + index);
+}
+
 // Read-only, and deliberately not a reservation: it powers the SKU the product
 // form shows before you submit. Nothing is consumed, so opening a form and
 // closing it doesn't burn a number, and two people opening the form at once

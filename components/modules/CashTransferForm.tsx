@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { createCashTransfer, deleteCashTransfer } from "@/lib/actions/transfers";
 import { Dialog } from "@/components/ui/Dialog";
-import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass } from "@/components/ui/form-styles";
+import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
 import { todayISO } from "@/lib/format";
 
@@ -36,7 +36,19 @@ export function CashTransferDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [state, action, pending] = useActionState(createCashTransfer, undefined);
+  // Wrapped so a transport failure (response lost after the server committed)
+  // becomes an inline error instead of throwing into the error boundary — the
+  // form stays, and a replayed Save is refused server-side as a duplicate.
+  const [state, action, pending] = useActionState(
+    async (prev: { error?: string; success?: boolean } | undefined, formData: FormData) => {
+      try {
+        return await createCashTransfer(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+    },
+    undefined,
+  );
   const [from, setFrom] = useState("");
   // One id per dialog session: a replayed submit (response lost after a
   // successful save) is refused by the server rather than moving the money twice.
@@ -130,10 +142,10 @@ export function DeleteCashTransferButton({ transferId, onDone }: { transferId: s
   }, [state?.success]);
 
   return (
-    <form action={action} onSubmit={(e) => { if (!confirm("Delete this transfer? The money goes back to the account it left.")) e.preventDefault(); }}>
+    <form action={action} onSubmit={(e) => { if (!confirm("Cancel this transfer? The money goes back to the account it left.")) e.preventDefault(); }}>
       <input type="hidden" name="documentId" value={transferId} />
       <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Deleting…" : "Delete this transfer"}
+        {pending ? "Cancelling…" : "Cancel this transfer"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

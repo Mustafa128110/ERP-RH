@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { StockPurchaseCreateForm, DeleteStockPurchaseButton } from "@/components/modules/StockPurchaseForm";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
@@ -14,10 +13,9 @@ import { PURCHASE_CSV_COLUMNS } from "@/lib/csv-columns";
 import { iconButtonClass, primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { DetailHover } from "@/components/ui/DetailHover";
 import type { ColumnDef, Row } from "@/lib/table";
-import { StockFilter } from "@/components/modules/StockFilters";
 import { MergePurchasesDialog } from "@/components/modules/MergePurchasesDialog";
+import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 type PurchaseDetail = NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>;
 
@@ -60,53 +58,46 @@ type DocumentTypeOption = {
 
 export function StockPurchaseManager({
   rows,
-  companyId,
   companyOptions,
   supplierOptions,
   itemOptions,
   documentTypeOptions,
   locationOptions,
   unitOptions,
-  categoryOptions,
-  brandOptions,
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
 }: {
   rows: PurchaseRow[];
-  // Whatever the ?company= filter is set to, so an export hands back the same
-  // purchases the list is showing rather than every company in scope.
-  companyId?: string;
   companyOptions: Option[];
   supplierOptions: ScopedOption[];
-  itemOptions: ScopedOption[];
+  itemOptions: (ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean })[];
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: Option[];
   unitOptions: Option[];
-  categoryOptions: Option[];
-  brandOptions: Option[];
   bankAccountOptions: Option[];
   cashAccountOptions: Option[];
   chequeOptions: Option[];
+  taxOptions: (Option & { rate: string })[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
 }) {
   const [open, setOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseDetail | null>(null);
   const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-  const router = useRouter();
 
   function close() {
     setOpen(false);
     setEditing(null);
     setMergeOpen(false);
-    router.refresh();
   }
 
   async function openEdit(id: string) {
-    setLoadingId(id);
     const [detail, cheques] = await Promise.all([getStockPurchase(id), listChequesForPurchases(id)]);
-    setLoadingId(null);
     if (detail) {
       setEditing(detail);
       setEditChequeOptions(cheques);
@@ -132,36 +123,6 @@ export function StockPurchaseManager({
   // cells — both of which a ColumnDef.render does, so this list gets the shared
   // table's keyboard navigation instead of being the one that hasn't got it.
   const columns: ColumnDef[] = [
-    {
-      key: "number",
-      label: "Number",
-      render: (row) => {
-        const r = row as unknown as PurchaseRow;
-        return (
-          <DetailHover
-            trigger={
-              <span className="cursor-pointer font-semibold text-navy-800 hover:text-brass-700">
-                {r.number}
-                {loadingId === r.id ? "…" : ""}
-              </span>
-            }
-            heading={r.number}
-            // Subtotal, then only the adjustments this purchase actually has.
-            rows={[
-              { label: "Subtotal", value: r.breakdown.subtotal },
-              ...(r.breakdown.discount ? [{ label: "Discount", value: <span className="text-success">-{r.breakdown.discount}</span> }] : []),
-              ...(r.breakdown.tax ? [{ label: "Tax", value: `+${r.breakdown.tax}` }] : []),
-              ...(r.breakdown.shipping ? [{ label: "Shipping", value: `+${r.breakdown.shipping}` }] : []),
-              { label: "Total", value: <span className="font-semibold text-navy-800">{r.breakdown.total}</span> },
-            ]}
-            footer={`${r.items.length} line(s) · ${r.supplier}`}
-          />
-        );
-      },
-    },
-    // Date second: after the number, it's what a row gets found by. Supplier and
-    // company go to the far end — they're what a row is checked against once
-    // it's found, not what it's scanned for.
     { key: "date", label: "Date" },
     { key: "item", label: "Item", render: (row) => stacked(row, (it) => it.itemName) },
     { key: "qty", label: "Qty", align: "right", render: (row) => stacked(row, (it) => it.qty) },
@@ -191,8 +152,6 @@ export function StockPurchaseManager({
   return (
     <div className="flex h-full flex-col gap-2">
       <PageHeader title="Stock Purchase" subtitle={`${rows.length} purchase(s)`}>
-        {/* Same ?company= filter the stock page uses. */}
-        <StockFilter param="company" allLabel="All Companies" options={companyOptions} />
         <button
           type="button"
           onClick={() => setMergeOpen(true)}
@@ -206,8 +165,8 @@ export function StockPurchaseManager({
           columns={PURCHASE_CSV_COLUMNS}
           name="stock-purchases"
           onImport={importStockPurchasesCsv}
-          onExport={() => exportStockPurchasesCsv(companyId)}
-          onDone={() => router.refresh()}
+          onExport={() => exportStockPurchasesCsv()}
+          onDone={() => undefined}
         />
         <button
           type="button"
@@ -240,11 +199,12 @@ export function StockPurchaseManager({
             documentTypeOptions={documentTypeOptions}
             locationOptions={locationOptions}
             unitOptions={unitOptions}
-            categoryOptions={categoryOptions}
-            brandOptions={brandOptions}
             bankAccountOptions={bankAccountOptions}
             cashAccountOptions={cashAccountOptions}
             chequeOptions={chequeOptions}
+            taxOptions={taxOptions}
+            conversionOptions={conversionOptions}
+            taxSettings={taxSettings}
             onDone={close}
           />
         </Dialog>
@@ -262,11 +222,12 @@ export function StockPurchaseManager({
               documentTypeOptions={documentTypeOptions}
               locationOptions={locationOptions}
               unitOptions={unitOptions}
-              categoryOptions={categoryOptions}
-              brandOptions={brandOptions}
               bankAccountOptions={bankAccountOptions}
               cashAccountOptions={cashAccountOptions}
               chequeOptions={editChequeOptions}
+              taxOptions={taxOptions}
+              conversionOptions={conversionOptions}
+              taxSettings={taxSettings}
               onDone={close}
             />
             <div className="rounded border border-error/30 bg-error-tint p-4">

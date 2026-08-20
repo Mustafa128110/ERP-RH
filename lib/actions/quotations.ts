@@ -1,20 +1,23 @@
 "use server";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, contacts, documentLines, documentNumberLedger, documentTypes, documents, items, units } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { resolveContactId, resolveItemId, resolveUnitId } from "@/lib/actions/resolve-refs";
+import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { round1, todayISO } from "@/lib/format";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { createSale } from "@/lib/actions/sales";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { financialDocumentError } from "@/lib/financial-input";
+import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
+import { resolveDocumentTax } from "@/lib/queries/document-tax";
 
 // A quotation is an ordinary document of type QUOTATION — the universal model
 // already had the type and the QT series, so this needed three nullable columns
@@ -70,7 +73,7 @@ export type QuotationListRow = {
   grandTotal: string;
   // Derived, not stored: a quotation's state is a fact about its lines, and a
   // stored copy is a second version of the truth waiting to disagree.
-  status: "Open" | "Partly converted" | "Converted" | "Expired";
+  status: "Open" | "Partly converted" | "Converted" | "Expired" | "Cancelled";
   // What was quoted, for the hover panel — name, how much, how much of it has
   // been invoiced already.
   lines: { name: string; quantity: string; converted: string }[];
@@ -78,7 +81,8 @@ export type QuotationListRow = {
 
 // Open / partly converted / converted, plus expiry. Expiry loses to conversion:
 // something already invoiced is converted, whatever its validity date says.
-function statusOf(quoted: number, converted: number, validUntil: string | null): QuotationListRow["status"] {
+function statusOf(quoted: number, converted: number, validUntil: string | null, documentStatus?: string): QuotationListRow["status"] {
+  if (documentStatus === "cancelled") return "Cancelled";
   if (converted > 0 && converted >= quoted) return "Converted";
   if (validUntil && validUntil < todayISO()) return "Expired";
   if (converted > 0) return "Partly converted";
@@ -88,7 +92,7 @@ function statusOf(quoted: number, converted: number, validUntil: string | null):
 export async function listQuotations(): Promise<QuotationListRow[]> {
   const session = await getSession();
   requirePermission(session, "quotations", "view");
-  const scope = await companyInScope(documents.companyId);
+  const scope = await companyInPermissionScope(documents.companyId, session, "quotations");
 
   // The line totals come back as an aggregate rather than as rows: the list only
   // needs "how much of this is converted", and pulling every line of every
@@ -98,11 +102,12 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
       id: documents.id,
       number: documents.number,
       companyId: documents.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       customer: contacts.displayName,
       documentDate: documents.documentDate,
       validUntil: documents.validUntil,
       grandTotal: documents.grandTotal,
+      documentStatus: documents.status,
       quoted: sql<string>`coalesce(sum(${documentLines.quantity}), 0)`,
       converted: sql<string>`coalesce(sum(${documentLines.convertedQuantity}), 0)`,
       // The lines, for the hover panel on the number. Aggregated in the same
@@ -137,7 +142,7 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
     documentDate: r.documentDate,
     validUntil: r.validUntil,
     grandTotal: r.grandTotal,
-    status: statusOf(Number(r.quoted), Number(r.converted), r.validUntil),
+    status: statusOf(Number(r.quoted), Number(r.converted), r.validUntil, r.documentStatus),
     lines: (r.lines ?? []).map((l) => ({
       name: l.name ?? "—",
       quantity: l.quantity,
@@ -152,7 +157,12 @@ export async function getQuotation(documentId: string) {
 
   // Both only need the id we were handed, so they share one round trip.
   const [[doc], lineRows] = await Promise.all([
-    db.select().from(documents).where(and(eq(documents.id, documentId), await companyInScope(documents.companyId))).limit(1),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInPermissionScope(documents.companyId, session, "quotations")))
+      .limit(1),
     db
       .select({
         itemId: documentLines.itemId,
@@ -184,9 +194,11 @@ export async function getQuotation(documentId: string) {
     validUntil: doc.validUntil ?? "",
     discountTotal: doc.discountTotal,
     taxTotal: doc.taxTotal,
+    taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     grandTotal: doc.grandTotal,
-    status: statusOf(quoted, converted, doc.validUntil),
+    documentStatus: doc.status,
+    status: statusOf(quoted, converted, doc.validUntil, doc.status),
     lines: lineRows.map(
       (l): QuotationLine => ({
         itemId: l.itemId ?? "",
@@ -210,7 +222,6 @@ function readForm(formData: FormData) {
   const contactId = String(formData.get("contactId") ?? "").trim() || null;
   const contactName = String(formData.get("contactName") ?? "").trim() || null;
   const discountTotal = String(formData.get("discountTotal") ?? "0") || "0";
-  const taxTotal = String(formData.get("taxTotal") ?? "0") || "0";
   const shippingTotal = String(formData.get("shippingTotal") ?? "0") || "0";
 
   let lines: LineInput[] = [];
@@ -223,8 +234,13 @@ function readForm(formData: FormData) {
   }
   const validLines = lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
 
+  const financialError = financialDocumentError(validLines, [
+    { label: "Discount", value: discountTotal },
+    { label: "Shipping", value: shippingTotal },
+  ]);
+
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  const grandTotal = round1(subtotal - Number(discountTotal) + Number(shippingTotal));
 
   const error = !companyId
     ? "Company is required."
@@ -234,39 +250,44 @@ function readForm(formData: FormData) {
         ? "Customer is required."
         : validLines.length === 0
           ? "Add at least one item."
+          : financialError
+            ? financialError
           : // A quotation that expired before it was written helps nobody, and is
             // almost always a mistyped year.
             validUntil && validUntil < documentDate
             ? "Valid Until can't be before the quotation date."
             : null;
 
-  return { companyId, documentDate, validUntil, contactId, contactName, discountTotal, taxTotal, shippingTotal, validLines, subtotal, grandTotal, error };
+  return { companyId, documentDate, validUntil, contactId, contactName, taxId: String(formData.get("taxId") ?? "") || null, discountTotal, shippingTotal, validLines, subtotal, grandTotal, error };
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function writeLines(tx: Tx, companyId: string, documentId: string, lines: LineInput[]) {
-  const rows = [];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
+async function writeLines(tx: Tx, companyId: string, documentId: string, lines: LineInput[], tax: { taxable: boolean[]; lineTaxAmounts: number[] }) {
+  const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
+  const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const baseQuantities = await resolveBaseQuantities(tx, lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })));
+  const rows = lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
-    rows.push({
+    return {
       companyId,
       documentId,
       lineNo: i + 1,
       sortOrder: i,
       // A name typed over the dropdown creates the record, the same rule the
       // sale and purchase grids follow.
-      itemId: await resolveItemId(tx, companyId, l.itemId || null, l.itemName || null),
-      unitId: await resolveUnitId(tx, l.unitId || null, l.unitName || null),
+      itemId: itemIds[i] ?? null,
+      unitId: unitIds[i] ?? null,
       quantity: String(quantity),
-      baseQuantity: String(quantity),
+      baseQuantity: String(baseQuantities[i]),
       unitPrice: String(unitPrice),
       lineTotal: String(round1(quantity * unitPrice)),
+      taxable: tax.taxable[i] ?? false,
+      taxAmount: String(tax.lineTaxAmounts[i] ?? 0),
       convertedQuantity: "0",
-    });
-  }
+    };
+  });
   if (rows.length > 0) await tx.insert(documentLines).values(rows);
 }
 
@@ -274,11 +295,24 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
   return guard(
     "Couldn't save the quotation.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "quotations", "create");
+      const session = await getLiveSession();
 
       const f = readForm(formData);
       if (f.error) return { error: f.error };
+      // Scoped to the submitted company — the user must both belong to it and
+      // hold quotations.create THERE. A queued submission was filled against
+      // the offline cache, which can list a company access or permission was
+      // revoked from since; the cache prepares work, it never grants it. A
+      // permission held in some other company, or an access revoked since the
+      // form was filled, is refused here rather than written into.
+      requirePermission(session, "quotations", "create", { companyId: f.companyId });
+      const tax = await resolveDocumentTax(
+        f.companyId,
+        f.taxId,
+        f.validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+        Number(f.discountTotal),
+        Number(f.shippingTotal),
+      );
       const operationId = readOperationId(formData);
 
       const documentType = await quotationType(f.companyId);
@@ -305,15 +339,18 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
             contactId,
             subtotal: String(f.subtotal),
             discountTotal: f.discountTotal,
-            taxTotal: f.taxTotal,
+            taxTotal: String(tax.taxTotal),
+            taxId: tax.taxId,
+            taxRate: String(tax.taxRate),
+            taxInclusive: tax.taxInclusive,
             shippingTotal: f.shippingTotal,
-            grandTotal: String(f.grandTotal),
+            grandTotal: String(tax.grandTotal),
             createdBy: session.userId,
           })
           .returning({ id: documents.id });
 
         await tx.insert(documentNumberLedger).values({ companyId: f.companyId, documentTypeId: documentType.id, number, documentId: doc.id });
-        await writeLines(tx, f.companyId, doc.id, f.validLines);
+        await writeLines(tx, f.companyId, doc.id, f.validLines, tax);
         return doc.id;
       });
 
@@ -327,7 +364,7 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
         entityId: createdId,
         summary: createdNumber,
         companyId: f.companyId,
-        detail: `Total ${f.grandTotal}`,
+        detail: `Total ${tax.grandTotal}`,
       });
       return { success: true, id: createdId };
     },
@@ -337,18 +374,31 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
 
 export async function updateQuotation(documentId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the quotation.", async () => {
-    const session = await getSession();
-    requirePermission(session, "quotations", "edit");
+    const session = await getLiveSession();
 
     const f = readForm(formData);
     if (f.error) return { error: f.error };
+    // Scoped to the submitted company: membership and per-company permission,
+    // so a forged or stale companyId can't steer an edit into (or out of) a set
+    // of books the user can't act on.
+    requirePermission(session, "quotations", "edit", { companyId: f.companyId });
+    const tax = await resolveDocumentTax(
+      f.companyId,
+      f.taxId,
+      f.validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(f.discountTotal),
+      Number(f.shippingTotal),
+    );
 
     const [existing] = await db
-      .select({ number: documents.number })
+      .select({ number: documents.number, companyId: documents.companyId, status: documents.status })
       .from(documents)
-      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existing) return { error: "Quotation not found." };
+    if (existing.status !== "pending") return { error: "A cancelled quotation cannot be edited." };
+    if (existing.companyId !== f.companyId) return { error: "A quotation can't be moved to another company. Delete it and enter it in the correct company." };
 
     // Refused rather than silently dropping the converted quantities: the lines
     // are being replaced wholesale below, and rewriting a quotation that already
@@ -371,48 +421,51 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
           contactId: await resolveContactId(tx, f.companyId, f.contactId, f.contactName),
           subtotal: String(f.subtotal),
           discountTotal: f.discountTotal,
-          taxTotal: f.taxTotal,
+          taxTotal: String(tax.taxTotal),
+          taxId: tax.taxId,
+          taxRate: String(tax.taxRate),
+          taxInclusive: tax.taxInclusive,
           shippingTotal: f.shippingTotal,
-          grandTotal: String(f.grandTotal),
+          grandTotal: String(tax.grandTotal),
           updatedAt: new Date(),
         })
         .where(eq(documents.id, documentId));
 
       // No inventory_transactions to clear first — a quotation never wrote any.
       await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-      await writeLines(tx, f.companyId, documentId, f.validLines);
+      await writeLines(tx, f.companyId, documentId, f.validLines, tax);
     });
 
     invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.units, CACHE.contacts, CACHE.cheques);
     revalidatePath("/sales/quotations");
-    await recordAudit({ action: "update", entity: "quotation", entityId: documentId, summary: existing.number, companyId: f.companyId, detail: `Total ${f.grandTotal}` });
+    await recordAudit({ action: "update", entity: "quotation", entityId: documentId, summary: existing.number, companyId: f.companyId, detail: `Total ${tax.grandTotal}` });
     return { success: true };
   });
 }
 
 export async function deleteQuotation(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete — this quotation is still referenced elsewhere.", async () => {
-    const session = await getSession();
+  return guard("Can't cancel this quotation.", async () => {
+    const session = await getLiveSession();
     requirePermission(session, "quotations", "delete");
 
     const documentId = String(formData.get("documentId") ?? "");
     const [doomed] = await db
       .select({ number: documents.number, companyId: documents.companyId })
       .from(documents)
-      .where(and(eq(documents.id, documentId), await companyInScope(documents.companyId)))
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "pending"), eq(documentTypes.code, "QUOTATION"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!doomed) return { error: "Quotation not found." };
+    // The delete permission is checked against the row's own company — a
+    // guessed id from a company the user can't delete in is refused even when
+    // they hold the permission somewhere else.
+    requirePermission(session, "quotations", "delete", { companyId: doomed.companyId });
 
-    // The invoices raised from it keep their own lines and stock; they just stop
-    // pointing back (source_document_id is ON DELETE SET NULL).
-    await db.transaction(async (tx) => {
-      await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-      await tx.delete(documents).where(eq(documents.id, documentId));
-    });
+    await db.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
 
     invalidateLookups(CACHE.cheques);
     revalidatePath("/sales/quotations");
-    await recordAudit({ action: "delete", entity: "quotation", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
+    await recordAudit({ action: "cancel", entity: "quotation", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
     return { success: true };
   });
 }
@@ -433,12 +486,16 @@ export async function convertQuotation(
   formData: FormData,
 ): Promise<ActionResult & { invoiceId?: string }> {
   return guard("Couldn't convert the quotation.", async () => {
-    const session = await getSession();
-    requirePermission(session, "quotations", "edit");
-    requirePermission(session, "sales", "create");
+    const session = await getLiveSession();
 
     const quotation = await getQuotation(documentId);
     if (!quotation) return { error: "Quotation not found." };
+    if (quotation.documentStatus !== "pending") return { error: "A cancelled quotation cannot be converted." };
+    // Both sides scoped to the quotation's company: editing the quotation (the
+    // converted quantities are written below) and raising the invoice from it
+    // both require the permission in THAT company, not merely somewhere.
+    requirePermission(session, "quotations", "edit", { companyId: quotation.companyId });
+    requirePermission(session, "sales", "create", { companyId: quotation.companyId });
 
     let requested: Record<number, string> = {};
     try {
@@ -492,7 +549,7 @@ export async function convertQuotation(
     // conversion carries them; a partial one leaves them for the last invoice.
     const whole = converting.length === quotation.lines.length && converting.every(({ index, quantity }) => quantity >= Number(quotation.lines[index].quantity) - Number(quotation.lines[index].convertedQuantity));
     saleForm.set("discountTotal", whole ? quotation.discountTotal : "0");
-    saleForm.set("taxTotal", whole ? quotation.taxTotal : "0");
+    saleForm.set("taxId", whole ? (quotation.taxId ?? "") : "");
     saleForm.set("shippingTotal", whole ? quotation.shippingTotal : "0");
     // Unpaid: a converted quotation is an invoice raised, not money taken. It is
     // settled from the invoice list like any other.
@@ -505,12 +562,14 @@ export async function convertQuotation(
     // above this line changed, and the same conversion can simply be retried.
     await db.transaction(async (tx) => {
       await tx.update(documents).set({ sourceDocumentId: documentId }).where(eq(documents.id, sale.id!));
-      for (const { index, quantity } of converting) {
-        await tx
-          .update(documentLines)
-          .set({ convertedQuantity: sql`coalesce(${documentLines.convertedQuantity}, 0) + ${String(quantity)}` })
-          .where(and(eq(documentLines.documentId, documentId), eq(documentLines.lineNo, index + 1)));
-      }
+      const values = sql.join(converting.map(({ index, quantity }) => sql`(${index + 1}::int, ${String(quantity)}::numeric)`), sql`, `);
+      await tx.execute(sql`
+        UPDATE document_lines dl
+        SET converted_quantity = coalesce(dl.converted_quantity, 0) + v.quantity
+        FROM (VALUES ${values}) AS v(line_no, quantity)
+        WHERE dl.document_id = ${documentId}
+          AND dl.line_no = v.line_no
+      `);
     });
 
     revalidatePath("/sales/quotations");

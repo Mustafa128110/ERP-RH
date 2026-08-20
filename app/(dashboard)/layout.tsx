@@ -4,19 +4,32 @@ import { getAccessibleCompanies } from "@/lib/actions/scope";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { KeyboardShortcuts } from "@/components/layout/KeyboardShortcuts";
+import { SessionSeed } from "@/components/layout/SessionSeed";
+import { SyncProvider } from "@/components/layout/SyncProvider";
+import { OfflineReadiness } from "@/components/layout/OfflineReadiness";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
   const [companies, selected] = await Promise.all([getAccessibleCompanies(), getSelectedScope()]);
+  const permissions = new Set(session.globalPermissions);
+  for (const companyPermissions of session.permissionsByCompany.values()) {
+    for (const permission of companyPermissions) permissions.add(permission);
+  }
 
   return (
     // Printing (the invoice's Download PDF) takes the page as it stands, so the
     // chrome drops out and the scroll container is released — otherwise the PDF
     // is one screenful of a scrolled div, framed by the sidebar.
     <div className="flex h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
+      {/* Who this browser is, for the user-scoped local persistence. */}
+      <SessionSeed userId={session.userId} />
+      <SyncProvider>
+      {/* Seeds the client reference cache with the offline workflows' minimum
+          data after login — renders nothing. */}
+      <OfflineReadiness />
       <KeyboardShortcuts />
       <div className="contents print:hidden">
-        <Sidebar />
+        <Sidebar permissions={[...permissions]} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:block print:overflow-visible">
         <div className="print:hidden">
@@ -33,6 +46,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {children}
         </main>
       </div>
+      </SyncProvider>
     </div>
   );
 }

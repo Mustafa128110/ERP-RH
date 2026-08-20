@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { sessionQuery } from "@/lib/db/session-query";
+import { sessionQuery, type SessionRow } from "@/lib/db/session-query";
 import { createClient } from "@/lib/supabase/server";
 import { cached, invalidate, MINUTE } from "@/lib/cache";
 
@@ -35,14 +35,46 @@ export interface AuthSession {
 // this is a cache with explicit invalidation rather than a staleness window; the
 // TTL is just a backstop for anything that learns to change permissions later.
 //
-// ponytail: in-process Map, so it is per server instance. Correct for the single
-// instance this runs on; behind a load balancer, move it to Redis or drop the
-// TTL to zero and take the round trip back.
+// Design note: in-process Map, so it is per server instance. It serves READS —
+// what a page shows. Writes must never rest on it: a revocation that lands on
+// another instance (or straight in the database) must not keep authorizing
+// writes here for up to the TTL, so every mutation reads its session through
+// getLiveSession() below instead. The TTL therefore bounds only display
+// staleness, never an authorization decision.
 const SESSION_TTL = MINUTE;
 const SESSION_KEY = "session";
 
 export function invalidateSessions() {
   invalidate(SESSION_KEY);
+}
+
+// The row → session shape, shared by the cached read and the live write read.
+function shapeSession(row: SessionRow): AuthSession {
+  const globalPermissions = new Set<string>();
+  const permissionsByCompany = new Map<string, Set<string>>();
+  for (const { companyId, key: permission } of row.perms) {
+    if (companyId === null) {
+      globalPermissions.add(permission);
+    } else {
+      const set = permissionsByCompany.get(companyId) ?? new Set<string>();
+      set.add(permission);
+      permissionsByCompany.set(companyId, set);
+    }
+  }
+
+  return {
+    userId: row.id,
+    supabaseAuthId: row.supabase_auth_id,
+    name: row.name,
+    email: row.email,
+    roleNames: row.role_names,
+    globalPermissions,
+    permissionsByCompany,
+    companyIds: row.company_ids,
+    warehouseIds: row.warehouse_ids,
+    uiTheme: row.ui_theme,
+    uiScale: row.ui_scale,
+  } satisfies AuthSession;
 }
 
 // Cached per-request (React `cache()`, resets on the next request) — not
@@ -69,32 +101,7 @@ const getCookieSession = cache(async (): Promise<AuthSession | null> => {
   const session = await cached(key, SESSION_TTL, async () => {
     const [row] = await sessionQuery(authId);
     if (!row || row.status !== "active") return null;
-
-    const globalPermissions = new Set<string>();
-    const permissionsByCompany = new Map<string, Set<string>>();
-    for (const { companyId, key: permission } of row.perms) {
-      if (companyId === null) {
-        globalPermissions.add(permission);
-      } else {
-        const set = permissionsByCompany.get(companyId) ?? new Set<string>();
-        set.add(permission);
-        permissionsByCompany.set(companyId, set);
-      }
-    }
-
-    return {
-      userId: row.id,
-      supabaseAuthId: row.supabase_auth_id,
-      name: row.name,
-      email: row.email,
-      roleNames: row.role_names,
-      globalPermissions,
-      permissionsByCompany,
-      companyIds: row.company_ids,
-      warehouseIds: row.warehouse_ids,
-      uiTheme: row.ui_theme,
-      uiScale: row.ui_scale,
-    } satisfies AuthSession;
+    return shapeSession(row);
   });
 
   // Deliberately no negative caching: a user who was just created or
@@ -102,6 +109,33 @@ const getCookieSession = cache(async (): Promise<AuthSession | null> => {
   // Concurrent callers still share the in-flight lookup, they just don't keep it.
   if (!session) invalidate(key);
   return session;
+});
+
+// The write-time session: the same shape, read fresh from the database on every
+// request. It deliberately bypasses the in-process Map — a permission revoked on
+// another server instance (or directly in the database) must not keep
+// authorizing writes here for up to the TTL. React `cache()` still dedupes
+// within a single request, so an action that checks several permissions pays
+// one query, not several; across requests there is no cache to go stale.
+//
+// Every mutation in lib/actions/* reads its session through this, so the final
+// authority for a write is always "what the database says right now", never
+// "what this process happened to cache". Reads (list/get/view actions and page
+// renders) keep getSession() — a stale company list on screen is a display
+// issue; a stale authorization on a write is a breach.
+export async function getLiveSession(): Promise<AuthSession | null> {
+  return getLiveCookieSession();
+}
+
+const getLiveCookieSession = cache(async (): Promise<AuthSession | null> => {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  const authId = data?.claims?.sub;
+  if (!authId) return null;
+
+  const [row] = await sessionQuery(authId);
+  if (!row || row.status !== "active") return null;
+  return shapeSession(row);
 });
 
 export async function requireSession(): Promise<AuthSession> {

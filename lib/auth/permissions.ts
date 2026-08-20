@@ -44,7 +44,25 @@ export function requirePermission(
   if (scope?.companyId && !session.companyIds.includes(scope.companyId)) {
     throw new PermissionError(`No access to company ${scope.companyId}`);
   }
-  if (scope?.warehouseId && !session.warehouseIds.includes(scope.warehouseId)) {
+  // Empty warehouseIds means unrestricted — the user wasn't assigned to
+  // specific warehouses, so they can access all of them.
+  if (scope?.warehouseId && session.warehouseIds.length > 0 && !session.warehouseIds.includes(scope.warehouseId)) {
     throw new PermissionError(`No access to warehouse ${scope.warehouseId}`);
+  }
+}
+
+// Account administration is system-wide: a company-scoped users.* grant must
+// never be enough to create, deactivate, delete, or globally promote a person.
+// Keep this separate from requirePermission()'s intentionally permissive
+// no-scope UI check so callers have to opt into global authority explicitly.
+export function requireGlobalPermission(
+  session: AuthSession | null,
+  moduleName: string,
+  action: string,
+): asserts session is AuthSession {
+  if (!session) throw new PermissionError("Not authenticated");
+  const key = `${moduleName}.${action}`;
+  if (!session.globalPermissions.has(key)) {
+    throw new PermissionError(`Missing global permission ${key}`);
   }
 }

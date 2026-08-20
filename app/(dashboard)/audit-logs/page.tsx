@@ -1,17 +1,8 @@
-import { listAuditLogs, getAuditFacets } from "@/lib/actions/audit";
+import { listAuditLogs } from "@/lib/actions/audit";
 import { AuditLogManager } from "@/components/modules/AuditLogManager";
 import { ListFilters } from "@/components/ui/ListFilters";
-import { StockFilter } from "@/components/modules/StockFilters";
 
 export const dynamic = "force-dynamic";
-
-const ACTIONS = [
-  { id: "create", name: "Created" },
-  { id: "update", name: "Edited" },
-  { id: "delete", name: "Deleted" },
-  { id: "merge", name: "Merged" },
-  { id: "import", name: "Imported" },
-];
 
 export default async function Page({
   searchParams,
@@ -19,23 +10,13 @@ export default async function Page({
   searchParams: Promise<{ user?: string; entity?: string; action?: string; from?: string; to?: string }>;
 }) {
   const filters = await searchParams;
-  const [entries, facets] = await Promise.all([listAuditLogs(filters), getAuditFacets()]);
+  const entries = await listAuditLogs(filters);
 
   return (
     <AuditLogManager
       entries={entries}
       filters={
-        // Entity and action narrow the list, and the date range is what reaches
-        // past the 200-row cap. Finding a row that's already on screen is the
-        // table's own search box.
-        <ListFilters key="filters">
-          <StockFilter
-            param="entity"
-            allLabel="All records"
-            options={facets.entities.map((e) => ({ id: e, name: e.replace(/^./, (c) => c.toUpperCase()) }))}
-          />
-          <StockFilter param="action" allLabel="All actions" options={ACTIONS} />
-        </ListFilters>
+        <ListFilters key="filters" />
       }
     />
   );

@@ -11,6 +11,8 @@ export type StockItem = {
   sku: string;
   itemName: string;
   company: string;
+  companyId: string;
+  lowStockQty: number;
   location: string;
   unitTotals: StockUnitTotal[];
   breakdown: StockBreakdownRow[];
@@ -26,7 +28,7 @@ export function StockLevels({ items }: { items: StockItem[] }) {
   const totalsOf = (row: Row) => (row as unknown as { unitTotals: StockUnitTotal[] }).unitTotals;
 
   const columns: ColumnDef[] = [
-    { key: "sku", label: "SKU" },
+    { key: "sku", label: "SKU", hideOnMobile: true },
     { key: "itemName", label: "Product" },
     { key: "company", label: "Company" },
     {
@@ -91,7 +93,7 @@ export function StockLevels({ items }: { items: StockItem[] }) {
     itemName: it.itemName,
     company: it.company,
     location: it.location,
-    status: it.unitTotals.some((u) => u.onHand > 0) ? "OK" : "Out",
+    status: it.unitTotals.every((u) => u.onHand <= 0) ? "Out" : it.unitTotals.some((u) => u.onHand <= it.lowStockQty) ? "Low" : "OK",
     unitTotals: it.unitTotals,
     breakdown: it.breakdown,
   })) as unknown as Row[];

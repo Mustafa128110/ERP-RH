@@ -4,12 +4,13 @@ import { useActionState, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createInterCompanySale, updateInterCompanySale, type InterCompanyResult } from "@/lib/actions/inter-company";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { DateField } from "@/components/ui/DateField";
 import { money, todayISO } from "@/lib/format";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -21,7 +22,9 @@ type Option = { id: string; name: string };
 type ItemOption = Option & { companyId: string; rate: string | null; salesRate: string | null };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string; rate: string };
 
-// One draft per form: only one inter-company sale is ever being typed.
+// One draft per form: only one inter-company sale is ever being typed. The user
+// id is appended at the call site (intercompany:<uid>) so a shared browser never
+// offers one user's half-typed sale to another.
 const INTERCOMPANY_DRAFT_KEY = "intercompany";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", rate: "" });
@@ -95,6 +98,11 @@ export function InterCompanyFormPage({
   const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
   const [fromLocationId, setFromLocationId] = useState(() => defaults?.fromLocationId ?? "");
   const [toLocationId, setToLocationId] = useState(() => defaults?.toLocationId ?? "");
+  // The draft key is composed per render from the logged-in user — SessionSeed
+  // (in the layout) sets the id before children render, so the first render
+  // already carries the scoped key.
+  const userId = useClientUserId();
+  const intercompanyDraftKey = userId ? `${INTERCOMPANY_DRAFT_KEY}:${userId}` : INTERCOMPANY_DRAFT_KEY;
 
   // --- Draft ----------------------------------------------------------------
   // New sales are entered back to back, so a created one clears the form; a
@@ -104,7 +112,7 @@ export function InterCompanyFormPage({
   const draftState = { lines, sellerCompanyId, buyerCompanyId, documentDate, fromLocationId, toLocationId };
   type InterCompanyDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<InterCompanyDraft>(INTERCOMPANY_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<InterCompanyDraft>(intercompanyDraftKey, {
     state: draftState,
     enabled: !isEdit,
     hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
@@ -134,10 +142,19 @@ export function InterCompanyFormPage({
   // the same transaction as the sale, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: InterCompanyResult | undefined, formData: FormData) => {
-    const result = isEdit ? await updateInterCompanySale(saleId!, prev, formData) : await createInterCompanySale(prev, formData);
+    // A transport failure must not throw into the error boundary — that would
+    // lose the form (and its operation id), and a restored draft would mint a
+    // fresh id and post the sale twice. Keep the form alive; a replayed Save
+    // is then refused server-side as a duplicate.
+    let result: InterCompanyResult | undefined;
+    try {
+      result = isEdit ? await updateInterCompanySale(saleId!, prev, formData) : await createInterCompanySale(prev, formData);
+    } catch {
+      return { error: TRANSPORT_ERROR_MESSAGE };
+    }
     if (result?.success) {
       // Saved — the local copy has nothing left to protect.
-      clearDraft(INTERCOMPANY_DRAFT_KEY);
+      clearDraft(intercompanyDraftKey);
       if (onDone) onDone();
       else if (!isEdit) resetForm();
     }

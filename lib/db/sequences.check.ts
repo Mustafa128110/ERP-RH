@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "./index";
 import { numberSequences } from "./schema";
-import { SKU_SCOPE, documentScope, formatSku, nextSequenceValue, peekSequenceValue } from "./sequences";
+import { SKU_SCOPE, documentScope, formatSku, nextSequenceRange, nextSequenceValue, peekSequenceValue } from "./sequences";
 
 // The reason number_sequences exists is that "read the count, add one" hands two
 // concurrent creates the same invoice number. So the check that matters is the
@@ -39,6 +39,15 @@ async function main() {
   assert.equal(await peekSequenceValue(b), 1);
   assert.equal(await nextSequenceValue(b), 1, "peeking must not have consumed anything");
   console.log("ok  peek does not consume");
+
+  // A batch reserves one contiguous block in one statement, and the next
+  // caller starts immediately after it.
+  const range = scope("range");
+  assert.deepEqual(await nextSequenceRange(range, 5), [1, 2, 3, 4, 5]);
+  assert.deepEqual(await nextSequenceRange(range, 3), [6, 7, 8]);
+  assert.equal(await nextSequenceValue(range), 9);
+  assert.deepEqual(await nextSequenceRange(range, 0), []);
+  console.log("ok  batch ranges are contiguous and atomic");
 
   // The one that matters: 25 concurrent allocations, no duplicates, no gaps.
   const c = scope("concurrent");

@@ -23,7 +23,6 @@
 @theme inline {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Fraunces", ui-serif, Georgia, serif;
-  --font-mono: "Source Code Pro", ui-monospace, monospace;
 }
 
 @theme {
@@ -405,23 +404,6 @@ input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   appearance: none;
   margin: 0;
-}
-
-/* All numbers — display cells, stat cards, form values, inputs — use Source
- * Code Pro for a monospaced, tabular look. The .num class covers explicit
- * number spans; tabular-nums already used in 100+ places inherits via the
- * font-feature-settings rule on td/th. */
-.num,
-.tabular-nums,
-input[type="number"],
-input[data-type="number"] {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-td,
-th {
-  font-variant-numeric: tabular-nums;
 }
 
 /* A cell inside an editable grid that is part of a multi-cell selection

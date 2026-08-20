@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { getRolePermissionKeys, type PermissionCatalog, type RoleListItem } from "@/lib/actions/roles";
 import { RoleCreateForm, RoleEditForm, DeleteRoleButton } from "@/components/modules/RoleForm";
@@ -27,12 +26,10 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<EditState>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const router = useRouter();
 
   function close() {
     setCreating(false);
     setEditing(null);
-    router.refresh();
   }
 
   async function openEdit(row: Row) {

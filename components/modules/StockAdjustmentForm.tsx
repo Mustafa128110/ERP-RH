@@ -3,15 +3,16 @@
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
+import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
 import { todayISO } from "@/lib/format";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -23,7 +24,9 @@ type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string };
 
-// One draft per form: only one adjustment is ever being typed.
+// One draft per form: only one adjustment is ever being typed. The user id is
+// appended at the call site (adjustment:<uid>) so a shared browser never offers
+// one user's half-typed adjustment to another.
 const ADJUSTMENT_DRAFT_KEY = "adjustment";
 
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "" });
@@ -59,6 +62,11 @@ export function StockAdjustmentFormPage({
   const [documentDate, setDocumentDate] = useState(todayISO());
   const [locationId, setLocationId] = useState("");
   const [reason, setReason] = useState("");
+  // The draft key is composed per render from the logged-in user — SessionSeed
+  // (in the layout) sets the id before children render, so the first render
+  // already carries the scoped key.
+  const userId = useClientUserId();
+  const adjustmentDraftKey = userId ? `${ADJUSTMENT_DRAFT_KEY}:${userId}` : ADJUSTMENT_DRAFT_KEY;
 
   // --- Draft ----------------------------------------------------------------
   // An adjustment is a shelf-count typed against live stock levels — the worst
@@ -68,7 +76,7 @@ export function StockAdjustmentFormPage({
   const draftState = { lines, companyId, documentDate, locationId, reason };
   type AdjustmentDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<AdjustmentDraft>(ADJUSTMENT_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<AdjustmentDraft>(adjustmentDraftKey, {
     state: draftState,
     enabled: true,
     hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
@@ -94,11 +102,20 @@ export function StockAdjustmentFormPage({
   // the same transaction as the adjustment, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(
-    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
-      const result = await createStockAdjustment(prev, formData);
+    async (prev: { error?: string; success?: boolean; id?: string; status?: "posted" | "pending" } | undefined, formData: FormData) => {
+      // A transport failure must not throw into the error boundary — that would
+      // lose the form (and its operation id), and a restored draft would mint a
+      // fresh id and post the adjustment twice. Keep the form alive; a replayed
+      // Save is then refused server-side as a duplicate.
+      let result: { error?: string; success?: boolean; id?: string; status?: "posted" | "pending" } | undefined;
+      try {
+        result = await createStockAdjustment(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
       if (result?.success) {
         // Saved — the local copy has nothing left to protect.
-        clearDraft(ADJUSTMENT_DRAFT_KEY);
+        clearDraft(adjustmentDraftKey);
         if (onDone) onDone();
         else resetForm();
       }
@@ -263,7 +280,7 @@ export function StockAdjustmentFormPage({
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
       {state?.success && (
         <p className={successTextClass}>
-          Adjustment posted — form cleared for the next one.{" "}
+          {state.status === "pending" ? "Adjustment saved for approval" : "Adjustment posted"} — form cleared for the next one.{" "}
           {state.id && (
             <Link href={`/inventory/stock-adjustments/${state.id}`} className="underline">
               View it
@@ -308,12 +325,30 @@ export function DeleteStockAdjustmentButton({ adjustmentId }: { adjustmentId: st
     <form
       action={action}
       onSubmit={(e) => {
-        if (!confirm("Delete this adjustment? The stock it wrote off or added is put back.")) e.preventDefault();
+        if (!confirm("Cancel this adjustment? Its stock effect will be reversed and the document will remain in the audit trail.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="documentId" value={adjustmentId} />
       <button type="submit" disabled={pending} className="text-sm font-medium text-error hover:underline disabled:opacity-40">
-        {pending ? "Deleting…" : "Delete this adjustment"}
+        {pending ? "Cancelling…" : "Cancel this adjustment"}
+      </button>
+      {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
+    </form>
+  );
+}
+
+export function ApproveStockAdjustmentButton({ adjustmentId }: { adjustmentId: string }) {
+  const router = useRouter();
+  const [state, action, pending] = useActionState(approveStockAdjustment, undefined);
+  useEffect(() => {
+    if (state?.success) router.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.success]);
+  return (
+    <form action={action}>
+      <input type="hidden" name="documentId" value={adjustmentId} />
+      <button type="submit" disabled={pending} className="h-10 rounded bg-navy-800 px-4 text-sm font-semibold text-white disabled:opacity-40">
+        {pending ? "Approving…" : "Approve & Post"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

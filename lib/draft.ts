@@ -19,11 +19,15 @@ type Envelope<T> = { savedAt: number; value: T };
 
 // Every call is wrapped: localStorage throws in private mode and when the quota
 // is full, and a draft failing to save must never take the form down with it.
-export function saveDraft(key: string, value: unknown): void {
+// The boolean return lets a caller that promises durability (a crash-draft for
+// a batch grid) say so out loud instead of silently claiming the work is safe.
+export function saveDraft(key: string, value: unknown): boolean {
   try {
     localStorage.setItem(`${PREFIX}${key}`, JSON.stringify({ savedAt: Date.now(), value } satisfies Envelope<unknown>));
+    return true;
   } catch {
     // No draft is better than a broken form.
+    return false;
   }
 }
 

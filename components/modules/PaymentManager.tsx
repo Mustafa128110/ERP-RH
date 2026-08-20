@@ -6,15 +6,22 @@ import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { DetailHover } from "@/components/ui/DetailHover";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
-import { PaymentEditForm, DeletePaymentButton, PaymentBatchAddDialog, type BankOption, type CashOption } from "@/components/modules/PaymentForm";
+import {
+  PaymentEditForm,
+  DeletePaymentButton,
+  PaymentBatchAddDialog,
+  type BankOption,
+  type CashOption,
+  type ChequeOption,
+} from "@/components/modules/PaymentForm";
 import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
 import type { ContactBalanceHint } from "@/lib/payment-constants";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
+import { useCachedOptions } from "@/lib/client-cache";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
@@ -33,54 +40,19 @@ interface PaymentRow {
   code: string;
 }
 
-// `render` closes over the grouped payments so the number cell can list them —
-// Row only holds primitives, and a group's members are a list.
-const buildColumns = (byRowId: Map<string, DayGroup<PaymentRow>>): ColumnDef[] => [
+const buildColumns = (): ColumnDef[] => [
   {
-    key: "number",
-    label: "Number",
-    // The row shows the amount and the method; what it doesn't show is the whole
-    // of a payment at a glance — which way it went, whose account it moved
-    // through, under which company. Hovering the number answers that without
-    // opening the record.
-    //
-    // A row standing for several payments to one party on one day is asked a
-    // different question, so it gets the other panel: what each of them was, and
-    // what they came to.
-    render: (row) => {
-      const members = byRowId.get(String(row.id))?.members ?? [];
-      return members.length > 1 ? (
-        <DetailHover
-          trigger={String(row.number)}
-          heading={`${row.contact} — ${row.date}`}
-          width={340}
-          lines={members.map((m) => ({
-            text: m.number,
-            note: m.paymentMethod ?? undefined,
-            value: money(m.grandTotal),
-          }))}
-          footer={`Total ${row.amount}`}
-        />
-      ) : (
-        <DetailHover
-          trigger={String(row.number)}
-          heading={String(row.number)}
-          rows={[
-            { label: row.type === "Made" ? "Paid to" : "Received from", value: String(row.contact) },
-            { label: "Amount", value: String(row.amount) },
-            { label: "Through", value: String(row.method) },
-            { label: "Company", value: String(row.company) },
-            { label: "Date", value: String(row.date) },
-          ]}
-        />
-      );
-    },
+    key: "type",
+    label: "Type",
+    render: (row) => (
+      <span title={String(row.type)} className={String(row.type) === "Received" ? "text-emerald-600" : "text-red-500"}>
+        <Icon name={String(row.type) === "Received" ? "arrowUp" : "arrowDown"} className="h-4 w-4" />
+      </span>
+    ),
   },
-  { key: "type", label: "Type", badge: true },
   { key: "contact", label: "Contact" },
-  { key: "date", label: "Date" },
-  { key: "method", label: "Method" },
   { key: "amount", label: "Amount", align: "right" },
+  { key: "method", label: "Method" },
   { key: "company", label: "Company" },
 ];
 
@@ -106,14 +78,23 @@ export function PaymentManager({
   contactBalances: ContactBalanceHint[];
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
-  chequeOptions: Option[];
+  chequeOptions: ChequeOption[];
   // The filter controls, built by the page — they drive query params, so the
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
 }) {
+  // Seed the client reference cache from the live options (so an offline batch
+  // dialog can still fill its pickers) and fall back to the cached copy when the
+  // page rendered empty. Live always wins when present.
+  const cachedCompany = useCachedOptions("companies", companyOptions);
+  const cachedContacts = useCachedOptions("contacts", contactOptions);
+  const cachedBank = useCachedOptions("bankAccounts", bankAccountOptions);
+  const cachedCash = useCachedOptions("cashAccounts", cashAccountOptions);
+  const cachedCheques = useCachedOptions("cheques", chequeOptions);
+
   const [batchOpen, setBatchOpen] = useState(false);
   const [editing, setEditing] = useState<PaymentDetail | null>(null);
-  const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
+  const [editChequeOptions, setEditChequeOptions] = useState<ChequeOption[]>(chequeOptions);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   // Which grouped row was clicked: it stands for several payments, so there's no
   // single record to open until one is picked.
@@ -124,7 +105,6 @@ export function PaymentManager({
     setBatchOpen(false);
     setEditing(null);
     setChoosing(null);
-    router.refresh();
   }
 
   async function openEdit(id: string) {
@@ -147,7 +127,7 @@ export function PaymentManager({
     (p) => p.grandTotal,
   );
   const byRowId = new Map(groups.map((g) => [g.key, g]));
-  const columns = buildColumns(byRowId);
+  const columns = buildColumns();
 
   const rows: Row[] = groups.map(({ key, members, total }) => {
     const first = members[0];
@@ -217,12 +197,12 @@ export function PaymentManager({
 
       {batchOpen && (
         <PaymentBatchAddDialog
-          companyOptions={companyOptions}
-          contactOptions={contactOptions}
+          companyOptions={cachedCompany.value}
+          contactOptions={cachedContacts.value}
           contactBalances={contactBalances}
-          bankAccountOptions={bankAccountOptions}
-          cashAccountOptions={cashAccountOptions}
-          chequeOptions={chequeOptions}
+          bankAccountOptions={cachedBank.value}
+          cashAccountOptions={cachedCash.value}
+          chequeOptions={cachedCheques.value}
           onClose={() => setBatchOpen(false)}
           onDone={close}
         />

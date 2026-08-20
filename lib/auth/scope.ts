@@ -3,6 +3,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { and, isNull, inArray, or, type Column, type SQL } from "drizzle-orm";
 import { getSession } from "./session";
+import type { AuthSession } from "./session";
 
 // The company scope decides what data is on screen. It's the Topbar selector:
 // pick a company and you see that company's rows plus everything global; pick
@@ -48,6 +49,29 @@ export async function companyInScope(column: Column): Promise<SQL | undefined> {
   // No company access at all: only global rows are visible.
   if (ids.length === 0) return isNull(column);
   return or(isNull(column), inArray(column, ids));
+}
+
+// Read permissions are company-scoped too. Requiring `sales.view` without a
+// company is only a page-level gate (the user has it somewhere); this predicate
+// narrows the rows to the selected companies where that exact permission is
+// effective. Without it, membership in company B plus sales.view in company A
+// exposed B's sales.
+export async function companyInPermissionScope(
+  column: Column,
+  session: AuthSession,
+  moduleName: string,
+  action = "view",
+): Promise<SQL> {
+  const selected = await getScopeCompanyIds();
+  const key = `${moduleName}.${action}`;
+  const ids = selected.filter(
+    (companyId) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+  );
+  // Global rows are shared reference data. The caller has already passed the
+  // page-level permission check, so those remain visible even when no selected
+  // company grants the permission.
+  if (ids.length === 0) return isNull(column);
+  return or(isNull(column), inArray(column, ids))!;
 }
 
 // Combine the scope condition with an existing filter.

@@ -413,6 +413,16 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   );
   if (financialError) return { error: financialError };
   const manualNumber = opt(formData, "number");
+  // A document type that doesn't touch the payable ledger has no paid/unpaid
+  // state to be in: nothing is owed either way, so there is nothing to settle.
+  // That's what separates a stock receipt (goods and a rate, no money) from a
+  // purchase invoice, and it's read off the type rather than asked for again.
+  const isPaid = documentType.affectsPayable && formData.get("isPaid") === "yes";
+  const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
+  const bankAccountId = isPaid && settlementType === "account" ? opt(formData, "bankAccountId") : null;
+  const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
+  const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
+  if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   let tax;
@@ -430,24 +440,6 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   }
   const taxTotal = String(tax.taxTotal);
   const grandTotal = tax.grandTotal;
-
-  // A document type that doesn't touch the payable ledger has no paid/unpaid
-  // state to be in: nothing is owed either way, so there is nothing to settle.
-  // That's what separates a stock receipt (goods and a rate, no money) from a
-  // purchase invoice, and it's read off the type rather than asked for again.
-  const payMode = String(formData.get("isPaid") ?? "no");
-  const settles = documentType.affectsPayable && (payMode === "yes" || payMode === "partial");
-  // Clamped to the document: a slipped digit would otherwise credit the
-  // drawer with money that never arrived, and a negative would take money out.
-  const entered = Math.min(Math.max(Number(num(formData, "paidAmount", "0")) || 0, 0), grandTotal);
-  const paidAmount = !documentType.affectsPayable ? 0 : payMode === "yes" ? grandTotal : payMode === "partial" ? entered : 0;
-  const isPaid = settles && paidAmount >= grandTotal;
-  const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
-  const bankAccountId = settles && settlementType === "account" ? opt(formData, "bankAccountId") : null;
-  const cashAccountId = settles && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
-  const chequeId = settles && settlementType === "cheque" ? opt(formData, "chequeId") : null;
-  if (settles && payMode === "partial" && paidAmount <= 0) return { error: "Enter how much was paid, or set Paid? to No." };
-  if (settles && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
 
   // Freight is paid the moment the goods arrive (recordShippingExpense below),
   // so what the supplier is owed is the total minus the shipping.
@@ -490,7 +482,10 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           shippingTotal,
           grandTotal: String(grandTotal),
           isPaid,
-          paidAmount: String(paidAmount),
+          // Shipping is paid on arrival (the expense below), so what the
+          // purchase shows as paid is the shipping amount when it isn't fully
+          // paid — the partial-paid state — and the whole total when it is.
+          paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
           bankAccountId,
           cashAccountId,
           createdBy: session.userId,
@@ -553,7 +548,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
       // shipping has already left the building, as the expense below.
       if (!documentType.affectsPayable) {
         // nothing to book
-      } else if (!settles) {
+      } else if (!isPaid) {
         if (goodsTotal > 0) {
           await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(goodsTotal) });
         }
@@ -562,7 +557,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           await linkCheque(tx, chequeId, doc.id, "out", companyId);
         }
         if (goodsTotal > 0) {
-          await adjustSettlementBalance(tx, "out", String(paidAmount > 0 ? Math.min(paidAmount, goodsTotal) : goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
+          await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
         }
       }
 
@@ -711,17 +706,12 @@ export async function updateStockPurchase(
 
   // Read after the type, for the same reason as in createStockPurchase: a
   // document that doesn't touch the payable has no paid/unpaid state.
-  const payMode = String(formData.get("isPaid") ?? "no");
-  const settles = Boolean(documentType?.affectsPayable) && (payMode === "yes" || payMode === "partial");
-  const entered = Math.min(Math.max(Number(num(formData, "paidAmount", "0")) || 0, 0), grandTotal);
-  const paidAmount = !documentType?.affectsPayable ? 0 : payMode === "yes" ? grandTotal : payMode === "partial" ? entered : 0;
-  const isPaid = settles && paidAmount >= grandTotal;
+  const isPaid = Boolean(documentType?.affectsPayable) && formData.get("isPaid") === "yes";
   const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
-  const bankAccountId = settles && settlementType === "account" ? opt(formData, "bankAccountId") : null;
-  const cashAccountId = settles && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
-  const chequeId = settles && settlementType === "cheque" ? opt(formData, "chequeId") : null;
-  if (settles && payMode === "partial" && paidAmount <= 0) return { error: "Enter how much was paid, or set Paid? to No." };
-  if (settles && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
+  const bankAccountId = isPaid && settlementType === "account" ? opt(formData, "bankAccountId") : null;
+  const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
+  const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
+  if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
   let vanishedDuringSave = false;
 
   await db.transaction(async (tx) => {
@@ -810,19 +800,21 @@ export async function updateStockPurchase(
         shippingTotal,
         grandTotal: String(grandTotal),
         isPaid,
-        paidAmount: String(paidAmount),
+        // Unpaid with freight: the shipping has already left as the expense, so
+        // that's what the purchase shows as paid — the partial-paid state.
+        paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
         bankAccountId,
         cashAccountId,
         updatedAt: new Date(),
       })
       .where(eq(documents.id, documentId));
 
-    if (settles) {
+    if (isPaid) {
       if (chequeId) {
         await linkCheque(tx, chequeId, documentId, "out", companyId);
       }
       // The goods portion only — the shipping is covered by the expense below.
-      await adjustSettlementBalance(tx, "out", String(paidAmount > 0 ? Math.min(paidAmount, goodsTotal) : goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
+      await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
     }
 
     // inventory_transactions.document_line_id is ON DELETE RESTRICT, so old

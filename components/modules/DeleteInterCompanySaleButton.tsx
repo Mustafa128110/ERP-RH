@@ -20,12 +20,12 @@ export function DeleteInterCompanySaleButton({ saleId }: { saleId: string }) {
     <form
       action={action}
       onSubmit={(e) => {
-        if (!confirm("Delete both documents? The stock goes back to the seller and neither company is owed anything.")) e.preventDefault();
+        if (!confirm("Cancel both documents? The stock goes back to the seller and neither company is owed anything.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="documentId" value={saleId} />
       <button type="submit" disabled={pending} className="text-sm font-medium text-error hover:underline disabled:opacity-40">
-        {pending ? "Deleting…" : "Delete this sale"}
+        {pending ? "Cancelling…" : "Cancel this sale"}
       </button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>

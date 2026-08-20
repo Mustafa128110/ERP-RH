@@ -4,8 +4,8 @@ import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { categories } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { getLiveSession, getSession } from "@/lib/auth/session";
+import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { slugify } from "@/lib/format";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
@@ -21,7 +21,7 @@ export interface CategoryNode {
 
 export async function listCategoryTree(): Promise<CategoryNode[]> {
   const session = await getSession();
-  requirePermission(session, "categories", "view");
+  requireGlobalPermission(session, "categories", "view");
 
   const rows = await db
     .select({
@@ -75,8 +75,8 @@ export async function saveCategoryTree(
   items: { id: string; parentId: string | null; sortOrder: number }[],
 ): Promise<ActionResult> {
   return guard("Couldn't save the category order.", async () => {
-    const session = await getSession();
-    requirePermission(session, "categories", "edit");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "categories", "edit");
 
     if (items.length === 0) return { success: true };
     if (items.some((i) => i.parentId === i.id)) return { error: "A category can't be its own parent." };
@@ -104,7 +104,7 @@ export async function saveCategoryTree(
 
 export async function getCategory(categoryId: string) {
   const session = await getSession();
-  requirePermission(session, "categories", "view");
+  requireGlobalPermission(session, "categories", "view");
   const [row] = await db.select().from(categories).where(eq(categories.id, categoryId)).limit(1);
   return row ?? null;
 }
@@ -126,8 +126,8 @@ export interface CategoryBatchRow {
 
 export async function createCategoriesBatch(rows: CategoryBatchRow[]): Promise<CreateResult<{ id: string; name: string }>> {
   return guard("Can't create — a category with the same slug already exists.", async () => {
-    const session = await getSession();
-    requirePermission(session, "categories", "create");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "categories", "create");
 
     const valid = rows.filter((r) => r.name.trim());
     if (valid.length === 0) return { error: "Add at least one category with a name." };
@@ -146,8 +146,8 @@ export async function createCategoriesBatch(rows: CategoryBatchRow[]): Promise<C
 
 export async function updateCategory(categoryId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the category.", async () => {
-    const session = await getSession();
-    requirePermission(session, "categories", "edit");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "categories", "edit");
 
     const values = readCategoryForm(formData);
     if (!values.name) return { error: "Name is required." };
@@ -163,8 +163,8 @@ export async function updateCategory(categoryId: string, _prevState: ActionResul
 
 export async function deleteCategory(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this category has child categories or items still referencing it.", async () => {
-    const session = await getSession();
-    requirePermission(session, "categories", "delete");
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "categories", "delete");
 
     const categoryId = String(formData.get("categoryId") ?? "");
     await db.delete(categories).where(eq(categories.id, categoryId));

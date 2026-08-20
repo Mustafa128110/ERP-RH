@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { updateUser, addUserRole, removeUserRole, deleteUser } from "@/lib/actions/users";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 
@@ -25,13 +24,6 @@ export function UserEditForm({
   status: string;
 }) {
   const [state, action, pending] = useActionState(updateUser.bind(null, userId), undefined);
-  const router = useRouter();
-
-  useEffect(() => {
-    if (state?.success) router.refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
-
   return (
     <form action={action} className="flex flex-col gap-4">
       <label className={labelClass}>

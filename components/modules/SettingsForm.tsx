@@ -1,7 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState } from "react";
 import { saveSettings } from "@/lib/actions/settings";
 import type { SettingDef } from "@/lib/setting-constants";
 import { errorTextClass, inputClass, labelClass, labelTextClass, submitClass, successTextClass } from "@/components/ui/form-styles";
@@ -13,18 +12,14 @@ export function SettingsForm({
   companyId,
   defs,
   values,
+  taxOptions,
 }: {
   companyId: string;
   defs: SettingDef[];
   values: Record<string, string>;
+  taxOptions: { id: string; name: string; rate: string }[];
 }) {
-  const router = useRouter();
   const [state, action, pending] = useActionState(saveSettings.bind(null, companyId), undefined);
-
-  useEffect(() => {
-    if (state?.success) router.refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
 
   return (
     // key on companyId: switching company has to re-seed every defaultValue,
@@ -38,6 +33,15 @@ export function SettingsForm({
           <span className="flex items-center gap-2">
             {def.kind === "text" ? (
               <textarea name={def.key} defaultValue={values[def.key]} rows={2} className="w-full rounded border border-sand p-3 text-sm text-ink focus:border-navy-800" />
+            ) : def.kind === "tax" ? (
+              <select name={def.key} defaultValue={values[def.key]} className={`${inputClass} w-72`}>
+                <option value="">No default tax</option>
+                {taxOptions.map((tax) => (
+                  <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>
+                ))}
+              </select>
+            ) : def.kind === "boolean" ? (
+              <input name={def.key} type="checkbox" defaultChecked={values[def.key] === "true"} className="h-5 w-5 rounded border-sand" />
             ) : (
               <input name={def.key} type="number" step="any" min="0" defaultValue={values[def.key]} className={`${inputClass} w-40`} />
             )}

@@ -10,7 +10,7 @@ export type SettingDef = {
   key: string;
   label: string;
   help: string;
-  kind: "number" | "text";
+  kind: "number" | "text" | "tax" | "boolean";
   fallback: string;
   suffix?: string;
 };
@@ -46,5 +46,26 @@ export const SETTING_DEFS: SettingDef[] = [
     help: "Printed at the bottom of every invoice — terms, a bank account, a thank you.",
     kind: "text",
     fallback: "",
+  },
+  {
+    key: "default_sales_tax_id",
+    label: "Default sales tax",
+    help: "Preselected on new sales. Tax is calculated only on products marked Taxable.",
+    kind: "tax",
+    fallback: "",
+  },
+  {
+    key: "default_purchase_tax_id",
+    label: "Default purchase tax",
+    help: "Preselected on new stock purchases. It remains changeable per purchase.",
+    kind: "tax",
+    fallback: "",
+  },
+  {
+    key: "tax_prices_include_tax",
+    label: "Prices include tax",
+    help: "When enabled, tax is extracted from entered prices instead of added on top.",
+    kind: "boolean",
+    fallback: "false",
   },
 ];

@@ -99,7 +99,7 @@ export function CompanyBatchAddDialog({ onClose, onDone }: { onClose: () => void
         }));
         return createCompaniesBatch(values);
       }}
-      renderRow={(row, i, update) => (
+      renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Name" />

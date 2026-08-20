@@ -12,16 +12,17 @@ import {
   cashAccounts,
   chequeRegister,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
-import { adjustSettlementBalance, type SettlementType } from "@/lib/actions/settlement";
-import { resolveExpenseCategoryId } from "@/lib/actions/resolve-refs";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { adjustSettlementBalance, adjustSettlementBalancesBatch, type SettlementType } from "@/lib/actions/settlement";
+import { resolveExpenseCategoryId, resolveExpenseCategoryIds } from "@/lib/actions/resolve-refs";
 import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 
 export interface ExpenseFilters {
   company?: string;
@@ -35,12 +36,15 @@ export interface ExpenseFilters {
 export async function listExpenses(filters: ExpenseFilters = {}) {
   const session = await getSession();
   requirePermission(session, "expenses", "view");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:expenses:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   const rows = await db
     .select({
       id: expenses.id,
       companyId: expenses.companyId,
-      company: companies.name,
+      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       expenseCategoryId: expenses.expenseCategoryId,
       category: expenseCategories.name,
       bankAccountId: expenses.bankAccountId,
@@ -55,6 +59,8 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
       expenseDate: expenses.expenseDate,
       notes: expenses.notes,
       attachmentUrl: expenses.attachmentUrl,
+      documentId: expenses.documentId,
+      status: expenses.status,
       createdByName: users.name,
     })
     .from(expenses)
@@ -66,7 +72,7 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
     .leftJoin(users, eq(users.id, expenses.createdBy))
     .where(
       and(
-        await companyInScope(expenses.companyId),
+        await companyInPermissionScope(expenses.companyId, session, "expenses"),
         // Narrows within the scope, never widens it — companyInScope still gates
         // every row.
         filters.company ? eq(expenses.companyId, filters.company) : undefined,
@@ -89,6 +95,7 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
           ? `Cheque: ${chequeNumber}`
           : null,
   }));
+  });
 }
 
 // Cheques available to settle an expense: unlinked everywhere, plus (when
@@ -116,7 +123,7 @@ export interface ExpenseBatchRow {
 
 export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?: string): Promise<ActionResult> {
   return guard("Couldn't save the expenses.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "expenses", "create");
     // Minted by the batch dialog when it opened; a replayed submit of a
     // committed batch is refused rather than posting every row twice.
@@ -135,6 +142,14 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
     if (valid.length === 0) {
       return { error: "Add at least one row with a company, category, date, amount, and a settlement account." };
     }
+    // Rows were filled against cached option lists; a company access or
+    // permission may have been revoked since. The cache prepares work, it never
+    // grants it — every distinct company in the batch needs the create
+    // permission THERE (membership is part of the scoped check), so a batch
+    // spanning a company the user can no longer act in is refused wholesale.
+    for (const companyId of new Set(valid.map((r) => r.companyId))) {
+      requirePermission(session, "expenses", "create", { companyId });
+    }
 
     // One transaction for the whole batch: each expense inserts and moves its
     // settlement balance, and if any row fails the lot rolls back rather than
@@ -149,20 +164,19 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
     await db.transaction(async (tx) => {
       // First statement: claim the operation id, or abort as a duplicate.
       if (!(await claimOperation(tx, opId))) throw new DuplicateOperationError();
-      // Distinct typed category names, resolved once each. A name repeated down
-      // the grid is the same category, and creating it twice is what the
-      // per-row loop did until the unique constraint stopped it.
-      const categoryIds = new Map<string, string>();
-      for (const r of valid) {
-        const key = `${r.companyId}:${r.expenseCategoryId || r.expenseCategoryName.trim()}`;
-        if (categoryIds.has(key)) continue;
-        categoryIds.set(key, (await resolveExpenseCategoryId(tx, r.companyId, r.expenseCategoryId || null, r.expenseCategoryName))!);
-      }
+      const categoryIds = await resolveExpenseCategoryIds(
+        tx,
+        valid.map((row) => ({
+          companyId: row.companyId,
+          expenseCategoryId: row.expenseCategoryId || null,
+          expenseCategoryName: row.expenseCategoryName,
+        })),
+      );
 
       await tx.insert(expenses).values(
-        valid.map((r) => ({
+        valid.map((r, index) => ({
           companyId: r.companyId,
-          expenseCategoryId: categoryIds.get(`${r.companyId}:${r.expenseCategoryId || r.expenseCategoryName.trim()}`)!,
+          expenseCategoryId: categoryIds[index]!,
           bankAccountId: r.bankAccountId,
           cashAccountId: r.cashAccountId,
           chequeId: r.chequeId,
@@ -173,18 +187,18 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
         })),
       );
 
-      // Ten rows drawn on the same drawer are one balance movement, not ten.
-      // Cheques stay ungrouped — each settles through its own bank account.
-      const totals = new Map<string, { bankAccountId: string | null; cashAccountId: string | null; chequeId: string | null; amount: number }>();
-      for (const r of valid) {
-        const key = `${r.bankAccountId ?? ""}|${r.cashAccountId ?? ""}|${r.chequeId ?? ""}`;
-        const at = totals.get(key) ?? { bankAccountId: r.bankAccountId, cashAccountId: r.cashAccountId, chequeId: r.chequeId, amount: 0 };
-        at.amount += Number(r.amount);
-        totals.set(key, at);
-      }
-      for (const t of totals.values()) {
-        await adjustSettlementBalance(tx, "out", String(t.amount), t.bankAccountId, t.cashAccountId, t.chequeId, 1);
-      }
+      await adjustSettlementBalancesBatch(
+        tx,
+        valid.map((r) => ({
+          direction: "out",
+          amount: r.amount,
+          bankAccountId: r.bankAccountId,
+          cashAccountId: r.cashAccountId,
+          chequeId: r.chequeId,
+          sign: 1,
+          companyId: r.companyId,
+        })),
+      );
     });
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
@@ -221,11 +235,14 @@ function readExpenseForm(formData: FormData) {
 
 export async function createExpense(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the expense.", async () => {
-    const session = await getSession();
-    requirePermission(session, "expenses", "create");
+    const session = await getLiveSession();
 
     const { expenseCategoryId, expenseCategoryName, ...values } = readExpenseForm(formData);
     if (!values.companyId) return { error: "Company is required." };
+    // Scoped to the submitted company: membership and per-company permission,
+    // so a queued submission filled against a stale cache is refused rather
+    // than written into a company the user can no longer create in.
+    requirePermission(session, "expenses", "create", { companyId: values.companyId });
     if (!expenseCategoryId && !expenseCategoryName) return { error: "Category is required." };
     if (!values.expenseDate) return { error: "Date is required." };
     if (Number.isNaN(Number(values.amount)) || Number(values.amount) <= 0) return { error: "Amount must be greater than zero." };
@@ -237,7 +254,7 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
       if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId });
-      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
+      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
@@ -250,16 +267,20 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
 
 export async function updateExpense(expenseId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't save the expense.", async () => {
-    const session = await getSession();
-    requirePermission(session, "expenses", "edit");
+    const session = await getLiveSession();
 
     const { expenseCategoryId, expenseCategoryName, ...values } = readExpenseForm(formData);
+    // Scoped to the submitted company — the update below rewrites the row's
+    // company_id from the form, so a forged or stale companyId must not steer
+    // it into a company the user can't edit in.
+    requirePermission(session, "expenses", "edit", { companyId: values.companyId });
     if (!expenseCategoryId && !expenseCategoryName) return { error: "Category is required." };
     if (!values.expenseDate) return { error: "Date is required." };
     if (Number.isNaN(Number(values.amount)) || Number(values.amount) <= 0) return { error: "Amount must be greater than zero." };
     if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
 
     let missing = false;
+    let companyChanged = false;
 
     await db.transaction(async (tx) => {
       // Read the old settlement inside the transaction, not before it. Read
@@ -268,9 +289,12 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
       // expense. `FOR UPDATE` makes the second wait for the first to commit and
       // then read what it actually wrote.
       const [existing] = await tx
-        .select({ amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
+        .select({ companyId: expenses.companyId, amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
         .from(expenses)
-        .where(eq(expenses.id, expenseId))
+        // Scoped to the session's current companies: an edit form opened
+        // before access was revoked must not be able to write into a company
+        // the user can no longer reach.
+        .where(and(eq(expenses.id, expenseId), eq(expenses.status, "posted"), sql`${expenses.documentId} IS NULL`, await companyInScope(expenses.companyId)))
         .limit(1)
         .for("update");
       // Nothing has been written yet, so returning here commits an empty
@@ -279,15 +303,20 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
         missing = true;
         return;
       }
+      if (existing.companyId !== values.companyId) {
+        companyChanged = true;
+        return;
+      }
 
       // Reverse the old settlement before applying the new one, same as Payments.
-      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1);
+      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.update(expenses).set({ ...values, expenseCategoryId: categoryId }).where(eq(expenses.id, expenseId));
-      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1);
+      await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 
-    if (missing) return { error: "Expense not found — it may already have been deleted." };
+    if (missing) return { error: "Expense not found — it may already be cancelled." };
+    if (companyChanged) return { error: "An expense can't be moved to another company. Delete it and enter it in the correct company." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     revalidatePath("/expenses");
@@ -298,8 +327,8 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
 }
 
 export async function deleteExpense(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete this expense.", async () => {
-    const session = await getSession();
+  return guard("Can't cancel this expense.", async () => {
+    const session = await getLiveSession();
     requirePermission(session, "expenses", "delete");
 
     const expenseId = String(formData.get("expenseId") ?? "");
@@ -307,25 +336,31 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
 
     await db.transaction(async (tx) => {
       const [existing] = await tx
-        .select({ amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
+        .select({ companyId: expenses.companyId, amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
         .from(expenses)
-        .where(eq(expenses.id, expenseId))
+        // Same scope rule as updateExpense: a delete is a write, and a write
+        // into a company the user no longer has access to is refused.
+        .where(and(eq(expenses.id, expenseId), eq(expenses.status, "posted"), sql`${expenses.documentId} IS NULL`, await companyInScope(expenses.companyId)))
         .limit(1)
         .for("update");
       if (!existing) {
         missing = true;
         return;
       }
-      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1);
-      await tx.delete(expenses).where(eq(expenses.id, expenseId));
+      // The delete permission is checked against the row's own company — a
+      // guessed id from a company the user can't delete in is refused even
+      // when they hold the permission somewhere else.
+      requirePermission(session, "expenses", "delete", { companyId: existing.companyId });
+      await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
+      await tx.update(expenses).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date() }).where(eq(expenses.id, expenseId));
     });
 
-    if (missing) return { error: "Expense not found — it may already have been deleted." };
+    if (missing) return { error: "Expense not found — it may already be cancelled." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
-    await recordAudit({ action: "delete", entity: "expense", entityId: expenseId, summary: expenseId });
+    await recordAudit({ action: "cancel", entity: "expense", entityId: expenseId, summary: expenseId });
     return { success: true };
   });
 }

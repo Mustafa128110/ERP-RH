@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -117,7 +116,6 @@ export function AccountsManager({
   const [tab, setTab] = useState<Tab>("cash");
   const [showSpent, setShowSpent] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
-  const router = useRouter();
 
   const companyName = (id: string | null) => (id ? (companyOptions.find((c) => c.id === id)?.name ?? "—") : "Global");
   // Bank, branch and account title — the same label the pickers, the payments
@@ -128,7 +126,6 @@ export function AccountsManager({
 
   function close() {
     setModal(null);
-    router.refresh();
   }
 
   const bankRows: Row[] = bankAccounts.map((b) => ({

@@ -30,7 +30,7 @@ export const GO_TO: Record<string, { href: string; label: string }> = {
   p: { href: "/inventory/products", label: "Products" },
   k: { href: "/inventory/stock", label: "Stock" },
   u: { href: "/purchases/stock", label: "Purchases" },
-  c: { href: "/purchases/suppliers", label: "Contacts" },
+  c: { href: "/contacts", label: "Contacts" },
   l: { href: "/ledger", label: "Ledger" },
   y: { href: "/payments", label: "Payments" },
   e: { href: "/expenses", label: "Expenses" },

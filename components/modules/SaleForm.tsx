@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/actions/sales";
 import type { SettlementType } from "@/lib/actions/settlement";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
@@ -13,7 +13,10 @@ import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { DEFAULT_SALE_TYPE, SALE_TYPES, type SaleType } from "@/lib/sale-constants";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
+import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
+import { calculateTax } from "@/lib/tax-calculation";
+import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -28,7 +31,8 @@ type ScopedOption = Option & { companyId: string };
 // prefilled into the
 // reference column. `salesRate` is its selling price, the price it last went out
 // at, which prefills what it's being sold for now.
-type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null };
+type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
+type TaxOption = { id: string; name: string; rate: string };
 // Both rates are stored with four decimals, but every total on this form is
 // round1 — so a price box prefilled with 1250.7500 shows precision the sale
 // itself will never carry. One decimal in, one decimal out.
@@ -50,6 +54,7 @@ type Line = {
   // unitPrice (what it sold for).
   listPrice: string;
   unitPrice: string;
+  marketPurchase: boolean;
 };
 
 const emptyLine = (): Line => ({
@@ -61,6 +66,7 @@ const emptyLine = (): Line => ({
   quantity: "",
   listPrice: "",
   unitPrice: "",
+  marketPurchase: false,
 });
 
 // A walk-in is the normal sale: rung up against the Counter contact, paid then
@@ -72,6 +78,8 @@ const DEFAULT_CUSTOMER = "Counter";
 const DEFAULT_CASH_ACCOUNT = "Cash on Hand";
 
 // One draft per form, not per sale: there is only ever one sale being typed.
+// The user id is appended at the call site (sale:<uid>) so a shared browser
+// never offers one user's half-typed sale to another.
 const SALE_DRAFT_KEY = "sale";
 
 // M52 doesn't sell over a counter — its sales go out on credit and are settled
@@ -96,6 +104,7 @@ export type SaleDefaults = {
   documentDate: string;
   discountTotal: string;
   taxTotal: string;
+  taxId?: string | null;
   shippingTotal: string;
   isPaid: boolean;
   paidAmount: string;
@@ -106,7 +115,7 @@ export type SaleDefaults = {
   saleType: SaleType;
   // Server lines carry ids, not combobox text; unit_cost is what the rate column
   // was saved as. The text and a missing rate are filled in client-side on load.
-  lines: { itemId: string; locationId: string; unitId: string; quantity: string; unitPrice: string; unitCost: string }[];
+  lines: { itemId: string; locationId: string; unitId: string; quantity: string; unitPrice: string; unitCost: string; marketPurchase?: boolean }[];
 };
 
 // Used as a page by /sales (a new sale, which is what that route now opens
@@ -121,6 +130,9 @@ export function SaleFormPage({
   bankAccountOptions,
   cashAccountOptions,
   chequeOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
   saleId,
   defaults,
   title,
@@ -129,11 +141,13 @@ export function SaleFormPage({
   companyOptions: Option[];
   customerOptions: ScopedOption[];
   itemOptions: ItemOption[];
-  locationOptions: Option[];
   unitOptions: Option[];
   bankAccountOptions: Option[];
   cashAccountOptions: ScopedOption[];
   chequeOptions: Option[];
+  taxOptions: TaxOption[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
   saleId?: string;
   defaults?: SaleDefaults;
   // Heading shown on the same row as Clear / Delete. Omitted inside a dialog,
@@ -143,6 +157,12 @@ export function SaleFormPage({
 }) {
   const router = useRouter();
   const isEdit = !!saleId;
+  // The draft key is composed per render from the logged-in user: SessionSeed
+  // (in the layout, above this form) sets the id before children render, so the
+  // first render already carries the scoped key and no write ever lands under
+  // an unscoped one. Reactive read so a late-arriving id re-keys the form.
+  const userId = useClientUserId();
+  const saleDraftKey = userId ? `${SALE_DRAFT_KEY}:${userId}` : SALE_DRAFT_KEY;
 
   // Grid refs first: the reset below focuses the first cell, and both the reset
   // and the action that calls it have to be declared before use.
@@ -181,6 +201,7 @@ export function SaleFormPage({
             unitText: unitOptions.find((u) => u.id === l.unitId)?.name ?? "",
             // What was typed on this line wins over the item's current rate list price.
             listPrice: rate1(unitCost || itemOptions.find((it) => it.id === l.itemId)?.rate),
+            marketPurchase: Boolean(l.marketPurchase),
           })),
           emptyLine(),
         ]
@@ -193,7 +214,7 @@ export function SaleFormPage({
   // ending in % is a percentage of the subtotal. The stored value was always the
   // resolved amount, so an existing sale loads as the plain figure.
   const [discountTotal, setDiscountTotal] = useState(() => defaults?.discountTotal ?? "0");
-  const [taxTotal, setTaxTotal] = useState(() => defaults?.taxTotal ?? "0");
+  const [taxId, setTaxId] = useState(() => defaults?.taxId ?? taxSettings[companyId]?.default_sales_tax_id ?? "");
   const [shippingTotal, setShippingTotal] = useState(() => defaults?.shippingTotal ?? "0");
   const [contactId, setContactId] = useState(() => defaults?.contactId ?? counterId(companyId));
   const [customerText, setCustomerText] = useState(() =>
@@ -220,10 +241,10 @@ export function SaleFormPage({
   //
   // New sales only: an edit has a saved record behind it, and quietly restoring
   // a stale copy over one is how someone else's changes disappear.
-  const draftState = { lines, companyId, contactId, customerText, discountTotal, taxTotal, shippingTotal, isPaid, paidAmount, settlementType };
+  const draftState = { lines, companyId, contactId, customerText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType };
   type SaleDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(SALE_DRAFT_KEY, {
+  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(saleDraftKey, {
     state: draftState,
     enabled: !isEdit,
     // A draft of a form nobody typed into is noise; only an unfinished sale is
@@ -233,12 +254,12 @@ export function SaleFormPage({
     // repopulating a form is worse than losing it: the shop would post a sale
     // it believed it had typed fresh.
     apply: (d) => {
-      setLines(d.lines);
+      setLines(d.lines.map((line) => ({ ...line, marketPurchase: Boolean(line.marketPurchase) })));
       setCompanyId(d.companyId);
       setContactId(d.contactId);
       setCustomerText(d.customerText);
       setDiscountTotal(d.discountTotal);
-      setTaxTotal(d.taxTotal);
+      setTaxId(d.taxId);
       setShippingTotal(d.shippingTotal);
       setIsPaid(d.isPaid);
       setPaidAmount(d.paidAmount);
@@ -269,12 +290,12 @@ export function SaleFormPage({
     // nothing left to protect. Cleared before the state updates so a render that
     // throws on the way out can't leave the finished sale sitting there as an
     // unsaved draft.
-    clearDraft(SALE_DRAFT_KEY);
+    clearDraft(saleDraftKey);
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
     setContactId(counterId(companyId));
     setCustomerText(DEFAULT_CUSTOMER);
     setDiscountTotal("0");
-    setTaxTotal("0");
+    setTaxId(taxSettings[companyId]?.default_sales_tax_id ?? "");
     setShippingTotal("0");
     setIsPaid(defaultPaidMode(companyId));
     setPaidAmount("");
@@ -304,11 +325,20 @@ export function SaleFormPage({
   // the same transaction as the sale, so a replayed submit can't post twice.
   const [operationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: SaleActionState, formData: FormData) => {
-    const result: SaleActionState = isEdit ? await updateSale(saleId!, prev, formData) : await createSale(prev, formData);
+    // A transport failure (response lost after the server committed) must not
+    // throw into the error boundary — that unmounts the form, and a restored
+    // draft would mint a fresh operation id and post the sale twice. Keep the
+    // form and its id alive; a replayed Save is then refused server-side.
+    let result: SaleActionState;
+    try {
+      result = isEdit ? await updateSale(saleId!, prev, formData) : await createSale(prev, formData);
+    } catch {
+      return { error: TRANSPORT_ERROR_MESSAGE };
+    }
     if (result?.success) {
       // Whatever happens next — a dialog closing, a route change, a page that
       // fails to re-render — this sale is saved, so its draft goes now.
-      clearDraft(SALE_DRAFT_KEY);
+      clearDraft(saleDraftKey);
       if (onDone) onDone();
       else if (isEdit) router.push("/sales/invoices");
       else resetForm();
@@ -350,6 +380,7 @@ export function SaleFormPage({
     if (!isEdit) {
       setIsPaid(defaultPaidMode(next));
       setPaidAmount("");
+      setTaxId(taxSettings[next]?.default_sales_tax_id ?? "");
     }
     if (contactId && !customerOpts.some((c) => c.id === contactId && inCompany(next)(c))) {
       setContactId(counterId(next));
@@ -376,16 +407,45 @@ export function SaleFormPage({
         ...l,
         itemText: name,
         itemId: opt?.id ?? "",
+        unitId: sameItem ? l.unitId : (opt?.baseUnitId ?? ""),
+        unitText: sameItem ? l.unitText : (unitOpts.find((unit) => unit.id === opt?.baseUnitId)?.name ?? ""),
         listPrice: sameItem ? l.listPrice : rate1(opt?.rate),
         unitPrice: sameItem ? l.unitPrice : rate1(opt?.salesRate),
       };
     });
   }
 
+  function pickUnit(i: number, name: string) {
+    const unitId = unitOpts.find((unit) => unit.name === name)?.id ?? "";
+    patchLine(i, (line) => {
+      const item = itemOpts.find((option) => option.id === line.itemId);
+      const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+      return {
+        ...line,
+        unitText: name,
+        unitId,
+        listPrice: item ? priceForUnit(item.rate, multiplier) : line.listPrice,
+        unitPrice: item ? priceForUnit(item.salesRate, multiplier) : line.unitPrice,
+      };
+    });
+  }
+
   const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
   const discountAmount = resolveAdjustment(discountTotal, subtotal);
-  const taxAmount = resolveAdjustment(taxTotal, subtotal);
-  const grandTotal = round1(subtotal - discountAmount + taxAmount + (Number(shippingTotal) || 0));
+  const selectedTax = taxOptions.find((tax) => tax.id === taxId);
+  const taxInclusive = taxSettings[companyId]?.tax_prices_include_tax === "true";
+  const taxCalculation = calculateTax(
+    lines.map((line) => ({
+      lineTotal: (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0),
+      taxable: itemOpts.find((item) => item.id === line.itemId)?.taxable ?? false,
+    })),
+    discountAmount,
+    Number(shippingTotal) || 0,
+    Number(selectedTax?.rate ?? 0),
+    taxInclusive,
+  );
+  const taxAmount = taxCalculation.taxTotal;
+  const grandTotal = taxCalculation.grandTotal;
   // Clamped the same way the server clamps it, so the balance on screen is the
   // balance that gets stored.
   const paidNow = round1(
@@ -542,6 +602,7 @@ export function SaleFormPage({
                   </th>
                   <th className={`${thClass} w-28`}>Unit Price</th>
                   <th className={`${thClass} w-28 text-right`}>Total</th>
+                  <th className={`${thClass} w-24 text-center`} title="Buy specifically from the market to fulfil this sale">Market Buy</th>
                   <th className="w-8 border border-sand" />
                 </tr>
               </thead>
@@ -569,7 +630,7 @@ export function SaleFormPage({
                         placeholder="Unit"
                         className={cellInput}
                         inputProps={{ "data-cell": `${r}-1` }}
-                        onChange={(name) => updateLine(r, { unitText: name, unitId: unitOpts.find((u) => u.name === name)?.id ?? "" })}
+                        onChange={(name) => pickUnit(r, name)}
                       />
                     </td>
                     <td className={tdClass}>
@@ -617,6 +678,15 @@ export function SaleFormPage({
                       {line.quantity && line.unitPrice ? money((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) : ""}
                     </td>
                     <td className="border border-sand text-center">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(line.marketPurchase)}
+                        onChange={(event) => updateLine(r, { marketPurchase: event.target.checked })}
+                        aria-label={`Market purchase for line ${r + 1}`}
+                        className="h-4 w-4 accent-navy-800"
+                      />
+                    </td>
+                    <td className="border border-sand text-center">
                       <button
                         type="button"
                         onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== r) : prev))}
@@ -652,18 +722,13 @@ export function SaleFormPage({
               />
               <input type="hidden" name="discountTotal" value={discountAmount.toFixed(2)} />
             </label>
-            <label className={`${labelClass} w-40`}>
+            <label className={`${labelClass} w-56`}>
               <span className={labelTextClass}>Tax</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="0 or 5%"
-                data-shortcut="t"
-                value={taxTotal}
-                onChange={(e) => setTaxTotal(e.target.value)}
-                className={fieldClass}
-              />
-              <input type="hidden" name="taxTotal" value={taxAmount.toFixed(1)} />
+              <select name="taxId" data-shortcut="t" value={taxId} onChange={(event) => setTaxId(event.target.value)} className={fieldClass}>
+                <option value="">No tax</option>
+                {taxOptions.map((tax) => <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>)}
+              </select>
+              {selectedTax && <span className="text-xs text-steel">{taxInclusive ? "Included in taxable prices" : "Added to taxable products"}</span>}
             </label>
             <label className={`${labelClass} w-40`}>
               <span className={labelTextClass}>Shipping Total</span>
@@ -681,7 +746,7 @@ export function SaleFormPage({
           </div>
           <div className="flex flex-col items-end gap-0.5 border-t border-sand pt-2 text-sm text-ink">
             {discountAmount > 0 && <span className="text-steel">Discount: -{money(discountAmount)}</span>}
-            {taxAmount > 0 && <span className="text-steel">Tax: +{money(taxAmount)}</span>}
+            {taxAmount > 0 && <span className="text-steel">Tax{taxInclusive ? " (included)" : ""}: {taxInclusive ? "" : "+"}{money(taxAmount)}</span>}
             {totalsBlock}
           </div>
         </div>
@@ -804,7 +869,7 @@ export function DeleteSaleButton({ saleId, onDone }: { saleId: string; onDone?: 
   const [error, setError] = useState<string | null>(null);
 
   async function remove() {
-    if (!confirm("Delete this sale? This removes its line items too.")) return;
+    if (!confirm("Cancel this sale? Its history will remain and its stock and accounting effects will be reversed.")) return;
     setPending(true);
     setError(null);
     const formData = new FormData();
@@ -830,7 +895,7 @@ export function DeleteSaleButton({ saleId, onDone }: { saleId: string; onDone?: 
         disabled={pending}
         className="text-sm font-medium text-error hover:underline disabled:opacity-40"
       >
-        {pending ? "Deleting…" : "Delete this sale"}
+        {pending ? "Cancelling…" : "Cancel this sale"}
       </button>
     </div>
   );

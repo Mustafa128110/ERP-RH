@@ -1,12 +1,12 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { bankAccounts, cashAccounts, chequeRegister } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
 import { CHEQUE_TYPES, CHEQUE_STATUSES } from "@/lib/cheque-constants";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
@@ -14,6 +14,7 @@ import { bankAccountLabel } from "@/lib/account-label";
 import { recordAudit } from "@/lib/actions/audit";
 import { resolveContactIds } from "@/lib/actions/resolve-refs";
 import { claimOperation, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { cachedPageRead } from "@/lib/read-cache";
 
 // Every account and cheque write goes through guard(): the hand-written messages
 // below are what a duplicate key should say, and guard adds the cases nobody can
@@ -27,19 +28,28 @@ const invalidateAccounts = () => invalidateLookups(CACHE.bankAccounts, CACHE.cas
 export async function listBankAccounts() {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
-  return db.select().from(bankAccounts).where(await companyInScope(bankAccounts.companyId));
+  const scope = (await getScopeCompanyIds()).sort().join(",");
+  return cachedPageRead(`${session.userId}:accounts:bank:${scope}`, async () =>
+    db.select().from(bankAccounts).where(await companyInPermissionScope(bankAccounts.companyId, session, "accounts")),
+  );
 }
 
 export async function listCashAccounts() {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
-  return db.select().from(cashAccounts).where(await companyInScope(cashAccounts.companyId));
+  const scope = (await getScopeCompanyIds()).sort().join(",");
+  return cachedPageRead(`${session.userId}:accounts:cash:${scope}`, async () =>
+    db.select().from(cashAccounts).where(await companyInPermissionScope(cashAccounts.companyId, session, "accounts")),
+  );
 }
 
 export async function listCheques() {
   const session = await getSession();
   requirePermission(session, "cheques", "view");
-  return db.select().from(chequeRegister).where(await companyInScope(chequeRegister.companyId));
+  const scope = (await getScopeCompanyIds()).sort().join(",");
+  return cachedPageRead(`${session.userId}:accounts:cheques:${scope}`, async () =>
+    db.select().from(chequeRegister).where(await companyInPermissionScope(chequeRegister.companyId, session, "cheques")),
+  );
 }
 
 // --- Bank accounts ---
@@ -66,15 +76,22 @@ export async function updateBankAccount(accountId: string, _prevState: ActionRes
   return guard(
     "Couldn't save the bank account.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "accounts", "edit");
+      const session = await getLiveSession();
 
       const values = readBankAccountForm(formData);
       if (!values.bankName) return { error: "Bank name is required." };
+      // A global account (no company) needs only the module permission; a
+      // company account is scoped — membership + per-company permission — and
+      // the row itself is updated scoped below.
+      if (values.companyId) requirePermission(session, "accounts", "edit", { companyId: values.companyId });
+      else requirePermission(session, "accounts", "edit");
       if (!values.accountTitle) return { error: "Account title is required." };
       if (!values.accountNumber) return { error: "Account number is required." };
 
-      await db.update(bankAccounts).set(values).where(eq(bankAccounts.id, accountId));
+      await db
+        .update(bankAccounts)
+        .set(values)
+        .where(and(eq(bankAccounts.id, accountId), await companyInScope(bankAccounts.companyId)));
 
       invalidateAccounts();
       revalidatePath("/accounts");
@@ -87,10 +104,18 @@ export async function updateBankAccount(accountId: string, _prevState: ActionRes
 
 export async function deleteBankAccount(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this account is still referenced by cheques or documents.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "accounts", "delete");
 
     const accountId = String(formData.get("accountId") ?? "");
+    // Read scoped: a guessed id from an unauthorized company is "not found".
+    const [existing] = await db
+      .select({ companyId: bankAccounts.companyId })
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.id, accountId), await companyInScope(bankAccounts.companyId)))
+      .limit(1);
+    if (!existing) return { error: "Account not found." };
+    requirePermission(session, "accounts", "delete", { companyId: existing.companyId ?? undefined });
     await db.delete(bankAccounts).where(eq(bankAccounts.id, accountId));
 
     invalidateAccounts();
@@ -120,11 +145,16 @@ export async function createBankAccountsBatch(
   return guard(
     "Couldn't save the bank accounts.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "accounts", "create");
 
       const valid = rows.filter((r) => r.bankName.trim() && r.accountTitle.trim() && r.accountNumber.trim());
       if (valid.length === 0) return { error: "Add at least one bank account with a bank name, account title, and account number." };
+      // Every company the batch files under must be one the user belongs to and
+      // can create accounts in.
+      for (const companyId of new Set(valid.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requirePermission(session, "accounts", "create", { companyId });
+      }
 
       const inserted = await db
         .insert(bankAccounts)
@@ -168,13 +198,17 @@ export async function updateCashAccount(accountId: string, _prevState: ActionRes
   return guard(
     "Couldn't save the cash account.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "accounts", "edit");
+      const session = await getLiveSession();
 
       const values = readCashAccountForm(formData);
       if (!values.name) return { error: "Name is required." };
+      if (values.companyId) requirePermission(session, "accounts", "edit", { companyId: values.companyId });
+      else requirePermission(session, "accounts", "edit");
 
-      await db.update(cashAccounts).set(values).where(eq(cashAccounts.id, accountId));
+      await db
+        .update(cashAccounts)
+        .set(values)
+        .where(and(eq(cashAccounts.id, accountId), await companyInScope(cashAccounts.companyId)));
 
       invalidateAccounts();
       revalidatePath("/accounts");
@@ -187,10 +221,18 @@ export async function updateCashAccount(accountId: string, _prevState: ActionRes
 
 export async function deleteCashAccount(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this account is still referenced by documents.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "accounts", "delete");
 
     const accountId = String(formData.get("accountId") ?? "");
+    // Read scoped: a guessed id from an unauthorized company is "not found".
+    const [existing] = await db
+      .select({ companyId: cashAccounts.companyId })
+      .from(cashAccounts)
+      .where(and(eq(cashAccounts.id, accountId), await companyInScope(cashAccounts.companyId)))
+      .limit(1);
+    if (!existing) return { error: "Account not found." };
+    requirePermission(session, "accounts", "delete", { companyId: existing.companyId ?? undefined });
     await db.delete(cashAccounts).where(eq(cashAccounts.id, accountId));
 
     invalidateAccounts();
@@ -212,11 +254,16 @@ export async function createCashAccountsBatch(rows: CashAccountBatchRow[]): Prom
   return guard(
     "Couldn't save the cash accounts.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "accounts", "create");
 
       const valid = rows.filter((r) => r.companyId && r.name.trim());
       if (valid.length === 0) return { error: "Add at least one cash account with a company and name." };
+      // Every company the batch files under must be one the user belongs to and
+      // can create accounts in.
+      for (const companyId of new Set(valid.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requirePermission(session, "accounts", "create", { companyId });
+      }
 
       await db.insert(cashAccounts).values(valid.map((r) => ({ ...r, currentBalance: r.openingBalance })));
 
@@ -250,11 +297,12 @@ export async function createCheque(_prevState: ActionResult | undefined, formDat
   return guard(
     "Couldn't save the cheque.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "cheques", "create");
+      const session = await getLiveSession();
 
       const values = readChequeForm(formData);
       if (!values.companyId) return { error: "Company is required." };
+      // Scoped to the submitted company: membership + per-company permission.
+      requirePermission(session, "cheques", "create", { companyId: values.companyId });
       if (!values.chequeNumber) return { error: "Cheque number is required." };
       if (!values.chequeDate) return { error: "Cheque date is required." };
       if (!values.chequeType) return { error: "Cheque type is required." };
@@ -286,11 +334,11 @@ export interface ChequeBatchRow {
   issuedByCompany: boolean;
 }
 
-export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: string): Promise<CreateResult<{ id: string; name: string }>> {
+export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: string): Promise<CreateResult<{ id: string; name: string; companyId: string }>> {
   return guard(
     "Couldn't save the cheques.",
     async () => {
-      const session = await getSession();
+      const session = await getLiveSession();
       requirePermission(session, "cheques", "create");
 
       // Minted by the cheque dialog when it opened; a replayed submit of a
@@ -300,6 +348,11 @@ export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: s
       const valid = rows.filter((r) => r.companyId && r.chequeNumber.trim() && r.chequeDate && r.chequeType && Number(r.amount) > 0);
       if (valid.length === 0) {
         return { error: "Add at least one cheque with a company, number, date, type, and positive amount." };
+      }
+      // Every company the batch files under must be one the user belongs to and
+      // can create cheques in.
+      for (const companyId of new Set(valid.map((r) => r.companyId).filter((c): c is string => !!c))) {
+        requirePermission(session, "cheques", "create", { companyId });
       }
 
       // One transaction, three statements: contacts typed into the grid are
@@ -326,7 +379,7 @@ export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: s
               remarks: null,
             })),
           )
-          .returning({ id: chequeRegister.id, chequeNumber: chequeRegister.chequeNumber, amount: chequeRegister.amount });
+          .returning({ id: chequeRegister.id, chequeNumber: chequeRegister.chequeNumber, amount: chequeRegister.amount, companyId: chequeRegister.companyId });
       });
 
       invalidateAccounts();
@@ -336,7 +389,7 @@ export async function createChequesBatch(rows: ChequeBatchRow[], operationId?: s
       // Labelled the way getAvailableCheques labels them, so one created from
       // inside a payment or an expense drops into the picker reading identically
       // to the rest of the list.
-      return { created: inserted.map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` })) };
+      return { created: inserted.map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})`, companyId: c.companyId })) };
     },
     { [DUPLICATE]: "Can't create — a cheque number is duplicated for its bank account." },
   );
@@ -346,15 +399,19 @@ export async function updateCheque(chequeId: string, _prevState: ActionResult | 
   return guard(
     "Couldn't save the cheque.",
     async () => {
-      const session = await getSession();
-      requirePermission(session, "cheques", "edit");
+      const session = await getLiveSession();
 
       const values = readChequeForm(formData);
       if (!values.chequeNumber) return { error: "Cheque number is required." };
+      if (values.companyId) requirePermission(session, "cheques", "edit", { companyId: values.companyId });
+      else requirePermission(session, "cheques", "edit");
       if (!values.chequeDate) return { error: "Cheque date is required." };
       if (Number.isNaN(Number(values.amount)) || Number(values.amount) <= 0) return { error: "Amount must be greater than zero." };
 
-      await db.update(chequeRegister).set(values).where(eq(chequeRegister.id, chequeId));
+      await db
+        .update(chequeRegister)
+        .set(values)
+        .where(and(eq(chequeRegister.id, chequeId), await companyInScope(chequeRegister.companyId)));
 
       invalidateAccounts();
       revalidatePath("/accounts");
@@ -367,10 +424,18 @@ export async function updateCheque(chequeId: string, _prevState: ActionResult | 
 
 export async function deleteCheque(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Can't delete — this cheque is still referenced by a document.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "cheques", "delete");
 
     const chequeId = String(formData.get("chequeId") ?? "");
+    // Read scoped: a guessed id from an unauthorized company is "not found".
+    const [existing] = await db
+      .select({ companyId: chequeRegister.companyId })
+      .from(chequeRegister)
+      .where(and(eq(chequeRegister.id, chequeId), await companyInScope(chequeRegister.companyId)))
+      .limit(1);
+    if (!existing) return { error: "Cheque not found." };
+    requirePermission(session, "cheques", "delete", { companyId: existing.companyId ?? undefined });
     await db.delete(chequeRegister).where(eq(chequeRegister.id, chequeId));
 
     invalidateAccounts();

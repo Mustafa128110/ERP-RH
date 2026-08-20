@@ -1,12 +1,13 @@
 "use server";
 
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, MINUTE } from "@/lib/cache";
 import { money, qty } from "@/lib/format";
 import { REPORT_TYPES, type ReportSlug } from "@/lib/report-constants";
 import { queryReport, reportScope, type ReportFilters, type ReportResult } from "@/lib/queries/reports";
+import type { AuthSession } from "@/lib/auth/session";
 
 // Same reasoning as the dashboard cache (lib/actions/dashboard.ts): a report
 // is a live aggregate, so the write-invalidation in invalidateLookups() is the
@@ -26,9 +27,15 @@ const AGGREGATE_TTL = MINUTE;
 export async function runReport(slug: ReportSlug, filters: ReportFilters): Promise<ReportResult> {
   const session = await getSession();
   requirePermission(session, "reports", "view");
+  return runScopedReport(session, slug, filters, "view");
+}
 
+async function runScopedReport(session: AuthSession, slug: ReportSlug, filters: ReportFilters, action: "view" | "export"): Promise<ReportResult> {
   const meta = REPORT_TYPES.find((r) => r.slug === slug)!;
-  const ids = await getScopeCompanyIds();
+  const key = `reports.${action}`;
+  const ids = (await getScopeCompanyIds()).filter(
+    (companyId) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+  );
   const scope = reportScope(ids, filters);
   if (!scope) {
     return {
@@ -55,10 +62,12 @@ export async function runReport(slug: ReportSlug, filters: ReportFilters): Promi
 // The same rows the table shows, as strings a spreadsheet will read. Formatted
 // here rather than in the browser so the file matches the screen exactly.
 export async function exportReportCsv(slug: ReportSlug, filters: ReportFilters): Promise<Record<string, string>[]> {
-  const session = await getSession();
+  // The CSV hands over the whole financial picture, so the gate is read live —
+  // a revoked user must not keep downloading it from a stale instance cache.
+  const session = await getLiveSession();
   requirePermission(session, "reports", "export");
 
-  const report = await runReport(slug, filters);
+  const report = await runScopedReport(session, slug, filters, "export");
   return report.rows.map((row) => {
     const out: Record<string, string> = {};
     for (const column of report.columns) {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStockAdjustment } from "@/lib/actions/stock-adjustments";
-import { DeleteStockAdjustmentButton } from "@/components/modules/StockAdjustmentForm";
+import { ApproveStockAdjustmentButton, DeleteStockAdjustmentButton } from "@/components/modules/StockAdjustmentForm";
 import { formatDate, qty as formatQty } from "@/lib/format";
 
 const thClass = "px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-steel";
@@ -30,7 +30,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             {adjustment.location} · {adjustment.reason ?? "No reason recorded"} · {formatDate(adjustment.documentDate)} · {adjustment.status}
           </p>
         </div>
-        <DeleteStockAdjustmentButton adjustmentId={adjustment.id} />
+        <div className="flex items-center gap-3">
+          {adjustment.status === "pending" && <ApproveStockAdjustmentButton adjustmentId={adjustment.id} />}
+          {adjustment.status !== "cancelled" && <DeleteStockAdjustmentButton adjustmentId={adjustment.id} />}
+        </div>
       </div>
 
       {/* Read-only: the movements are already posted, so an adjustment is deleted

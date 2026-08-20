@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { logout } from "@/lib/auth/actions";
 import { setScopeCompany } from "@/lib/actions/scope";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
+import { SyncStatus } from "@/components/layout/SyncStatus";
+import { useSync } from "@/components/layout/SyncProvider";
+import { setClientUserId } from "@/lib/client-user";
 import { openShortcuts } from "@/components/layout/KeyboardShortcuts";
 import { openNav } from "@/components/layout/Sidebar";
 
@@ -17,6 +20,54 @@ import { openNav } from "@/components/layout/Sidebar";
 // box, and — behind one overflow button — the scope, the shortcut sheet and
 // logging out. Search stays visible because it is the fastest way to anything;
 // the rest are occasional and would each steal width from it.
+// Logging out with queued or failed operations is not a silent decision: the
+// work stays on this browser under this user (it is never lost, never handed
+// to another account), but the user should know it is waiting before they go.
+// The first click arms a confirm; the second logs out. The client-side user id
+// is cleared with the session so nothing after this page keeps composing
+// persistence keys under the old identity.
+function LogoutButton({ className }: { className: string }) {
+  const { entries } = useSync();
+  const waiting = entries.filter((e) => e.status === "pending" || e.status === "failed").length;
+  const [armed, setArmed] = useState(false);
+  // Auto-disarm so an armed-but-unclicked button doesn't stay live forever.
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 10_000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  return (
+    <form action={logout}>
+      <button
+        type="submit"
+        onClick={(e) => {
+          if (waiting > 0 && !armed) {
+            e.preventDefault();
+            setArmed(true);
+            return;
+          }
+          // The session is ending — the client-side user id goes with it, so
+          // no post-logout render composes drafts/outbox keys under the old
+          // user.
+          setClientUserId(null);
+          navigator.serviceWorker?.controller?.postMessage({ type: "erp:clear-cache" });
+        }}
+        title={waiting > 0 ? `${waiting} operation(s) waiting to sync — they stay on this browser and sync after you log back in.` : undefined}
+        className={className}
+      >
+        {armed ? "Log out anyway?" : "Log out"}
+      </button>
+      {armed && (
+        <span className="block pt-1 text-xs text-amber-900">
+          {waiting} {waiting === 1 ? "operation is" : "operations are"} waiting to sync. They stay on this browser
+          and sync when you log back in — nothing is lost.
+        </span>
+      )}
+    </form>
+  );
+}
+
 export function Topbar({
   username,
   companies,
@@ -98,6 +149,9 @@ export function Topbar({
 
       <GlobalSearch />
 
+      {/* The sync/offline pill — invisible when everything is fine. */}
+      <SyncStatus />
+
       {/* Everything from here right is desktop-only; the phone gets the menu. */}
       <div className="hidden items-center gap-3 whitespace-nowrap sm:flex">
         {/* The app is keyboard-first — arrow navigation in every list, an Excel
@@ -112,11 +166,7 @@ export function Topbar({
           ?
         </button>
         <span className="hidden text-sm text-steel lg:inline">{username}</span>
-        <form action={logout}>
-          <button type="submit" className="rounded-md border border-sand px-3 py-1.5 text-sm font-medium text-steel hover:bg-ivory">
-            Log out
-          </button>
-        </form>
+        <LogoutButton className="rounded-md border border-sand px-3 py-1.5 text-sm font-medium text-steel hover:bg-ivory" />
       </div>
 
       <div ref={menuRef} className="relative shrink-0 sm:hidden">
@@ -141,11 +191,9 @@ export function Topbar({
               </label>
             )}
 
-            <form action={logout}>
-              <button type="submit" className="h-11 w-full rounded-md border border-sand text-sm font-medium text-steel hover:bg-ivory">
-                Log out
-              </button>
-            </form>
+            {/* The mobile menu unmounts when it closes, which also resets the
+                armed confirm — a fresh menu always starts unarmed. */}
+            <LogoutButton className="h-11 w-full rounded-md border border-sand text-sm font-medium text-steel hover:bg-ivory" />
           </div>
         )}
       </div>

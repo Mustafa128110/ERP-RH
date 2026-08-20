@@ -67,7 +67,7 @@ export const KIND_LABEL: Record<SearchKind, string> = {
 // which has a search box of its own to finish the job.
 export const SEARCH_HREF: Record<SearchKind, (id: string) => string> = {
   product: () => "/inventory/products",
-  contact: () => "/purchases/suppliers",
+  contact: () => "/contacts",
   invoice: (id) => `/sales/invoices/${id}`,
   purchase: () => "/purchases/stock",
   quotation: (id) => `/sales/quotations/${id}`,

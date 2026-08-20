@@ -14,6 +14,7 @@ import {
   index,
   check,
   primaryKey,
+  foreignKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -84,6 +85,7 @@ export const documentTypeCodeEnum = pgEnum("document_type_code", [
   "EXPENSE",
   "DELIVERY_NOTE",
   "GOODS_RECEIPT",
+  "MARKET_PURCHASE",
   "CREDIT_NOTE",
   "DEBIT_NOTE",
 ]);
@@ -105,6 +107,7 @@ export const documentSeriesEnum = pgEnum("document_series", [
   "EX",
   "DN",
   "GR",
+  "MP",
   "CN",
   "DB",
 ]);
@@ -327,6 +330,9 @@ export const expenses = pgTable(
     documentId: uuid("document_id").references(() => documents.id, { onDelete: "cascade" }),
     notes: text("notes"),
     attachmentUrl: text("attachment_url"),
+    status: documentStatusEnum("status").notNull().default("posted"),
+    cancelledBy: uuid("cancelled_by"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -351,6 +357,11 @@ export const items = pgTable(
     urduName: varchar("urdu_name", { length: 255 }),
     categoryId: uuid("category_id").references(() => categories.id),
     brandId: uuid("brand_id").references(() => brands.id),
+    // Stock is always held in this unit. A transaction entered in another unit
+    // is converted through unit_conversions before it reaches the inventory
+    // ledger. Nullable only for legacy/new incomplete products; the first
+    // transaction with a unit establishes it atomically.
+    baseUnitId: uuid("base_unit_id").references(() => units.id),
     taxable: boolean("taxable").default(false),
     isActive: boolean("is_active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -429,6 +440,9 @@ export const documentTypes = pgTable(
     // second company (M52) failed on that constraint. Each company gets its own
     // SI-0001 series now, matching the company+code rule above.
     unique().on(table.companyId, table.series),
+    // Supports the composite documents FK below: a document type is not merely
+    // an id, it belongs to the same company as the document using it.
+    unique().on(table.companyId, table.id),
   ],  );
 
 export const documents = pgTable(
@@ -444,6 +458,12 @@ export const documents = pgTable(
     subtotal: numeric("subtotal", { precision: 18, scale: 2 }).notNull().default("0"),
     discountTotal: numeric("discount_total", { precision: 18, scale: 2 }).notNull().default("0"),
     taxTotal: numeric("tax_total", { precision: 18, scale: 2 }).notNull().default("0"),
+    // The chosen tax rule and its immutable snapshot. Keeping the rate and
+    // inclusive flag on the document means editing the Tax master or company
+    // defaults never rewrites an old invoice.
+    taxId: uuid("tax_id").references(() => taxes.id, { onDelete: "set null" }),
+    taxRate: numeric("tax_rate", { precision: 8, scale: 4 }).notNull().default("0"),
+    taxInclusive: boolean("tax_inclusive").notNull().default(false),
     shippingTotal: numeric("shipping_total", { precision: 18, scale: 2 }).notNull().default("0"),
     grandTotal: numeric("grand_total", { precision: 18, scale: 2 }).notNull().default("0"),
     // Unpaid documents get a matching ledger_entries credit row (money owed);
@@ -480,11 +500,21 @@ export const documents = pgTable(
     createdBy: uuid("created_by"),
     approvedBy: uuid("approved_by"),
     cancelledBy: uuid("cancelled_by"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    foreignKey({
+      columns: [table.companyId, table.documentTypeId],
+      foreignColumns: [documentTypes.companyId, documentTypes.id],
+      name: "documents_company_document_type_fk",
+    }),
     unique().on(table.companyId, table.documentTypeId, table.number),
+    // Commerce lists resolve a document type, narrow to a company scope, then
+    // show newest documents first. One composite index serves that shared path
+    // instead of making PostgreSQL combine and sort the single-column indexes.
+    index("idx_documents_company_type_date").on(table.companyId, table.documentTypeId, table.documentDate.desc(), table.createdAt.desc()),
     index("idx_documents_date").on(table.documentDate),
     index("idx_documents_contact").on(table.contactId),
     index("idx_documents_status").on(table.status),
@@ -542,6 +572,18 @@ export const documentLines = pgTable(
     unitPrice: numeric("unit_price", { precision: 18, scale: 4 }).notNull().default("0"),
     unitCost: numeric("unit_cost", { precision: 18, scale: 4 }),
     lineTotal: numeric("line_total", { precision: 18, scale: 2 }).notNull().default("0"),
+    // Taxability and tax amount are snapshots. Product taxability and a rate
+    // may change later; an issued invoice must continue to add up exactly as it
+    // did when it was posted.
+    taxable: boolean("taxable").notNull().default(false),
+    taxAmount: numeric("tax_amount", { precision: 18, scale: 2 }).notNull().default("0"),
+    // Used by approval-gated stock adjustments. Pending adjustments have no
+    // inventory_transaction yet, so the intended sign has to live on the line.
+    stockMovement: smallint("stock_movement"),
+    // A sale line can be fulfilled by buying the item specifically from the
+    // market. It still posts the outbound sale immediately; confirmation of the
+    // linked request posts the matching inbound movement and the actual cost.
+    marketPurchase: boolean("market_purchase").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     // Quotation lines only: how much of this line has already been turned into
     // an invoice. A quotation is converted in parts — half the tiles now, the
@@ -554,7 +596,61 @@ export const documentLines = pgTable(
     index("idx_document_lines_document").on(table.documentId),
     index("idx_document_lines_item").on(table.itemId),
     index("idx_document_lines_location").on(table.locationId),
+    check("document_lines_stock_movement_check", sql`${table.stockMovement} IS NULL OR ${table.stockMovement} IN (-1, 1)`),
   ],  );
+
+// A standalone receipt/payment settles the oldest open invoices for its contact
+// and company. The payment and invoice documents remain independently auditable;
+// this bridge records exactly how much of one paid the other. Amounts are never
+// inferred from row order after posting.
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id),
+    paymentDocumentId: uuid("payment_document_id").notNull().references(() => documents.id, { onDelete: "restrict" }),
+    invoiceDocumentId: uuid("invoice_document_id").notNull().references(() => documents.id, { onDelete: "restrict" }),
+    amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique().on(table.paymentDocumentId, table.invoiceDocumentId),
+    index("idx_payment_allocations_payment").on(table.paymentDocumentId),
+    index("idx_payment_allocations_invoice").on(table.invoiceDocumentId),
+    index("idx_payment_allocations_company").on(table.companyId),
+    check("payment_allocations_amount_check", sql`${table.amount} > 0`),
+  ],
+);
+
+export const marketPurchaseStatusEnum = pgEnum("market_purchase_status", ["pending", "confirmed", "cancelled"]);
+
+export const marketPurchaseRequests = pgTable(
+  "market_purchase_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id),
+    saleDocumentId: uuid("sale_document_id").notNull().references(() => documents.id, { onDelete: "restrict" }),
+    saleLineId: uuid("sale_line_id").notNull().references(() => documentLines.id, { onDelete: "restrict" }),
+    itemId: uuid("item_id").notNull().references(() => items.id),
+    unitId: uuid("unit_id").references(() => units.id),
+    quantity: numeric("quantity", { precision: 18, scale: 3 }).notNull(),
+    baseQuantity: numeric("base_quantity", { precision: 18, scale: 3 }).notNull(),
+    status: marketPurchaseStatusEnum("status").notNull().default("pending"),
+    confirmationDocumentId: uuid("confirmation_document_id").references(() => documents.id, { onDelete: "restrict" }),
+    expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "restrict" }),
+    purchaseCost: numeric("purchase_cost", { precision: 18, scale: 4 }),
+    confirmedBy: uuid("confirmed_by"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique().on(table.saleLineId),
+    index("idx_market_purchase_company_status_created").on(table.companyId, table.status, table.createdAt.desc()),
+    index("idx_market_purchase_confirmation").on(table.confirmationDocumentId),
+    check("market_purchase_quantity_check", sql`${table.quantity} > 0 AND ${table.baseQuantity} > 0`),
+    check("market_purchase_cost_check", sql`${table.purchaseCost} IS NULL OR ${table.purchaseCost} >= 0`),
+  ],
+);
 
 // --- Inventory Ledger ---
 
@@ -682,7 +778,7 @@ export const submittedOperations = pgTable("submitted_operations", {
 // Written by lib/actions/audit.ts, from the actions that mutate. A failure to
 // write an audit row never fails the operation it describes — an unrecorded
 // change is bad, a lost sale is worse.
-export const auditAction = pgEnum("audit_action", ["create", "update", "delete", "merge", "import"]);
+export const auditAction = pgEnum("audit_action", ["create", "update", "delete", "cancel", "approve", "merge", "import"]);
 
 export const auditLogs = pgTable(
   "audit_logs",

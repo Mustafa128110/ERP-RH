@@ -1,5 +1,5 @@
 import { listPayments } from "@/lib/actions/payments";
-import { listLedgerBalances } from "@/lib/actions/ledger";
+import { listPaymentLedgerBalances } from "@/lib/actions/ledger";
 import {
   getAvailableCheques,
   getBankAccountOptions,
@@ -9,7 +9,6 @@ import {
 } from "@/lib/queries/lookups";
 import { PaymentManager } from "@/components/modules/PaymentManager";
 import { ListFilters } from "@/components/ui/ListFilters";
-import { StockFilter } from "@/components/modules/StockFilters";
 
 export default async function Page({
   searchParams,
@@ -26,7 +25,7 @@ export default async function Page({
     getAvailableCheques(),
     // Which company each contact's balance sits in, so a new payment settles the
     // books that actually hold it rather than whichever company sorts first.
-    listLedgerBalances(),
+    listPaymentLedgerBalances(),
   ]);
 
   return (
@@ -40,17 +39,7 @@ export default async function Page({
       cashAccountOptions={cashAccountOptions}
       chequeOptions={chequeOptions}
       filters={
-        <ListFilters key="filters">
-          <StockFilter
-            param="direction"
-            allLabel="Made & Received"
-            options={[
-              { id: "made", name: "Made" },
-              { id: "received", name: "Received" },
-            ]}
-          />
-          <StockFilter param="company" allLabel="All Companies" options={companyRows.map((c) => ({ id: c.id, name: c.name }))} />
-        </ListFilters>
+        <ListFilters key="filters" />
       }
     />
   );

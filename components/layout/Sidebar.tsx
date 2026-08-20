@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { navSections } from "@/lib/nav-config";
 import { NavIcon } from "@/components/layout/NavIcon";
 import { HoverCard } from "@/components/ui/HoverCard";
+import type { ComponentProps } from "react";
 
 // Fired by the Topbar's hamburger. An event rather than lifted state: the drawer
 // is the only thing the two share, and threading a setter down through the
@@ -14,8 +15,46 @@ import { HoverCard } from "@/components/ui/HoverCard";
 export const NAV_EVENT = "erp:nav";
 export const openNav = () => window.dispatchEvent(new Event(NAV_EVENT));
 
-export function Sidebar() {
+// Dynamic ERP routes normally prefetch only their loading shell. Once a pointer,
+// keyboard focus, or finger shows intent, opt that one destination into a full
+// prefetch so its cached read model and JavaScript are ready before the click.
+// `null` preserves Next's inexpensive default while the link is merely visible.
+function IntentLink({ onPointerEnter, onFocus, onTouchStart, ...props }: ComponentProps<typeof Link>) {
+  const [intent, setIntent] = useState(false);
+  const warm = () => setIntent(true);
+  return (
+    <Link
+      {...props}
+      prefetch={intent ? true : null}
+      onPointerEnter={(event) => {
+        warm();
+        onPointerEnter?.(event);
+      }}
+      onFocus={(event) => {
+        warm();
+        onFocus?.(event);
+      }}
+      onTouchStart={(event) => {
+        warm();
+        onTouchStart?.(event);
+      }}
+    />
+  );
+}
+
+export function Sidebar({ permissions }: { permissions: string[] }) {
   const pathname = usePathname();
+  const allowed = new Set(permissions);
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!item.permission) return true;
+        const required = Array.isArray(item.permission) ? item.permission : [item.permission];
+        return required.some((permission) => allowed.has(permission));
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   // Exactly one link lights up: the most specific one whose path we're under.
   //
@@ -24,7 +63,7 @@ export function Sidebar() {
   // matched /sales, and both lit up. Taking the longest match resolves the
   // nesting: /sales/invoices beats /sales, and /sales/abc123 (an edit page,
   // which has no nav entry of its own) still falls back to /sales.
-  const activeHref = navSections
+  const activeHref = visibleSections
     .flatMap((section) => section.items.map((item) => item.href))
     .filter((href) => pathname === href || pathname.startsWith(href + "/"))
     .sort((a, b) => b.length - a.length)[0];
@@ -63,12 +102,12 @@ export function Sidebar() {
 
   // The full list of links, shared by the drawer and the expanded desktop rail
   // so the two can never offer different navigation.
-  const sections = navSections.map((section) => (
+  const sections = visibleSections.map((section) => (
     <div key={section.label}>
       <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-brass-600">{section.label}</p>
       <div className="flex flex-col gap-0.5">
         {section.items.map((item) => (
-          <Link
+          <IntentLink
             key={item.href}
             href={item.href}
             // Tapping a link on a phone should land you on the page, not on the
@@ -79,7 +118,7 @@ export function Sidebar() {
             className={linkClass(item.href === activeHref)}
           >
             {item.label}
-          </Link>
+          </IntentLink>
         ))}
       </div>
     </div>
@@ -136,7 +175,7 @@ export function Sidebar() {
           </button>
 
           <nav className="scroll-thin flex flex-1 flex-col items-center gap-1 overflow-y-auto py-3">
-            {navSections.map((section, i) => (
+            {visibleSections.map((section, i) => (
               <div key={section.label} className="flex w-full flex-col items-center gap-1">
                 {i > 0 && <hr className="my-1 w-6 border-t border-sand" />}
                 {section.items.map((item) => {
@@ -153,7 +192,7 @@ export function Sidebar() {
                       estimatedHeight={54}
                       panelClassName="w-max px-3 py-2"
                       trigger={
-                        <Link
+                        <IntentLink
                           href={item.href}
                           aria-label={item.label}
                           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors ${
@@ -161,7 +200,7 @@ export function Sidebar() {
                           }`}
                         >
                           <NavIcon href={item.href} label={item.label} />
-                        </Link>
+                        </IntentLink>
                       }
                     >
                       <p className="font-semibold text-navy-800">{item.label}</p>

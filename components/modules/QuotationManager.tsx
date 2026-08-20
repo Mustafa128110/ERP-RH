@@ -1,42 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { DataTable } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
-import { DetailHover } from "@/components/ui/DetailHover";
-import { formatDate, money, qty } from "@/lib/format";
+import { formatDate, money } from "@/lib/format";
 import { statusColumn, type ColumnDef, type Row } from "@/lib/table";
+import { useCachedOptions } from "@/lib/client-cache";
 import type { QuotationListRow } from "@/lib/actions/quotations";
 import { QuotationForm } from "@/components/modules/QuotationForm";
+import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 const columns: ColumnDef[] = [
-  {
-    key: "number",
-    label: "Number",
-    // What was quoted, and how much of it has already gone out on an invoice —
-    // which is the whole state of a quotation, and the reason you open one.
-    render: (row) => {
-      const lines = JSON.parse(String(row.lines ?? "[]")) as { name: string; quantity: string; converted: string }[];
-      if (lines.length === 0) return String(row.number);
-      return (
-        <DetailHover
-          trigger={String(row.number)}
-          heading={`${lines.length} line${lines.length === 1 ? "" : "s"} · ${row.total}`}
-          lines={lines.map((l) => ({
-            text: l.name,
-            note: Number(l.converted) > 0 ? `${qty(l.converted)} invoiced` : undefined,
-            value: qty(l.quantity),
-          }))}
-          width={320}
-        />
-      );
-    },
-  },
   { key: "customer", label: "Customer" },
   { key: "company", label: "Company" },
   { key: "date", label: "Date" },
@@ -51,17 +29,32 @@ export function QuotationManager({
   customerOptions,
   itemOptions,
   unitOptions,
+  taxOptions,
+  conversionOptions,
+  taxSettings,
 }: {
   quotations: QuotationListRow[];
   // The options the add popup's form needs — the same bundle the sale form
   // uses, minus the settlement lists a quotation never touches.
   companyOptions: { id: string; name: string }[];
   customerOptions: { id: string; name: string; companyId: string }[];
-  itemOptions: ({ id: string; name: string; companyId: string } & { salesRate: string | null })[];
+  itemOptions: ({ id: string; name: string; companyId: string } & { salesRate: string | null; baseUnitId: string | null; taxable: boolean })[];
   unitOptions: { id: string; name: string }[];
+  taxOptions: { id: string; name: string; rate: string }[];
+  conversionOptions: UnitConversionOption[];
+  taxSettings: Record<string, Record<string, string>>;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
+
+  // Seed the client reference cache from the live options (so an offline form
+  // can still fill its pickers) and fall back to the cached copy when the page
+  // rendered empty — e.g. a shell served with no data. Live always wins when
+  // present, so an online visit is unaffected.
+  const cachedCompany = useCachedOptions("companies", companyOptions);
+  const cachedCustomers = useCachedOptions("customers", customerOptions);
+  const cachedItems = useCachedOptions("items", itemOptions);
+  const cachedUnits = useCachedOptions("units", unitOptions);
+
   const rows: Row[] = quotations.map((q) => ({
     id: q.id,
     number: q.number,
@@ -82,7 +75,6 @@ export function QuotationManager({
 
   function close() {
     setOpen(false);
-    router.refresh();
   }
 
   return (
@@ -111,10 +103,13 @@ export function QuotationManager({
       {open && (
         <Dialog title="New Quotation" onClose={close} size="xwide">
           <QuotationForm
-            companyOptions={companyOptions}
-            customerOptions={customerOptions}
-            itemOptions={itemOptions}
-            unitOptions={unitOptions}
+            companyOptions={cachedCompany.value}
+            customerOptions={cachedCustomers.value}
+            itemOptions={cachedItems.value}
+            unitOptions={cachedUnits.value}
+            taxOptions={taxOptions}
+            conversionOptions={conversionOptions}
+            taxSettings={taxSettings}
             onDone={close}
           />
         </Dialog>
