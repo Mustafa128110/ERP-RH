@@ -7,6 +7,9 @@ import "@fontsource/fraunces/600.css";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
+import "@fontsource/source-code-pro/400.css";
+import "@fontsource/source-code-pro/500.css";
+import "@fontsource/source-code-pro/600.css";
 import "./globals.css";
 
 // Brand pairing (docs/OS/02-brand/typography.md): Fraunces 600 for
