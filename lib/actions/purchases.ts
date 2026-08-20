@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -19,12 +19,14 @@ import {
   chequeRegister,
   inventoryTransactions,
   expenses,
+  paymentAllocations,
+  taxes,
 } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
-import { adjustSettlementBalance, type SettlementType } from "@/lib/actions/settlement";
+import { adjustSettlementBalance, adjustSettlementBalancesBatch, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
 import {
   CACHE,
   getAvailableCheques,
@@ -33,18 +35,25 @@ import {
   getCompanies,
   getItemOptions,
   getLocations,
-  getSuppliers,
+  getContactOptions,
+  getTaxes,
   getUnits,
   invalidateLookups,
 } from "@/lib/queries/lookups";
-import { resolveContactId, resolveExpenseCategoryId, resolveItemId, resolveLocationId, resolveUnitId } from "@/lib/actions/resolve-refs";
+import { resolveContactId, resolveExpenseCategoryId, resolveItemIds, resolveLocationId, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { inCompany } from "@/lib/contact-scope";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
 import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
+import { financialDocumentError } from "@/lib/financial-input";
+import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
+import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
+import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
+import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
+import { settingsForCompanies } from "@/lib/queries/settings";
 
 export interface StockPurchaseItemRow {
   itemName: string;
@@ -64,7 +73,10 @@ export interface StockPurchaseItemRow {
 export async function listStockPurchases(companyId?: string) {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
-  const scope = and(await companyInScope(documents.companyId), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+
+  return cachedPageRead(`${session.userId}:purchases:${cacheScope}:${stableReadKey(companyId)}`, async () => {
 
   // Same shape as listSales: selecting lines by document type rather than by a
   // list of ids drops the dependency between the two queries, so they overlap
@@ -75,6 +87,7 @@ export async function listStockPurchases(companyId?: string) {
         id: documents.id,
         number: documents.number,
         documentDate: documents.documentDate,
+        status: documents.status,
         subtotal: documents.subtotal,
         grandTotal: documents.grandTotal,
         isPaid: documents.isPaid,
@@ -132,6 +145,7 @@ export async function listStockPurchases(companyId?: string) {
   }
 
   return docs.map((d) => ({ ...d, items: linesByDoc.get(d.id) ?? [] }));
+  });
 }
 
 export async function getStockPurchase(documentId: string) {
@@ -141,7 +155,12 @@ export async function getStockPurchase(documentId: string) {
   // Three independent lookups keyed on the id we were handed — run them together
   // rather than one after another.
   const [[doc], lineRows, [linkedCheque]] = await Promise.all([
-    db.select().from(documents).where(eq(documents.id, documentId)).limit(1),
+    db
+      .select(getTableColumns(documents))
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases")))
+      .limit(1),
     db.select().from(documentLines).where(eq(documentLines.documentId, documentId)).orderBy(documentLines.lineNo),
     db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1),
   ]);
@@ -156,6 +175,7 @@ export async function getStockPurchase(documentId: string) {
     documentDate: doc.documentDate,
     discountTotal: doc.discountTotal,
     taxTotal: doc.taxTotal,
+    taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     isPaid: doc.isPaid,
     bankAccountId: doc.bankAccountId,
@@ -201,32 +221,43 @@ async function resolvePurchaseLineRows(
   companyId: string,
   lines: PurchaseLineInput[],
   location: { locationId: string; locationName: string },
+  tax: { taxable: boolean[]; lineTaxAmounts: number[]; taxTotal: number; taxInclusive: boolean },
+  adjustment: { discountTotal: number; shippingTotal: number },
 ) {
   // One delivery arrives in one place, so the location is a header field and is
   // resolved once rather than per line — a typed name that did not match creates
   // the location, the same as the item and unit on each line.
   const locationId = await resolveLocationId(tx, location.locationId || null, location.locationName || null);
-  const rows = [];
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
+  const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
+  const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  const baseQuantities = await resolveBaseQuantities(
+    tx,
+    lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+  );
+  const totalQuantity = lines.reduce((sum, line) => sum + Number(line.quantity), 0);
+  const adjustmentPerUnit = perUnitShare(
+    adjustment.shippingTotal - adjustment.discountTotal + (tax.taxInclusive ? 0 : tax.taxTotal),
+    totalQuantity,
+  );
+  return lines.map((l, i) => {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice) || 0;
-    const itemId = await resolveItemId(tx, companyId, l.itemId || null, l.itemName || null);
-    const unitId = await resolveUnitId(tx, l.unitId || null, l.unitName || null);
-    rows.push({
+    return {
       lineNo: i + 1,
       sortOrder: i,
-      itemId,
+      itemId: itemIds[i] ?? null,
       locationId,
-      unitId,
+      unitId: unitIds[i] ?? null,
       quantity: String(quantity),
-      baseQuantity: String(quantity),
+      baseQuantity: String(baseQuantities[i]),
       unitPrice: String(unitPrice),
-      unitCost: l.unitCost ? String(Number(l.unitCost)) : null,
+      unitCost: String(landedUnitCost(unitPrice, adjustmentPerUnit)),
       lineTotal: String(quantity * unitPrice),
-    });
-  }
-  return rows;
+      taxable: tax.taxable[i] ?? false,
+      taxAmount: String(tax.lineTaxAmounts[i] ?? 0),
+      stockMovement: 1,
+    };
+  });
 }
 
 function num(formData: FormData, key: string, fallback: string) {
@@ -281,18 +312,22 @@ async function recordShippingExpense(tx: PurchaseTx, args: ShippingExpenseArgs) 
     notes: `Shipping on ${args.number}`,
     createdBy: args.userId,
   });
-  await adjustSettlementBalance(tx, "out", args.shipping, null, args.cashAccountId, null, 1);
+  await adjustSettlementBalance(tx, "out", args.shipping, null, args.cashAccountId, null, 1, args.companyId);
 }
 
-export async function createStockPurchase(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
-  requirePermission(session, "purchases", "create");
+export async function createStockPurchase(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't create the purchase.", async () => {
+  const session = await getLiveSession();
 
   const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
+  // Scoped to the submitted company: membership + purchases.create there, so a
+  // permission held in another company, or a company access revoked since the
+  // form was filled, is refused rather than written into.
+  requirePermission(session, "purchases", "create", { companyId });
 
   let lines: PurchaseLineInput[];
   try {
@@ -360,28 +395,59 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // needs no location.
   const movesStock = validLines.some((l) => Number(l.quantity) > 0);
   if (movesStock && !locationId && !locationName) return { error: "Pick the location the goods arrived at." };
+  if (movesStock && locationId) requirePermission(session, "purchases", "create", { companyId, warehouseId: locationId });
 
   // --- documents: every user-facing header field ---
   const contactId = opt(formData, "contactId");
   const contactName = opt(formData, "contactName");
   if (!contactId && !contactName) return { error: "Supplier is required." };
   const discountTotal = num(formData, "discountTotal", "0");
-  const taxTotal = num(formData, "taxTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
+  const financialError = financialDocumentError(
+    validLines,
+    [
+      { label: "Discount", value: discountTotal },
+      { label: "Shipping", value: shippingTotal },
+    ],
+    { allowZeroQuantity: ratesOnly },
+  );
+  if (financialError) return { error: financialError };
   const manualNumber = opt(formData, "number");
+
+  const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
+  let tax;
+  try {
+    tax = await resolveDocumentTax(
+      companyId,
+      opt(formData, "taxId"),
+      validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(discountTotal),
+      Number(shippingTotal),
+    );
+  } catch (error) {
+    if (error instanceof TaxConfigurationError) return { error: error.message };
+    throw error;
+  }
+  const taxTotal = String(tax.taxTotal);
+  const grandTotal = tax.grandTotal;
+
   // A document type that doesn't touch the payable ledger has no paid/unpaid
   // state to be in: nothing is owed either way, so there is nothing to settle.
   // That's what separates a stock receipt (goods and a rate, no money) from a
   // purchase invoice, and it's read off the type rather than asked for again.
-  const isPaid = documentType.affectsPayable && formData.get("isPaid") === "yes";
+  const payMode = String(formData.get("isPaid") ?? "no");
+  const settles = documentType.affectsPayable && (payMode === "yes" || payMode === "partial");
+  // Clamped to the document: a slipped digit would otherwise credit the
+  // drawer with money that never arrived, and a negative would take money out.
+  const entered = Math.min(Math.max(Number(num(formData, "paidAmount", "0")) || 0, 0), grandTotal);
+  const paidAmount = !documentType.affectsPayable ? 0 : payMode === "yes" ? grandTotal : payMode === "partial" ? entered : 0;
+  const isPaid = settles && paidAmount >= grandTotal;
   const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
-  const bankAccountId = isPaid && settlementType === "account" ? opt(formData, "bankAccountId") : null;
-  const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
-  const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
-  if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
-
-  const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  const bankAccountId = settles && settlementType === "account" ? opt(formData, "bankAccountId") : null;
+  const cashAccountId = settles && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
+  const chequeId = settles && settlementType === "cheque" ? opt(formData, "chequeId") : null;
+  if (settles && payMode === "partial" && paidAmount <= 0) return { error: "Enter how much was paid, or set Paid? to No." };
+  if (settles && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
 
   // Freight is paid the moment the goods arrive (recordShippingExpense below),
   // so what the supplier is owed is the total minus the shipping.
@@ -418,13 +484,13 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           subtotal: String(subtotal),
           discountTotal,
           taxTotal,
+          taxId: tax.taxId,
+          taxRate: String(tax.taxRate),
+          taxInclusive: tax.taxInclusive,
           shippingTotal,
           grandTotal: String(grandTotal),
           isPaid,
-          // Shipping is paid on arrival (the expense below), so what the
-          // purchase shows as paid is the shipping amount when it isn't fully
-          // paid — the partial-paid state — and the whole total when it is.
-          paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
+          paidAmount: String(paidAmount),
           bankAccountId,
           cashAccountId,
           createdBy: session.userId,
@@ -432,7 +498,10 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
         .returning();
       createdId = doc.id;
 
-      const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName });
+      const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName }, tax, {
+        discountTotal: Number(discountTotal),
+        shippingTotal: Number(shippingTotal),
+      });
       const insertedLines = await tx
         .insert(documentLines)
         .values(
@@ -462,7 +531,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
             movement: 1,
             quantity: l.quantity,
             baseQuantity: l.baseQuantity,
-            unitCost: l.unitPrice,
+            unitCost: String(Number(l.unitPrice) * Number(l.quantity) / Number(l.baseQuantity)),
             totalCost: l.lineTotal,
           })),
         );
@@ -484,16 +553,16 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
       // shipping has already left the building, as the expense below.
       if (!documentType.affectsPayable) {
         // nothing to book
-      } else if (!isPaid) {
+      } else if (!settles) {
         if (goodsTotal > 0) {
           await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(goodsTotal) });
         }
       } else {
         if (chequeId) {
-          await tx.update(chequeRegister).set({ documentId: doc.id }).where(eq(chequeRegister.id, chequeId));
+          await linkCheque(tx, chequeId, doc.id, "out", companyId);
         }
         if (goodsTotal > 0) {
-          await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1);
+          await adjustSettlementBalance(tx, "out", String(paidAmount > 0 ? Math.min(paidAmount, goodsTotal) : goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
         }
       }
 
@@ -515,6 +584,9 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
+    if (e instanceof ChequeUnavailableError) return { error: e.message };
+    if (e instanceof SettlementScopeError) return { error: e.message };
+    if (e instanceof MissingUnitConversionError) return { error: e.message };
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
@@ -532,20 +604,23 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   revalidatePath("/dashboard");
   await recordAudit({ action: "create", entity: "purchase", entityId: createdId, summary: createdNumber, companyId, detail: `Total ${grandTotal}` });
   return { success: true };
+  });
 }
 
 export async function updateStockPurchase(
   documentId: string,
   _prevState: ActionResult | undefined,
   formData: FormData,
-) {
-  const session = await getSession();
-  requirePermission(session, "purchases", "edit");
+): Promise<ActionResult> {
+  return guard("Couldn't save the purchase.", async () => {
+  const session = await getLiveSession();
 
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
+  // Scoped to the submitted company; the record itself is also read scoped below.
+  requirePermission(session, "purchases", "edit", { companyId });
 
   let lines: PurchaseLineInput[];
   try {
@@ -564,16 +639,38 @@ export async function updateStockPurchase(
   const locationId = String(formData.get("locationId") ?? "");
   const locationName = String(formData.get("locationName") ?? "").trim();
   if (!locationId && !locationName) return { error: "Pick the location the goods arrived at." };
+  if (locationId) requirePermission(session, "purchases", "edit", { companyId, warehouseId: locationId });
 
   const contactId = opt(formData, "contactId");
   const contactName = opt(formData, "contactName");
   if (!contactId && !contactName) return { error: "Supplier is required." };
   const discountTotal = num(formData, "discountTotal", "0");
-  const taxTotal = num(formData, "taxTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
+  const financialError = financialDocumentError(
+    validLines,
+    [
+      { label: "Discount", value: discountTotal },
+      { label: "Shipping", value: shippingTotal },
+    ],
+  );
+  if (financialError) return { error: financialError };
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
-  const grandTotal = round1(subtotal - Number(discountTotal) + Number(taxTotal) + Number(shippingTotal));
+  let tax;
+  try {
+    tax = await resolveDocumentTax(
+      companyId,
+      opt(formData, "taxId"),
+      validLines.map((line) => ({ itemId: line.itemId || null, lineTotal: Number(line.quantity) * (Number(line.unitPrice) || 0) })),
+      Number(discountTotal),
+      Number(shippingTotal),
+    );
+  } catch (error) {
+    if (error instanceof TaxConfigurationError) return { error: error.message };
+    throw error;
+  }
+  const taxTotal = String(tax.taxTotal);
+  const grandTotal = tax.grandTotal;
 
   // Freight is paid on arrival (recordShippingExpense below), so the supplier's
   // payable is the total minus the shipping — the same split as create.
@@ -586,9 +683,12 @@ export async function updateStockPurchase(
     return { error: "Shipping needs a cash account — add one for this company first." };
   }
 
+  // Read scoped: a guessed id must never resolve to a document in a company
+  // the user can't act on — outside the scope it simply doesn't exist.
   const [existingDoc] = await db
     .select({
       number: documents.number,
+      companyId: documents.companyId,
       documentTypeId: documents.documentTypeId,
       isPaid: documents.isPaid,
       grandTotal: documents.grandTotal,
@@ -596,22 +696,56 @@ export async function updateStockPurchase(
       cashAccountId: documents.cashAccountId,
     })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
+  const [allocation] = await db
+    .select({ id: paymentAllocations.id })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId))
+    .limit(1);
+  if (allocation) return { error: "This purchase has FIFO payments allocated to it. Cancel or edit those payments before editing the purchase." };
+  if (existingDoc.companyId !== companyId) return { error: "A posted purchase can't be moved to another company. Delete it and enter it in the correct company." };
   const [documentType] = await db.select().from(documentTypes).where(eq(documentTypes.id, existingDoc.documentTypeId)).limit(1);
 
   // Read after the type, for the same reason as in createStockPurchase: a
   // document that doesn't touch the payable has no paid/unpaid state.
-  const isPaid = Boolean(documentType?.affectsPayable) && formData.get("isPaid") === "yes";
+  const payMode = String(formData.get("isPaid") ?? "no");
+  const settles = Boolean(documentType?.affectsPayable) && (payMode === "yes" || payMode === "partial");
+  const entered = Math.min(Math.max(Number(num(formData, "paidAmount", "0")) || 0, 0), grandTotal);
+  const paidAmount = !documentType?.affectsPayable ? 0 : payMode === "yes" ? grandTotal : payMode === "partial" ? entered : 0;
+  const isPaid = settles && paidAmount >= grandTotal;
   const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
-  const bankAccountId = isPaid && settlementType === "account" ? opt(formData, "bankAccountId") : null;
-  const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
-  const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
-  if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
-  const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
+  const bankAccountId = settles && settlementType === "account" ? opt(formData, "bankAccountId") : null;
+  const cashAccountId = settles && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
+  const chequeId = settles && settlementType === "cheque" ? opt(formData, "chequeId") : null;
+  if (settles && payMode === "partial" && paidAmount <= 0) return { error: "Enter how much was paid, or set Paid? to No." };
+  if (settles && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
+  let vanishedDuringSave = false;
 
   await db.transaction(async (tx) => {
+    const [lockedDoc] = await tx
+      .select({
+        isPaid: documents.isPaid,
+        grandTotal: documents.grandTotal,
+        bankAccountId: documents.bankAccountId,
+        cashAccountId: documents.cashAccountId,
+      })
+      .from(documents)
+      .where(and(eq(documents.id, documentId), eq(documents.companyId, companyId)))
+      .limit(1)
+      .for("update");
+    if (!lockedDoc) {
+      vanishedDuringSave = true;
+      return;
+    }
+    const [existingCheque] = await tx
+      .select({ id: chequeRegister.id })
+      .from(chequeRegister)
+      .where(eq(chequeRegister.documentId, documentId))
+      .limit(1)
+      .for("update");
     // The freight expense from this purchase's last save, if any. A merge can
     // leave several (the losers' expenses travel to the survivor), so every
     // linked row is reversed and dropped, and one new expense is written for
@@ -625,28 +759,38 @@ export async function updateStockPurchase(
     // change a paid purchase settles the goods portion (grandTotal − shipping);
     // one saved before it settled the whole total. The linked expense is the
     // tell: present → the settlement was goods-only.
-    const oldSettled = round1(Number(existingDoc.grandTotal) - oldShippingPaid);
+    const oldSettled = round1(Number(lockedDoc.grandTotal) - oldShippingPaid);
 
     // Reverse the old settlement (if it was paid) before applying the new
     // one — handles amount changes and paid/unpaid flips in one pass.
-    if (existingDoc.isPaid) {
+    if (lockedDoc.isPaid) {
       await adjustSettlementBalance(
         tx,
         "out",
         String(oldSettled),
-        existingDoc.bankAccountId,
-        existingDoc.cashAccountId,
+        lockedDoc.bankAccountId,
+        lockedDoc.cashAccountId,
         existingCheque?.id ?? null,
         -1,
+        companyId,
       );
       if (existingCheque) {
         await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
       }
     }
     // And the freight payments themselves, before the new state is written.
-    for (const e of linkedExpenses) {
-      await adjustSettlementBalance(tx, "out", e.amount, null, e.cashAccountId, null, -1);
-    }
+    await adjustSettlementBalancesBatch(
+      tx,
+      linkedExpenses.map((expense) => ({
+        direction: "out",
+        amount: expense.amount,
+        bankAccountId: null,
+        cashAccountId: expense.cashAccountId,
+        chequeId: null,
+        sign: -1,
+        companyId,
+      })),
+    );
     await tx.delete(expenses).where(eq(expenses.documentId, documentId));
 
     const resolvedContactId = await resolveContactId(tx, companyId, contactId, contactName);
@@ -660,24 +804,25 @@ export async function updateStockPurchase(
         subtotal: String(subtotal),
         discountTotal,
         taxTotal,
+        taxId: tax.taxId,
+        taxRate: String(tax.taxRate),
+        taxInclusive: tax.taxInclusive,
         shippingTotal,
         grandTotal: String(grandTotal),
         isPaid,
-        // Unpaid with freight: the shipping has already left as the expense, so
-        // that's what the purchase shows as paid — the partial-paid state.
-        paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
+        paidAmount: String(paidAmount),
         bankAccountId,
         cashAccountId,
         updatedAt: new Date(),
       })
       .where(eq(documents.id, documentId));
 
-    if (isPaid) {
+    if (settles) {
       if (chequeId) {
-        await tx.update(chequeRegister).set({ documentId }).where(eq(chequeRegister.id, chequeId));
+        await linkCheque(tx, chequeId, documentId, "out", companyId);
       }
       // The goods portion only — the shipping is covered by the expense below.
-      await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1);
+      await adjustSettlementBalance(tx, "out", String(paidAmount > 0 ? Math.min(paidAmount, goodsTotal) : goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
     }
 
     // inventory_transactions.document_line_id is ON DELETE RESTRICT, so old
@@ -689,7 +834,10 @@ export async function updateStockPurchase(
       );
     }
     await tx.delete(documentLines).where(eq(documentLines.documentId, documentId));
-    const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName });
+    const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName }, tax, {
+      discountTotal: Number(discountTotal),
+      shippingTotal: Number(shippingTotal),
+    });
     const insertedLines = await tx
       .insert(documentLines)
       .values(
@@ -709,7 +857,7 @@ export async function updateStockPurchase(
           movement: 1,
           quantity: l.quantity,
           baseQuantity: l.baseQuantity,
-          unitCost: l.unitPrice,
+          unitCost: String(Number(l.unitPrice) * Number(l.quantity) / Number(l.baseQuantity)),
           totalCost: l.lineTotal,
         })),
       );
@@ -738,6 +886,7 @@ export async function updateStockPurchase(
       });
     }
   });
+  if (vanishedDuringSave) return { error: "Purchase not found — it may already have been deleted." };
 
   // A purchase can create items and contacts on the fly (resolve-refs.ts), and it
   // always moves stock and touches the payable ledger — so the cached option lists
@@ -752,14 +901,18 @@ export async function updateStockPurchase(
   revalidatePath("/expenses");
   await recordAudit({ action: "update", entity: "purchase", entityId: documentId, summary: existingDoc.number, companyId, detail: `Total ${grandTotal}` });
   return { success: true };
+  });
 }
 
-export async function deleteStockPurchase(_prevState: ActionResult | undefined, formData: FormData) {
-  const session = await getSession();
+export async function deleteStockPurchase(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+  return guard("Couldn't delete the purchase.", async () => {
+  const session = await getLiveSession();
   requirePermission(session, "purchases", "delete");
 
   const documentId = String(formData.get("documentId") ?? "");
 
+  // Read scoped: a guessed id from an unauthorized company is "not found", and
+  // the delete permission is then checked against the row's own company.
   const [existingDoc] = await db
     .select({
       number: documents.number,
@@ -770,13 +923,42 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
       cashAccountId: documents.cashAccountId,
     })
     .from(documents)
-    .where(eq(documents.id, documentId))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
-  const [existingCheque] = await db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1);
+  const [allocation] = await db
+    .select({ id: paymentAllocations.id })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId))
+    .limit(1);
+  if (allocation) return { error: "This purchase has FIFO payments allocated to it. Cancel or edit those payments before cancelling the purchase." };
+  requirePermission(session, "purchases", "delete", { companyId: existingDoc.companyId });
+  let vanishedDuringDelete = false;
 
   try {
     await db.transaction(async (tx) => {
+      const [lockedDoc] = await tx
+        .select({
+          isPaid: documents.isPaid,
+          grandTotal: documents.grandTotal,
+          bankAccountId: documents.bankAccountId,
+          cashAccountId: documents.cashAccountId,
+        })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, existingDoc.companyId)))
+        .limit(1)
+        .for("update");
+      if (!lockedDoc) {
+        vanishedDuringDelete = true;
+        return;
+      }
+      const [existingCheque] = await tx
+        .select({ id: chequeRegister.id })
+        .from(chequeRegister)
+        .where(eq(chequeRegister.documentId, documentId))
+        .limit(1)
+        .for("update");
       // The freight expense was paid from the cash account, so its settlement
       // has to be reversed before the document goes. The cascade on
       // expenses.document_id would delete the rows by itself, but a paid expense
@@ -789,41 +971,60 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
       const oldShippingPaid = round1(linkedExpenses.reduce((sum, e) => sum + Number(e.amount), 0));
       // Same rule as update: the old settlement covered the goods only when a
       // freight expense was linked (post-change data), the whole total before.
-      if (existingDoc.isPaid) {
+      if (lockedDoc.isPaid) {
         await adjustSettlementBalance(
           tx,
           "out",
-          String(round1(Number(existingDoc.grandTotal) - oldShippingPaid)),
-          existingDoc.bankAccountId,
-          existingDoc.cashAccountId,
+          String(round1(Number(lockedDoc.grandTotal) - oldShippingPaid)),
+          lockedDoc.bankAccountId,
+          lockedDoc.cashAccountId,
           existingCheque?.id ?? null,
           -1,
+          existingDoc.companyId,
         );
       }
-      for (const e of linkedExpenses) {
-        await adjustSettlementBalance(tx, "out", e.amount, null, e.cashAccountId, null, -1);
-      }
+      await adjustSettlementBalancesBatch(
+        tx,
+        linkedExpenses.map((expense) => ({
+          direction: "out",
+          amount: expense.amount,
+          bankAccountId: null,
+          cashAccountId: expense.cashAccountId,
+          chequeId: null,
+          sign: -1,
+          companyId: existingDoc.companyId,
+        })),
+      );
       await tx.delete(expenses).where(eq(expenses.documentId, documentId));
       // Unlinked regardless of the paid flag: cheque_register.document_id is ON
       // DELETE NO ACTION, so a cheque still pointing here fails the delete.
       if (existingCheque) {
         await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
       }
-      const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
-      if (oldLines.length > 0) {
-        await tx.delete(inventoryTransactions).where(
-          inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)),
-        );
-      }
-      // ledger_entries.document_id is ON DELETE NO ACTION, so an unpaid
-      // purchase's payable row has to go before the document. Without this,
-      // deleting one failed the FK and reported "still referenced elsewhere".
-      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-      await tx.delete(documents).where(eq(documents.id, documentId));
+      await tx.execute(sql`
+        INSERT INTO inventory_transactions
+          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
+        SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
+               it.base_quantity, it.unit_cost, it.total_cost
+        FROM inventory_transactions it
+        JOIN document_lines dl ON dl.id = it.document_line_id
+        WHERE dl.document_id = ${documentId}::uuid
+      `);
+      await tx.execute(sql`
+        INSERT INTO ledger_entries (company_id, document_id, debit, credit)
+        SELECT company_id, document_id, credit, debit
+        FROM ledger_entries
+        WHERE document_id = ${documentId}::uuid
+      `);
+      await tx
+        .update(documents)
+        .set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() })
+        .where(eq(documents.id, documentId));
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't delete — this purchase is still referenced elsewhere.") };
   }
+  if (vanishedDuringDelete) return { error: "Purchase not found — it may already have been deleted." };
 
   // A purchase can create items and contacts on the fly (resolve-refs.ts), and it
   // always moves stock and touches the payable ledger — so the cached option lists
@@ -837,7 +1038,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
   revalidatePath("/ledger");
   revalidatePath("/expenses");
   await recordAudit({
-    action: "delete",
+    action: "cancel",
     entity: "purchase",
     entityId: documentId,
     summary: existingDoc.number,
@@ -845,6 +1046,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     detail: `Total ${existingDoc.grandTotal}`,
   });
   return { success: true };
+  });
 }
 
 // --- Merge ---------------------------------------------------------------
@@ -900,7 +1102,7 @@ export async function listPurchaseMergeCandidates(): Promise<PurchaseMergeCandid
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
     .innerJoin(companies, eq(companies.id, documents.companyId))
     .leftJoin(contacts, eq(contacts.id, documents.contactId))
-    .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
+    .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases")))
     .orderBy(desc(documents.documentDate));
 
   return rows.map((r) => ({ ...r, lines: Number(r.lines), shippingPaid: Number(r.shippingPaid) }));
@@ -910,8 +1112,11 @@ export async function mergeStockPurchases(
   _prevState: ActionResult | undefined,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
-  const session = await getSession();
-  // Rewrites one purchase and destroys the others, so it needs both.
+  return guard("Couldn't merge the purchases.", async () => {
+  const session = await getLiveSession();
+  // Rewrites one purchase and destroys the others, so it needs both. The read
+  // below is scoped, so the merged set can only come from companies the user
+  // can act on; the permission is then re-checked against the merged company.
   requirePermission(session, "purchases", "edit");
   requirePermission(session, "purchases", "delete");
 
@@ -974,6 +1179,8 @@ export async function mergeStockPurchases(
 
   const loserIds = documentIds.filter((id) => id !== survivorId);
   const companyId = docs[0].companyId;
+  requirePermission(session, "purchases", "edit", { companyId });
+  requirePermission(session, "purchases", "delete", { companyId });
   // The charges are per document, so the merged invoice carries their sum — the
   // shipping on two deliveries really was paid twice.
   const discountTotal = docs.reduce((sum, d) => sum + Number(d.discountTotal), 0);
@@ -1078,6 +1285,7 @@ export async function mergeStockPurchases(
     detail: `${loserIds.length} other purchase(s) folded in`,
   });
   return { success: true };
+  });
 }
 
 // --- CSV import / export ---------------------------------------------------
@@ -1094,7 +1302,7 @@ export async function mergeStockPurchases(
 export async function exportStockPurchasesCsv(companyId?: string): Promise<Record<string, string>[]> {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
-  const scope = and(await companyInScope(documents.companyId), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
 
   const [rows, cheques] = await Promise.all([
     db
@@ -1103,7 +1311,7 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
         number: documents.number,
         documentDate: documents.documentDate,
         discountTotal: documents.discountTotal,
-        taxTotal: documents.taxTotal,
+        taxName: taxes.name,
         shippingTotal: documents.shippingTotal,
         isPaid: documents.isPaid,
         bankAccountId: documents.bankAccountId,
@@ -1130,14 +1338,15 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
       .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-      .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), scope))
+      .leftJoin(taxes, eq(taxes.id, documents.taxId))
+      .where(and(eq(documentTypes.code, "PURCHASE_INVOICE"), eq(documents.status, "posted"), scope))
       .orderBy(desc(documents.documentDate), documents.number, documentLines.lineNo),
     // A cheque points at the document, not the other way round, so it can't be
     // joined off documents — one pass over the register instead.
     db
       .select({ documentId: chequeRegister.documentId, chequeNumber: chequeRegister.chequeNumber })
       .from(chequeRegister)
-      .where(await companyInScope(chequeRegister.companyId)),
+      .where(await companyInPermissionScope(chequeRegister.companyId, session, "purchases")),
   ]);
 
   const chequeByDoc = new Map(cheques.filter((c) => c.documentId).map((c) => [c.documentId as string, c.chequeNumber]));
@@ -1162,7 +1371,7 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
       // Header figures, repeated on every line of the document — the import reads
       // them off the first row of the group and ignores the rest.
       discountTotal: r.discountTotal,
-      taxTotal: r.taxTotal,
+      tax: r.taxName ?? "",
       shippingTotal: r.shippingTotal,
       paid: r.isPaid ? "yes" : "no",
       settlementType,
@@ -1191,7 +1400,7 @@ export async function importStockPurchasesCsv(
   rows: Record<string, string>[],
 ): Promise<{ error?: string; created?: number }> {
   return guard("Couldn't import the purchases.", async () => {
-    const session = await getSession();
+    const session = await getLiveSession();
     requirePermission(session, "purchases", "create");
     if (rows.length === 0) return { error: "That file has no rows." };
 
@@ -1205,7 +1414,7 @@ export async function importStockPurchasesCsv(
     // lookups the pickers already use, so a name that matches arrives as an id and
     // the transaction does no lookup at all. A name that matches nothing still
     // goes down as text and is created inside the transaction, exactly as before.
-    const [companyRows, bankOptions, cashOptions, chequeOptions, itemRows, unitRows, locationRows, supplierRows] = await Promise.all([
+    const [companyRows, bankOptions, cashOptions, chequeOptions, itemRows, unitRows, locationRows, supplierRows, taxOptions] = await Promise.all([
       getCompanies(),
       getBankAccountOptions(),
       getCashAccountOptions(),
@@ -1213,8 +1422,10 @@ export async function importStockPurchasesCsv(
       getItemOptions(),
       getUnits(),
       getLocations(),
-      getSuppliers(),
+      getContactOptions(),
+      getTaxes(),
     ]);
+    const taxSettings = await settingsForCompanies(companyRows.map((company) => company.id), ["default_purchase_tax_id"]);
     const companyByName = new Map(companyRows.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const byName = (list: { id: string; name: string }[], name: string) =>
       list.find((o) => o.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -1225,6 +1436,7 @@ export async function importStockPurchasesCsv(
     const itemByName = new Map(itemRows.map((i) => [`${i.companyId}|${key(i.name)}`, i.id]));
     const unitByName = new Map(unitRows.map((u) => [key(u.name), u.id]));
     const locationByName = new Map(locationRows.map((l) => [key(l.name), l.id]));
+    const taxByName = new Map(taxOptions.map((tax) => [key(tax.name), tax.id]));
     const supplierId = (companyId: string, name: string) => {
       const matches = supplierRows.filter((s) => key(s.displayName) === key(name) && inCompany(companyId)(s));
       return (matches.find((s) => s.companyId === companyId) ?? matches[0])?.id ?? "";
@@ -1270,6 +1482,9 @@ export async function importStockPurchasesCsv(
 
       if (!(head.supplier ?? "").trim()) errors.push(`${at}: Supplier is required.`);
       if (!(head.location ?? "").trim()) errors.push(`${at}: Location is required — goods have to arrive somewhere.`);
+      const taxName = (head.tax ?? "").trim();
+      const taxId = taxName ? (taxByName.get(key(taxName)) ?? "") : (companyId ? (taxSettings[companyId]?.default_purchase_tax_id ?? "") : "");
+      if (taxName && !taxId) errors.push(`${at}: no active tax rule named "${taxName}".`);
 
       // Settlement is only read when the purchase says it was paid — the same rule
       // the form follows, where the account picker only appears for a paid one.
@@ -1328,23 +1543,10 @@ export async function importStockPurchasesCsv(
 
       if (!companyId || errors.length > 0) continue;
 
-      // Discount and tax take rupees or a percentage of the subtotal ("250" or
-      // "5%"), the same as the boxes in the popup — which post the resolved amount,
-      // never the percentage, so the resolving happens here too.
+      // Discount takes rupees or a percentage of the subtotal ("250" or "5%").
+      // Tax is a named master rule, exactly as it is in the purchase form.
       const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
       const discount = resolveAdjustment(head.discountTotal ?? "", subtotal);
-      const tax = resolveAdjustment(head.taxTotal ?? "", subtotal);
-
-      // The landed cost the popup shows in its Unit Cost column — shipping,
-      // discount and tax spread over every unit that came in the delivery. All
-      // three are per-purchase figures in the file, and the discount and tax can
-      // be percentages of the subtotal, so a line's share can only be worked out
-      // once every line has been read and those two resolved.
-      const perUnit = perUnitShare(
-        (Number((head.shippingTotal ?? "").trim()) || 0) - discount + tax,
-        lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
-      );
-      for (const l of lines) l.unitCost = String(landedUnitCost(Number(l.unitPrice) || 0, perUnit));
 
       const form = new FormData();
       form.set("companyId", companyId);
@@ -1360,7 +1562,7 @@ export async function importStockPurchasesCsv(
       form.set("locationId", locationByName.get(key(location)) ?? "");
       form.set("locationName", location);
       form.set("discountTotal", String(discount));
-      form.set("taxTotal", String(tax));
+      form.set("taxId", taxId);
       form.set("shippingTotal", (head.shippingTotal ?? "").trim());
       form.set("isPaid", paid ? "yes" : "no");
       if (paid) {

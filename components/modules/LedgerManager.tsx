@@ -325,7 +325,7 @@ function LedgerEntryForm({
             min="0.1"
             step="0.1"
             required
-            defaultValue={balance ? Math.abs(balance.balance).toFixed(1) : undefined}
+            defaultValue={balance ? Number(Math.abs(balance.balance)).toFixed(2) : undefined}
             className={fieldClass}
           />
         </label>

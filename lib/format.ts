@@ -62,14 +62,16 @@ export const todayISO = () => new Date().toLocaleDateString("en-CA");
 // holds and what the screen says are the same number.
 export const round1 = (n: number) => Math.round(n * 10) / 10;
 
-const moneyFormat = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const moneyFormat = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Round to whole number (no decimals), then display with .00.
 export function money(value: string | number): string {
   const n = Number(value);
-  return Number.isFinite(n) ? moneyFormat.format(n) : String(value);
+  return Number.isFinite(n) ? moneyFormat.format(Math.round(n)) : String(value);
 }
 
+// Two decimal places.
 export function qty(value: string | number): string {
   const n = Number(value);
   return Number.isFinite(n) ? qtyFormat.format(n) : String(value);

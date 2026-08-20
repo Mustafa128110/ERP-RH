@@ -25,12 +25,13 @@ assert.equal(toISODate(""), "");
 // what's stored.
 assert.equal(toISODate(formatDate("2026-02-09")), "2026-02-09");
 
-// --- Money: one decimal place, South-Asian grouping (##,##,###) --------------
-assert.equal(money(1234.56), "1,234.6");
-assert.equal(money(1234567), "12,34,567.0", "lakh grouping, not thousands");
-assert.equal(money("100"), "100.0");
-assert.equal(money(0), "0.0");
-assert.equal(money(-1500.25), "-1,500.3");
+// --- Money: whole number (rounded), two decimal places, lakh grouping ------
+assert.equal(money(1234.56), "1,235.00", "rounded to whole");
+assert.equal(money(1234567), "12,34,567.00", "lakh grouping, not thousands");
+assert.equal(money("100"), "100.00");
+assert.equal(money(0), "0.00");
+assert.equal(money(-1500.25), "-1,500.00", "rounded to whole");
+assert.equal(money(1500.5), "1,501.00", "rounds 0.5 up");
 
 // --- Quantity: two decimals, counted in thousands ----------------------------
 assert.equal(qty(12), "12.00");

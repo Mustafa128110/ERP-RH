@@ -342,7 +342,7 @@ export function InterCompanyFormPage({
                     />
                   </td>
                   <td className="border border-sand px-2 text-right tabular-nums text-steel">
-                    {line.quantity && line.rate ? ((Number(line.quantity) || 0) * (Number(line.rate) || 0)).toFixed(2) : ""}
+                    {line.quantity && line.rate ? money((Number(line.quantity) || 0) * (Number(line.rate) || 0)) : ""}
                   </td>
                   <td className="border border-sand text-center">
                     <button

@@ -650,7 +650,7 @@ export function SaleFormPage({
                 onChange={(e) => setDiscountTotal(e.target.value)}
                 className={fieldClass}
               />
-              <input type="hidden" name="discountTotal" value={discountAmount.toFixed(1)} />
+              <input type="hidden" name="discountTotal" value={discountAmount.toFixed(2)} />
             </label>
             <label className={`${labelClass} w-40`}>
               <span className={labelTextClass}>Tax</span>
@@ -690,9 +690,9 @@ export function SaleFormPage({
           <label className={`${labelClass} w-52`}>
             <span className={labelTextClass}>Paid?</span>
             <select name="isPaid" value={isPaid} onChange={(e) => setIsPaid(e.target.value as PaidMode)} className={fieldClass}>
-              <option value="no">No — add to receivables</option>
-              <option value="partial">Partially paid</option>
-              <option value="yes">Yes — paid in full</option>
+              <option value="no">No</option>
+              <option value="partial">Partial</option>
+              <option value="yes">Yes</option>
             </select>
           </label>
           {isPaid === "partial" && (
@@ -719,7 +719,7 @@ export function SaleFormPage({
 
         {/* The amount actually settled — the whole total when paid in full, so the
             server never has to infer it from the mode. */}
-        <input type="hidden" name="paidAmount" value={paidNow.toFixed(1)} />
+        <input type="hidden" name="paidAmount" value={paidNow.toFixed(2)} />
 
         {isPaid !== "no" && (
           <div className="flex flex-col gap-3 rounded border border-sand p-3">

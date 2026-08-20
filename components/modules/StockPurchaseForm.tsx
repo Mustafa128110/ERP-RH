@@ -70,6 +70,7 @@ type PurchaseDefaults = {
   taxTotal: string;
   shippingTotal: string;
   isPaid: boolean;
+  paidAmount?: string;
   bankAccountId: string | null;
   cashAccountId: string | null;
   chequeId: string | null;
@@ -134,7 +135,9 @@ export function StockPurchaseCreateForm({
   const [shippingTotal, setShippingTotal] = useState(() => defaults?.shippingTotal ?? "0");
   const [contactId, setContactId] = useState(() => defaults?.contactId ?? "");
   const [supplierText, setSupplierText] = useState(() => supplierOptions.find((s) => s.id === defaults?.contactId)?.name ?? "");
-  const [isPaid, setIsPaid] = useState<"yes" | "no">(() => (defaults?.isPaid ? "yes" : "no"));
+  type PaidMode = "yes" | "partial" | "no";
+  const [isPaid, setIsPaid] = useState<PaidMode>(() => defaults?.isPaid ? "yes" : Number(defaults?.paidAmount) > 0 ? "partial" : "no");
+  const [paidAmount, setPaidAmount] = useState(() => (defaults && !defaults.isPaid ? (defaults.paidAmount ?? "") : ""));
   const [settlementType, setSettlementType] = useState<SettlementType>(defaults?.settlementType ?? "account");
   const settlementOptions = settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? cashAccountOptions : chequeOptions;
   const settlementFieldName = settlementType === "account" ? "bankAccountId" : settlementType === "cash" ? "cashAccountId" : "chequeId";
@@ -560,7 +563,7 @@ export function StockPurchaseCreateForm({
               onChange={(e) => setDiscountTotal(e.target.value)}
               className={fieldClass}
             />
-            <input type="hidden" name="discountTotal" value={discountAmount.toFixed(1)} />
+            <input type="hidden" name="discountTotal" value={discountAmount.toFixed(2)} />
           </label>
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Tax</span>
@@ -591,9 +594,7 @@ export function StockPurchaseCreateForm({
                 as a paid expense from the default cash account, not added to
                 what the supplier is owed — so this purchase shows Partial Paid
                 and the payable below it is the total minus this. */}
-            <span className="mt-1 block text-xs leading-snug text-steel">
-              Paid on arrival from the default cash account — it isn&apos;t part of what you owe the supplier.
-            </span>
+
           </label>
         </div>
         <div className="flex flex-col items-end gap-0.5 border-t border-sand pt-2 text-sm text-ink">
@@ -604,15 +605,42 @@ export function StockPurchaseCreateForm({
         </div>
       </div>
 
-      <label className={`${labelClass} w-40`}>
-        <span className={labelTextClass}>Paid?</span>
-        <select name="isPaid" value={isPaid} onChange={(e) => setIsPaid(e.target.value as "yes" | "no")} className={fieldClass}>
-          <option value="no">No — add to payables</option>
-          <option value="yes">Yes</option>
-        </select>
-      </label>
+      <div className="flex flex-wrap items-start gap-3">
+        <label className={`${labelClass} w-40`}>
+          <span className={labelTextClass}>Paid?</span>
+          <select name="isPaid" value={isPaid} onChange={(e) => setIsPaid(e.target.value as PaidMode)} className={fieldClass}>
+            <option value="no">No</option>
+            <option value="partial">Partial</option>
+            <option value="yes">Yes</option>
+          </select>
+        </label>
+        {isPaid === "partial" && (
+          <label className={`${labelClass} w-40`}>
+            <span className={labelTextClass}>Amount Paid</span>
+            <input
+              type="number"
+              min="0"
+              max={grandTotal}
+              step="0.1"
+              value={paidAmount}
+              onChange={(e) => setPaidAmount(e.target.value)}
+              className={`${fieldClass}`}
+            />
+          </label>
+        )}
+        {isPaid !== "no" && (
+          <div className="flex flex-col justify-center gap-0.5 self-stretch pt-5 text-sm">
+            <span className="text-steel">Paid: {isPaid === "yes" ? grandTotal : money(Number(paidAmount) || 0)}</span>
+            <span className={grandTotal - (isPaid === "yes" ? grandTotal : Number(paidAmount) || 0) > 0 ? "font-semibold text-error" : "font-semibold text-success"}>Balance: {money(grandTotal - (isPaid === "yes" ? grandTotal : Number(paidAmount) || 0))}</span>
+          </div>
+        )}
+      </div>
 
-      {isPaid === "yes" && (
+      {/* The amount actually settled — the whole total when paid in full, so the
+          server never has to infer it from the mode. */}
+      <input type="hidden" name="paidAmount" value={isPaid === "yes" ? String(grandTotal) : (Number(paidAmount) || 0).toFixed(2)} />
+
+      {isPaid !== "no" && (
         <div className="flex flex-col gap-3 rounded border border-sand p-3">
           <span className={sectionTitleClass}>Payment</span>
           <div className={`${labelClass} w-72`}>
