@@ -484,3 +484,164 @@ export async function setContactBalance(
     { [DUPLICATE]: "Can't save — a journal entry number is already in use for this company." },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Party Ledger — detailed statement of account for one contact
+// ---------------------------------------------------------------------------
+
+export type PartyLedgerEntry = {
+  id: string;
+  date: string;
+  type: "item_sold" | "item_bought" | "payment_received" | "payment_made" | "journal_entry";
+  description: string;
+  reference: string | null;
+  quantity: string | null;
+  rate: string | null;
+  debit: number;
+  credit: number;
+};
+
+export type PartyLedgerResult = {
+  contactId: string;
+  displayName: string;
+  companyName: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  entries: PartyLedgerEntry[];
+};
+
+// Map from document_type_code to the ledger entry's semantic type.
+function codeToLedgerType(code: string): PartyLedgerEntry["type"] {
+  switch (code) {
+    case "SALES_INVOICE": return "item_sold";
+    case "PURCHASE_INVOICE":
+    case "MARKET_PURCHASE": return "item_bought";
+    case "PAYMENT_RECEIVED": return "payment_received";
+    case "PAYMENT_MADE": return "payment_made";
+    default: return "journal_entry";
+  }
+}
+
+export async function getPartyLedger(
+  contactId: string,
+): Promise<PartyLedgerResult | null> {
+  const session = await getSession();
+  requirePermission(session, "accounts", "view");
+  if (!contactId) return null;
+
+  const [contact] = await db
+    .select({
+      id: contacts.id,
+      displayName: contacts.displayName,
+      companyName: contacts.companyName,
+      phone: contacts.phone,
+      email: contacts.email,
+      address: contacts.address,
+      city: contacts.city,
+    })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+
+  if (!contact) return null;
+
+  // Fetch all ledger entries for this contact, newest-first for slicing,
+  // then we reverse to chronological for the running balance.
+  const docScope = await companyInPermissionScope(documents.companyId, session, "accounts");
+
+  const rows = await db
+    .select({
+      ledgerId: ledgerEntries.id,
+      date: documents.documentDate,
+      code: documentTypes.code,
+      number: documents.number,
+      reason: documents.reason,
+      debit: ledgerEntries.debit,
+      credit: ledgerEntries.credit,
+    })
+    .from(ledgerEntries)
+    .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.contactId, contactId), docScope))
+    .orderBy(desc(documents.documentDate), desc(documents.createdAt));
+
+  // Fetch line items for all documents that have them (sales/purchases).
+  const docIds = rows.map((r) => r.ledgerId);
+  const lineRows = docIds.length > 0
+    ? await db
+        .select({
+          documentId: documentLines.documentId,
+          itemName: items.name,
+          quantity: documentLines.quantity,
+          unitPrice: documentLines.unitPrice,
+          lineTotal: documentLines.lineTotal,
+        })
+        .from(documentLines)
+        .innerJoin(items, eq(items.id, documentLines.itemId))
+        .where(inArray(documentLines.documentId, docIds))
+        .orderBy(documentLines.lineNo)
+    : [];
+
+  // Group line items by document.
+  const linesByDoc = new Map<string, typeof lineRows>();
+  for (const l of lineRows) {
+    const arr = linesByDoc.get(l.documentId) ?? [];
+    arr.push(l);
+    linesByDoc.set(l.documentId, arr);
+  }
+
+  // Build entries — each ledger row becomes one or more entries (one per line
+  // item for sales/purchases, or a single summary row for payments/journals).
+  const entries: PartyLedgerEntry[] = [];
+  for (const r of rows) {
+    const type = codeToLedgerType(r.code);
+    const debit = Number(r.debit ?? 0);
+    const credit = Number(r.credit ?? 0);
+    const lines = linesByDoc.get(r.ledgerId);
+
+    if (lines && lines.length > 0 && (type === "item_sold" || type === "item_bought")) {
+      // One entry per line item — the description is the item name.
+      for (const l of lines) {
+        entries.push({
+          id: r.ledgerId,
+          date: r.date,
+          type,
+          description: l.itemName,
+          reference: r.number,
+          quantity: String(l.quantity),
+          rate: String(l.unitPrice),
+          debit: debit / lines.length,
+          credit: credit / lines.length,
+        });
+      }
+    } else {
+      entries.push({
+        id: r.ledgerId,
+        date: r.date,
+        type,
+        description: r.reason || r.number || "—",
+        reference: r.number,
+        quantity: null,
+        rate: null,
+        debit,
+        credit,
+      });
+    }
+  }
+
+  // Chronological order (oldest first) for the running balance.
+  entries.reverse();
+
+  return {
+    contactId: contact.id,
+    displayName: contact.displayName,
+    companyName: contact.companyName,
+    phone: contact.phone,
+    email: contact.email,
+    address: contact.address,
+    city: contact.city,
+    entries,
+  };
+}
