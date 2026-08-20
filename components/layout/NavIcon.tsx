@@ -135,6 +135,12 @@ const SHAPES: Record<string, ReactNode> = {
       <circle cx="16.5" cy="16.5" r="2.5" />
     </>
   ),
+  "/costing": (
+    <>
+      <rect x="4" y="2" width="16" height="20" rx="2" />
+      <path d="M8 6h8M8 10h8M8 14h5M8 18h3" />
+    </>
+  ),
 
   // --- Communication / Reporting ---
   "/whatsapp": <path d="M21 12a8 8 0 01-11.6 7.1L4 21l1.9-5.4A8 8 0 1121 12z" />,

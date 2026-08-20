@@ -51,3 +51,6 @@ next-env.d.ts
 
 # Pre-change DB exports (recovery artifacts, contain business data)
 db-export/
+
+# Example documents (reference files, not part of the app)
+example doc/
