@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoice } from "@/lib/actions/sales";
 import { InvoiceDocument, DownloadInvoiceButton, DownloadInvoiceImageButton } from "@/components/modules/InvoiceDocument";
+import { INVOICE_COMPANY_NAME } from "@/lib/invoice-pdf";
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,7 +33,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </div>
       </div>
 
-      <InvoiceDocument invoice={invoice} />
+      <InvoiceDocument invoice={invoice} companyName={INVOICE_COMPANY_NAME} />
     </div>
   );
 }

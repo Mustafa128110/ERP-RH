@@ -268,6 +268,7 @@ export async function getInvoice(documentId: string) {
         grandTotal: documents.grandTotal,
         paidAmount: documents.paidAmount,
         isPaid: documents.isPaid,
+        contactId: documents.contactId,
         companyName: companies.name,
         companyPhone: companies.phone,
         companyEmail: companies.email,
@@ -307,7 +308,27 @@ export async function getInvoice(documentId: string) {
   // reached by id would otherwise render under the wrong heading.
   if (!doc || doc.code !== "SALES_INVOICE") return null;
 
-  return { ...doc, lines: lineRows };
+  // Previous balance: what this customer still owes from earlier invoices,
+  // excluding this one. A new customer or one who has settled up shows 0.
+  let previousBalance = 0;
+  if (doc.contactId) {
+    const [bal] = await db
+      .select({
+        owed: sql<string>`coalesce(sum(${ledgerEntries.debit} - ${ledgerEntries.credit}), 0)`,
+      })
+      .from(ledgerEntries)
+      .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
+      .where(
+        and(
+          eq(documents.contactId, doc.contactId),
+          ne(documents.id, documentId),
+          await companyInPermissionScope(ledgerEntries.companyId, session, "sales"),
+        ),
+      );
+    previousBalance = Math.max(0, Math.round(Number(bal?.owed ?? 0) * 10) / 10);
+  }
+
+  return { ...doc, previousBalance, lines: lineRows };
 }
 
 interface SaleLineInput {

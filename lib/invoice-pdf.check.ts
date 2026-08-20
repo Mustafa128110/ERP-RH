@@ -26,6 +26,7 @@ const base: Invoice = {
   customerPhone: "0300-1234567",
   customerAddress: "Somewhere\nElse",
   customerCity: "Karachi",
+  previousBalance: 0,
   lines: [
     { itemName: "Hinge 4in", sku: "RH-00042", quantity: "12", unitPrice: "250.5", lineTotal: "3006", unitSymbol: "pcs" },
     { itemName: "Screw box", sku: null, quantity: "2.5", unitPrice: "1200", lineTotal: "3000", unitSymbol: null },

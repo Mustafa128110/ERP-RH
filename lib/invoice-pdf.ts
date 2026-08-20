@@ -39,6 +39,7 @@ export type Invoice = {
   customerPhone: string | null;
   customerAddress: string | null;
   customerCity: string | null;
+  previousBalance: number;
   invoiceFooter?: string | null;
   lines: InvoiceLine[];
 };
@@ -157,7 +158,7 @@ export async function buildInvoicePdf(invoice: Invoice): Promise<jsPDF> {
     head: [["#", "Item", "Qty", "Rate", "Amount"]],
     body: invoice.lines.map((l, i) => [
       String(i + 1),
-      l.sku ? `${l.itemName ?? "—"}\n${l.sku}` : (l.itemName ?? "—"),
+      l.itemName ?? "—",
       `${qty(l.quantity)} ${l.unitSymbol ?? ""}`.trim(),
       money(l.unitPrice),
       money(l.lineTotal),
@@ -167,17 +168,11 @@ export async function buildInvoicePdf(invoice: Invoice): Promise<jsPDF> {
     headStyles: { fontStyle: "bold", fontSize: 8, textColor: STEEL, lineColor: SAND, lineWidth: { top: 0.3, bottom: 0.3 } },
     bodyStyles: { lineColor: SAND, lineWidth: { bottom: 0.2 } },
     columnStyles: {
-      0: { halign: "right", cellWidth: 10, textColor: STEEL },
+      0: { halign: "center", cellWidth: 10, textColor: INK },
       1: { halign: "left" },
       2: { halign: "right", cellWidth: 26 },
       3: { halign: "right", cellWidth: 28 },
       4: { halign: "right", cellWidth: 32 },
-    },
-    // The SKU rides under the item name at a smaller size, the same as on screen.
-    didParseCell: (data) => {
-      if (data.section === "body" && data.column.index === 1 && String(data.cell.raw).includes("\n")) {
-        data.cell.styles.fontSize = 9;
-      }
     },
   });
 
@@ -208,7 +203,8 @@ export async function buildInvoicePdf(invoice: Invoice): Promise<jsPDF> {
   if (discount > 0) row("Discount", `-${money(discount)}`);
   if (tax > 0) row("Tax", `+${money(tax)}`);
   if (shipping > 0) row("Shipping", `+${money(shipping)}`);
-  row("Grand Total", money(invoice.grandTotal), true, true);
+  if (invoice.previousBalance > 0) row("Previous Balance", money(invoice.previousBalance));
+  row("Grand Total", money(Number(invoice.grandTotal) + invoice.previousBalance), true, true);
   row("Paid", money(invoice.paidAmount));
   row("Balance Due", money(balance), true);
 
