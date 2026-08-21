@@ -731,6 +731,15 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
       );
     });
   } catch (e) {
+    console.error('[deletePayment] Error:', e);
+    // Handle known custom errors first
+    if (e instanceof SettlementScopeError) return { error: e.message };
+    if (e instanceof PermissionError) return { error: e.message };
+    // Check for specific PostgreSQL error codes
+    const pgError = e as { code?: string; constraint_name?: string; detail?: string; message?: string; cause?: unknown };
+    if (pgError?.code) {
+      console.error('[deletePayment] PostgreSQL error code:', pgError.code, 'constraint:', pgError.constraint_name, 'detail:', pgError.detail);
+    }
     return { error: describeDbError(e, "Can't cancel this payment.") };
   }
   if (vanishedDuringDelete) return { error: "Payment not found — it may already have been deleted." };

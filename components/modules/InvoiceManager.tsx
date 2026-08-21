@@ -174,13 +174,18 @@ export function InvoiceManager({
       const items = itemsBySaleId?.get(id);
       if (!items || items.length === 0) return String(row.customer ?? "—");
       return (
-        <DetailHover trigger={<span>{String(row.customer ?? "—")}</span>} width={320}>
-          <div className="flex flex-col gap-0.5 text-sm">
+        <DetailHover trigger={<span className="border-b border-dotted border-steel">{String(row.customer ?? "—")}</span>} width={380}>
+          <div className="flex flex-col">
+            <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b-2 border-sand pb-1 text-[10px] font-semibold uppercase tracking-wide text-steel">
+              <span>Item</span>
+              <span className="text-right">Qty</span>
+              <span className="text-right">Rate</span>
+            </div>
             {items.map((it, i) => (
-              <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-x-4">
-                <span className="truncate text-ink">{it.name}</span>
-                <span className="tabular-nums text-steel">{it.qty}</span>
-                <span className="text-right tabular-nums text-ink">{it.rate}</span>
+              <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b border-sand/50 py-1.5 last:border-0">
+                <span className="truncate pr-2 text-sm text-ink">{it.name}</span>
+                <span className="w-16 text-right text-sm tabular-nums text-ink">{it.qty}</span>
+                <span className="w-24 text-right text-sm tabular-nums font-medium text-ink">{it.rate}</span>
               </div>
             ))}
           </div>
@@ -213,6 +218,7 @@ export function InvoiceManager({
         onBatchEdit={() => selected[0] && void openEdit(selected[0])}
         emptyMessage={filtered ? "No invoices match these filters." : "No invoices yet — raise one from Sales."}
         searchPlaceholder="Search invoices…"
+        storageKey="sales-invoices"
       />
 
       {loadingId && <p className="shrink-0 text-sm text-steel">Opening…</p>}

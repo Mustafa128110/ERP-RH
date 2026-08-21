@@ -3,7 +3,7 @@
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units } from "@/lib/db/schema";
+import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
@@ -106,6 +106,7 @@ async function loadLedgerBalances(
     // Every payment against a contact, newest first — sliced to five per contact
     // below. Both directions: a contact can be owed money on one invoice and owe
     // it on another, and "what has moved between us lately" is the question.
+    // Filter out payments with invalid settlement accounts (wrong company).
     db
       .select({
         companyId: documents.companyId,
@@ -114,9 +115,15 @@ async function loadLedgerBalances(
         number: documents.number,
         amount: documents.grandTotal,
         code: documentTypes.code,
+        bankAccountId: documents.bankAccountId,
+        cashAccountId: documents.cashAccountId,
+        bankCompanyId: bankAccounts.companyId,
+        cashCompanyId: cashAccounts.companyId,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
+      .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
       .where(
         and(
           inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
@@ -176,10 +183,24 @@ async function loadLedgerBalances(
       .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
   ]);
 
+  // Filter out payments with invalid settlement accounts (wrong company).
+  // Mirrors adjustSettlementBalancesBatch validation:
+  // - bank accounts: global (company_id IS NULL) or matching document's company
+  // - cash accounts: must match document's company
+  // - cheques: validated on delete (rare, and we don't have documentId here)
+  const validPaymentRows = paymentRows.filter((p) => {
+    if (p.bankAccountId) {
+      if (p.bankCompanyId !== null && p.bankCompanyId !== p.companyId) return false;
+    } else if (p.cashAccountId) {
+      if (p.cashCompanyId !== p.companyId) return false;
+    }
+    return true;
+  });
+
   // Split payments into made/received, 6 per direction per contact.
   const paymentsMadeByContact = new Map<string, ContactPayment[]>();
   const paymentsReceivedByContact = new Map<string, ContactPayment[]>();
-  for (const p of paymentRows) {
+  for (const p of validPaymentRows) {
     const key = `${p.companyId}:${p.contactId}`;
     const dir = p.code === "PAYMENT_MADE" ? "made" : "received";
     const map = dir === "made" ? paymentsMadeByContact : paymentsReceivedByContact;
@@ -212,6 +233,14 @@ async function loadLedgerBalances(
     entry.debit += Number(r.debit ?? 0);
     byContact.set(key, entry);
   }
+
+  // Balance convention: positive = we owe (payable), negative = they owe (receivable).
+  // Matches Party Ledger: running balance = sum(debit - credit).
+  // A sale (item_sold) creates a credit entry -> negative balance -> "Owes Us".
+  // A purchase (item_bought) creates a debit entry -> positive balance -> "We Owe".
+  const balances = Array.from(byContact.values())
+    .map((e) => ({ ...e, balance: e.debit - e.credit }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
 
   // Group invoice headers by contact, top 6 per contact.
   const invoicesByContact = new Map<string, typeof invoiceHeaders>();
@@ -272,9 +301,7 @@ async function loadLedgerBalances(
   }
 
   // A-Z by contact.
-  return Array.from(byContact.values())
-    .map((e) => ({ ...e, balance: e.credit - e.debit }))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
+  return balances;
   });
 }
 
@@ -489,16 +516,25 @@ export async function setContactBalance(
 // Party Ledger — detailed statement of account for one contact
 // ---------------------------------------------------------------------------
 
+export type PartyLedgerLineItem = {
+  itemName: string;
+  quantity: string;
+  rate: string;
+  lineTotal: string;
+  unitSymbol: string | null;
+};
+
 export type PartyLedgerEntry = {
-  id: string;
+  id: string; // ledger entry id
+  documentId: string; // document id (for deletion)
   date: string;
   type: "item_sold" | "item_bought" | "payment_received" | "payment_made" | "journal_entry";
-  description: string;
   reference: string | null;
-  quantity: string | null;
-  rate: string | null;
   debit: number;
   credit: number;
+  // Nested detail: line items for sales/purchases, payment method for payments.
+  lineItems?: PartyLedgerLineItem[];
+  paymentMethod?: string | null;
 };
 
 export type PartyLedgerResult = {
@@ -526,6 +562,7 @@ function codeToLedgerType(code: string): PartyLedgerEntry["type"] {
 
 export async function getPartyLedger(
   contactId: string,
+  companyId?: string,
 ): Promise<PartyLedgerResult | null> {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
@@ -554,21 +591,78 @@ export async function getPartyLedger(
   const rows = await db
     .select({
       ledgerId: ledgerEntries.id,
+      documentId: documents.id,
       date: documents.documentDate,
       code: documentTypes.code,
       number: documents.number,
-      reason: documents.reason,
       debit: ledgerEntries.debit,
       credit: ledgerEntries.credit,
+      bankAccountId: documents.bankAccountId,
+      cashAccountId: documents.cashAccountId,
+      bankCompanyId: bankAccounts.companyId,
+      cashCompanyId: cashAccounts.companyId,
+      companyId: ledgerEntries.companyId,
     })
     .from(ledgerEntries)
     .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .where(and(eq(documents.contactId, contactId), docScope))
+    .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
+    .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
+    .where(and(eq(documents.contactId, contactId), companyId ? eq(ledgerEntries.companyId, companyId) : undefined, docScope))
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
+  // Filter out payments with invalid settlement accounts (wrong company).
+  // This mirrors the validation in adjustSettlementBalancesBatch:
+  // - bank accounts: global (company_id IS NULL) or matching document's company
+  // - cash accounts: must match document's company
+  // - cheques: validated separately below
+  const validRows = rows.filter((r) => {
+    if (r.code === "PAYMENT_MADE" || r.code === "PAYMENT_RECEIVED") {
+      if (r.bankAccountId) {
+        // Bank account must be global or match the document's company
+        if (r.bankCompanyId !== null && r.bankCompanyId !== r.companyId) return false;
+      } else if (r.cashAccountId) {
+        // Cash account must match the document's company
+        if (r.cashCompanyId !== r.companyId) return false;
+      } else {
+        // Cheque payment - will be validated when fetching cheque details
+        // For now, include it; cheque validation happens in deletePayment
+      }
+    }
+    return true;
+  });
+
+  // Validate cheque payments: fetch cheque details and filter out invalid ones
+  const chequeDocIds = validRows
+    .filter((r) => (r.code === "PAYMENT_MADE" || r.code === "PAYMENT_RECEIVED") && !r.bankAccountId && !r.cashAccountId)
+    .map((r) => r.documentId);
+
+  const validChequeDocIds = new Set<string>();
+  if (chequeDocIds.length > 0) {
+    const chequeRows = await db
+      .select({ documentId: chequeRegister.documentId, companyId: chequeRegister.companyId })
+      .from(chequeRegister)
+      .where(inArray(chequeRegister.documentId, chequeDocIds));
+    for (const c of chequeRows) {
+      const matchingRow = validRows.find((r) => r.documentId === c.documentId);
+      if (matchingRow && c.companyId === matchingRow.companyId && c.documentId) {
+        validChequeDocIds.add(c.documentId);
+      }
+    }
+  }
+
+  const filteredRows = validRows.filter((r) => {
+    if (r.code === "PAYMENT_MADE" || r.code === "PAYMENT_RECEIVED") {
+      if (!r.bankAccountId && !r.cashAccountId) {
+        // Cheque payment - must have valid cheque
+        return validChequeDocIds.has(r.documentId);
+      }
+    }
+    return true;
+  });
+
   // Fetch line items for all documents that have them (sales/purchases).
-  const docIds = rows.map((r) => r.ledgerId);
+  const docIds = filteredRows.map((r) => r.documentId);
   const lineRows = docIds.length > 0
     ? await db
         .select({
@@ -577,9 +671,11 @@ export async function getPartyLedger(
           quantity: documentLines.quantity,
           unitPrice: documentLines.unitPrice,
           lineTotal: documentLines.lineTotal,
+          unitSymbol: units.symbol,
         })
         .from(documentLines)
         .innerJoin(items, eq(items.id, documentLines.itemId))
+        .leftJoin(units, eq(units.id, documentLines.unitId))
         .where(inArray(documentLines.documentId, docIds))
         .orderBy(documentLines.lineNo)
     : [];
@@ -592,46 +688,57 @@ export async function getPartyLedger(
     linesByDoc.set(l.documentId, arr);
   }
 
-  // Build entries — each ledger row becomes one or more entries (one per line
-  // item for sales/purchases, or a single summary row for payments/journals).
+  // Fetch payment method names for payment documents.
+  const bankIds = [...new Set(filteredRows.filter((r) => r.bankAccountId).map((r) => r.bankAccountId!))];
+  const cashIds = [...new Set(filteredRows.filter((r) => r.cashAccountId).map((r) => r.cashAccountId!))];
+
+  const [bankRows, cashRows] = await Promise.all([
+    bankIds.length > 0 ? db.select({ id: bankAccounts.id, label: bankAccounts.accountTitle }).from(bankAccounts).where(inArray(bankAccounts.id, bankIds)) : [],
+    cashIds.length > 0 ? db.select({ id: cashAccounts.id, label: cashAccounts.name }).from(cashAccounts).where(inArray(cashAccounts.id, cashIds)) : [],
+  ]);
+
+  const bankNameById = new Map(bankRows.map((r) => [r.id, r.label]));
+  const cashNameById = new Map(cashRows.map((r) => [r.id, r.label]));
+
+  // Build entries — one per ledger row, with nested detail.
   const entries: PartyLedgerEntry[] = [];
-  for (const r of rows) {
+  for (const r of filteredRows) {
     const type = codeToLedgerType(r.code);
     const debit = Number(r.debit ?? 0);
     const credit = Number(r.credit ?? 0);
-    const lines = linesByDoc.get(r.ledgerId);
+    const lines = linesByDoc.get(r.documentId);
+
+    const entry: PartyLedgerEntry = {
+      id: r.ledgerId,
+      documentId: r.documentId,
+      date: r.date,
+      type,
+      reference: r.number,
+      debit,
+      credit,
+    };
 
     if (lines && lines.length > 0 && (type === "item_sold" || type === "item_bought")) {
-      // One entry per line item — the description is the item name.
-      for (const l of lines) {
-        entries.push({
-          id: r.ledgerId,
-          date: r.date,
-          type,
-          description: l.itemName,
-          reference: r.number,
-          quantity: String(l.quantity),
-          rate: String(l.unitPrice),
-          debit: debit / lines.length,
-          credit: credit / lines.length,
-        });
-      }
-    } else {
-      entries.push({
-        id: r.ledgerId,
-        date: r.date,
-        type,
-        description: r.reason || r.number || "—",
-        reference: r.number,
-        quantity: null,
-        rate: null,
-        debit,
-        credit,
-      });
+      entry.lineItems = lines.map((l) => ({
+        itemName: l.itemName,
+        quantity: String(l.quantity),
+        rate: String(l.unitPrice),
+        lineTotal: String(l.lineTotal),
+        unitSymbol: l.unitSymbol,
+      }));
     }
+
+    if (type === "payment_received" || type === "payment_made") {
+      if (r.bankAccountId) entry.paymentMethod = `Bank: ${bankNameById.get(r.bankAccountId) ?? "Account"}`;
+      else if (r.cashAccountId) entry.paymentMethod = `Cash: ${cashNameById.get(r.cashAccountId) ?? "Account"}`;
+      else entry.paymentMethod = "Cheque";
+    }
+
+    entries.push(entry);
   }
 
   // Chronological order (oldest first) for the running balance.
+  // entries are already in desc order from the query, so reverse.
   entries.reverse();
 
   return {
@@ -644,4 +751,79 @@ export async function getPartyLedger(
     city: contact.city,
     entries,
   };
+}
+
+// Cancel a document behind a ledger row. Delegates to the owning module's
+// delete logic so inventory, settlements, cheques and allocations are all
+// reversed correctly. Journal entries are handled directly here.
+export async function deleteLedgerRow(documentId: string): Promise<ActionResult> {
+  return guard(
+    "Couldn't delete this entry.",
+    async () => {
+      const session = await getLiveSession();
+      requirePermission(session, "accounts", "create");
+
+      const [doc] = await db
+        .select({
+          id: documents.id,
+          number: documents.number,
+          status: documents.status,
+          companyId: documents.companyId,
+          code: documentTypes.code,
+        })
+        .from(documents)
+        .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+        .where(eq(documents.id, documentId))
+        .limit(1);
+
+      if (!doc) return { error: "Entry not found." };
+      if (doc.status === "cancelled") return { error: "Already cancelled." };
+
+      // Build a FormData the way the module-specific delete functions expect it.
+      const fd = new FormData();
+      fd.set("documentId", documentId);
+
+      switch (doc.code) {
+        case "JOURNAL_ENTRY": {
+          await db.transaction(async (tx) => {
+            await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
+            await tx.update(documents).set({
+              status: "cancelled",
+              cancelledBy: session.userId,
+              cancelledAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(documents.id, documentId));
+          });
+          break;
+        }
+        case "SALES_INVOICE": {
+          const { deleteSale } = await import("@/lib/actions/sales");
+          const result = await deleteSale(undefined, fd);
+          if (result?.error) return result;
+          break;
+        }
+        case "PURCHASE_INVOICE":
+        case "MARKET_PURCHASE": {
+          const { deleteStockPurchase } = await import("@/lib/actions/purchases");
+          const result = await deleteStockPurchase(undefined, fd);
+          if (result?.error) return result;
+          break;
+        }
+        case "PAYMENT_RECEIVED":
+        case "PAYMENT_MADE": {
+          const { deletePayment } = await import("@/lib/actions/payments");
+          fd.set("paymentId", documentId);
+          const result = await deletePayment(undefined, fd);
+          if (result?.error) return result;
+          break;
+        }
+        default:
+          return { error: `Cannot cancel ${doc.code} from here.` };
+      }
+
+      revalidatePath("/ledger");
+      await recordAudit({ action: "cancel", entity: "ledger row", entityId: documentId, summary: doc.number, companyId: doc.companyId });
+      return { success: true };
+    },
+  );
 }

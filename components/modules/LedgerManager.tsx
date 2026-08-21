@@ -7,8 +7,6 @@ import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ComboBox } from "@/components/ui/ComboBox";
-import { ContactPaymentsHover } from "@/components/modules/ContactPaymentsHover";
-import { LedgerDocHover } from "@/components/modules/LedgerDocHover";
 import { DateField } from "@/components/ui/DateField";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, primaryActionClass, primaryIconButtonClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
@@ -16,7 +14,9 @@ import type { ColumnDef, Row } from "@/lib/table";
 import { money, todayISO } from "@/lib/format";
 import { downloadNodeAsPdf, downloadNodeAsPng } from "@/lib/node-download";
 import { ContactStatementDocument, SheetRenderer, type Letterhead } from "@/components/modules/LedgerSheet";
+import { PartyLedgerDialog, PartyLedgerPrintDocument } from "@/components/modules/PartyLedgerDialog";
 import { inCompany } from "@/lib/contact-scope";
+import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/actions/ledger";
 
 const readOnlyClass = `${fieldClass} flex items-center bg-ivory text-steel`;
 
@@ -27,35 +27,21 @@ const readOnlyClass = `${fieldClass} flex items-center bg-ivory text-steel`;
 // direction each balance runs rather than just "credit" and "debt".
 // `render` closes over the balances so the contact cell can carry the hover panel
 // — Row only holds primitives, and the recent payments are a list.
-const buildColumns = (byRowId: Map<string, ContactLedgerBalance>): ColumnDef[] => [
+const buildColumns: ColumnDef[] = [
   {
     key: "displayName",
     label: "Contact",
-    render: (row) => {
-      const balance = byRowId.get(String(row.id));
-      return balance ? <ContactPaymentsHover name={balance.displayName} paymentsMade={balance.recentPayments.filter((p) => p.direction === "made")} paymentsReceived={balance.recentPayments.filter((p) => p.direction === "received")} /> : String(row.displayName);
-    },
   },
   { key: "company", label: "Company" },
   {
     key: "creditBalance",
     label: "We Owe",
     align: "right",
-    render: (row) => {
-      const balance = byRowId.get(String(row.id));
-      if (!balance || balance.recentPurchases.length === 0) return String(row.creditBalance);
-      return <LedgerDocHover docs={balance.recentPurchases} trigger={String(row.creditBalance)} />;
-    },
   },
   {
     key: "debtBalance",
     label: "Owes Us",
     align: "right",
-    render: (row) => {
-      const balance = byRowId.get(String(row.id));
-      if (!balance || balance.recentInvoices.length === 0) return String(row.debtBalance);
-      return <LedgerDocHover docs={balance.recentInvoices} trigger={String(row.debtBalance)} />;
-    },
   },
 ];
 
@@ -93,6 +79,37 @@ export function LedgerManager({
   filter?: React.ReactNode;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
+  const [partyLedger, setPartyLedger] = useState<{ contactId: string; contactName: string; companyId: string } | null>(null);
+  // Party ledger export state — lifted here so the SheetRenderer renders outside any Dialog.
+  const [partyExportFormat, setPartyExportFormat] = useState<"pdf" | "png" | null>(null);
+  const [partyExportData, setPartyExportData] = useState<{
+    data: PartyLedgerResult;
+    entries: (PartyLedgerEntry & { balance: number })[];
+    summary: { opening: number; totalDebit: number; totalCredit: number; closing: number };
+  } | null>(null);
+  const [partyExportError, setPartyExportError] = useState<string | null>(null);
+  const partyCapturing = useRef(false);
+
+  async function capturePartyExport(node: HTMLElement) {
+    if (partyCapturing.current) return;
+    const snap = partyExportData;
+    const fmt = partyExportFormat;
+    if (!snap || !fmt) return;
+    partyCapturing.current = true;
+    setPartyExportError(null);
+    const who = snap.data.displayName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    const fileName = `${who}-ledger-${todayISO()}.${fmt}`;
+    try {
+      if (fmt === "pdf") await downloadNodeAsPdf(node, fileName);
+      else await downloadNodeAsPng(node, fileName);
+    } catch {
+      setPartyExportError("Couldn't build that file. Try again, or use the browser's print dialog.");
+    } finally {
+      partyCapturing.current = false;
+      setPartyExportData(null);
+      setPartyExportFormat(null);
+    }
+  }
   // Whose statement is being taken, and as what. Null except for the moment the
   // document is mounted off-screen and photographed.
   const [sheet, setSheet] = useState<{ format: "pdf" | "png"; contact: ContactLedgerBalance } | null>(null);
@@ -152,7 +169,7 @@ export function LedgerManager({
 
   const byRowId = new Map(balances.map((b) => [`${b.companyId}:${b.contactId}`, b]));
   const columns = [
-    ...buildColumns(byRowId),
+    ...buildColumns,
     statementColumn(byRowId, (contact) =>
       downloadButtons(contact, "rounded border border-sand px-2 py-1 text-xs font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"),
     ),
@@ -188,6 +205,7 @@ export function LedgerManager({
       </PageHeader>
 
       {sheetError && <p className="shrink-0 text-sm text-error">{sheetError}</p>}
+      {partyExportError && <p className="shrink-0 text-sm text-error">{partyExportError}</p>}
 
       {sheet && (
         <SheetRenderer onReady={(node) => void captureSheet(node)}>
@@ -201,10 +219,11 @@ export function LedgerManager({
         idKey="id"
         onRowClick={(row) => {
           const balance = byRowId.get(String(row.id));
-          if (balance) setModal({ kind: "edit", balance });
+          if (balance) setPartyLedger({ contactId: balance.contactId, contactName: balance.displayName, companyId: balance.companyId });
         }}
         emptyMessage="No ledger activity yet."
         searchPlaceholder="Search contacts…"
+        storageKey="ledger-contacts"
       />
 
       {modal?.kind === "add" && (
@@ -217,6 +236,25 @@ export function LedgerManager({
         <Dialog title={modal.balance.displayName} onClose={() => setModal(null)}>
           <LedgerEntryForm balance={modal.balance} companyOptions={companyOptions} contactOptions={contactOptions} onClose={close} />
         </Dialog>
+      )}
+
+      {partyLedger && (
+        <PartyLedgerDialog
+          contactId={partyLedger.contactId}
+          companyId={partyLedger.companyId}
+          contactName={partyLedger.contactName}
+          onClose={() => setPartyLedger(null)}
+          onExport={(fmt, data, entries, summary) => {
+            setPartyExportData({ data, entries, summary });
+            setPartyExportFormat(fmt);
+          }}
+        />
+      )}
+
+      {partyExportFormat && partyExportData && (
+        <SheetRenderer onReady={(node) => void capturePartyExport(node)}>
+          <PartyLedgerPrintDocument data={partyExportData.data} entries={partyExportData.entries} summary={partyExportData.summary} />
+        </SheetRenderer>
       )}
     </div>
   );

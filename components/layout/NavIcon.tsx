@@ -122,12 +122,6 @@ const SHAPES: Record<string, ReactNode> = {
       <path d="M9 7h7" />
     </>
   ),
-  "/finance/party-ledger": (
-    <>
-      <path d="M6 3h8l4 4v14H6z" />
-      <path d="M9 12h6M9 16h3" />
-    </>
-  ),
   "/expenses": (
     <>
       <path d="M3 8a2 2 0 012-2h13a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z" />

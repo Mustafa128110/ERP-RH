@@ -41,9 +41,12 @@ function saveBlob(blob: Blob, fileName: string) {
 }
 
 export async function downloadNodeAsPng(node: HTMLElement, fileName: string) {
+  console.log('[downloadNodeAsPng] Starting PNG download:', fileName);
   const canvas = await rasterize(node);
+  console.log('[downloadNodeAsPng] Canvas received, creating blob');
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("The browser could not turn this into an image.");
+  console.log('[downloadNodeAsPng] Blob created, size:', blob.size);
   saveBlob(blob, fileName);
 }
 
