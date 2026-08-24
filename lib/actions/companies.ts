@@ -7,9 +7,21 @@ import { companies, userCompanyAccess } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+
+// Every cached list carries the company's short name in its own column, so
+// renaming or shortening one is visible on all seven at once.
+const READS = [
+  READ_DOMAIN.sales,
+  READ_DOMAIN.purchases,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.expenses,
+  READ_DOMAIN.stock,
+  READ_DOMAIN.products,
+] as const;
 
 export async function listCompanies() {
   const session = await getSession();
@@ -70,6 +82,7 @@ export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<Act
     });
 
     invalidateLookups(CACHE.companies);
+    invalidateReads(...READS);
     // The new company changes what the Topbar scope selector offers, and that
     // lives in the dashboard layout rather than on this page.
     revalidatePath("/", "layout");
@@ -88,6 +101,7 @@ export async function updateCompany(companyId: string, _prevState: ActionResult 
 
     await db.update(companies).set(values).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "edit")));
     invalidateLookups(CACHE.companies);
+    invalidateReads(...READS);
     revalidatePath("/", "layout");
     await recordAudit({ action: "update", entity: "company", entityId: companyId, summary: values.name, companyId });
     return { success: true };
@@ -102,6 +116,7 @@ export async function deleteCompany(_prevState: ActionResult | undefined, formDa
     await db.delete(companies).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "delete")));
 
     invalidateLookups(CACHE.companies);
+    invalidateReads(...READS);
     revalidatePath("/", "layout");
     await recordAudit({ action: "delete", entity: "company", entityId: companyId, summary: companyId });
     return { success: true };

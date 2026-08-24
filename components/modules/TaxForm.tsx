@@ -4,6 +4,7 @@ import { useActionState, useEffect } from "react";
 import { updateTax, deleteTax, createTaxesBatch, type TaxBatchRow } from "@/lib/actions/taxes";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { optimistically } from "@/lib/optimistic-records";
 
 // Taxes are global reference data — no company scope, so no company field.
 interface TaxValues {
@@ -31,8 +32,23 @@ function Fields({ defaults }: { defaults?: TaxValues }) {
   );
 }
 
-export function TaxEditForm({ taxId, defaults, onDone }: { taxId: string; defaults: TaxValues; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(updateTax.bind(null, taxId), undefined);
+export function TaxEditForm({
+  taxId,
+  defaults,
+  onDone,
+  onSaving,
+}: {
+  taxId: string;
+  defaults: TaxValues;
+  onDone?: () => void;
+  // The list's hook: the row takes the change and the popup steps aside the moment
+  // Save is pressed. Optional — without it this form waits for the server and then
+  // closes, as it always did. No matching failure callback is needed: the popup's
+  // visibility comes from the list's pending set, which React clears when this
+  // action settles. See lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
+}) {
+  const [state, action, pending] = useActionState(optimistically(updateTax.bind(null, taxId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -84,8 +100,17 @@ export function TaxBatchAddDialog({ onClose, onDone }: { onClose: () => void; on
   );
 }
 
-export function DeleteTaxButton({ taxId, onDone }: { taxId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteTax, undefined);
+export function DeleteTaxButton({
+  taxId,
+  onDone,
+  onDeleting,
+}: {
+  taxId: string;
+  onDone?: () => void;
+  onDeleting?: () => void;
+}) {
+  // Inside the action, so it runs after the confirm() below has had its say.
+  const [state, action, pending] = useActionState(optimistically(deleteTax, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

@@ -103,7 +103,14 @@ export function describeDbError(e: unknown, fallback: string, messages?: ErrorMe
 // statements) is what keeps `state?.error` readable in the form that renders it,
 // and what lets `guard` add an error branch to any action without changing its
 // public type.
-export type ActionResult = { error?: string; success?: boolean };
+//
+// `needsConfirmation` marks the one refusal that isn't a fault: the write is
+// legal, it just moves settled money, and the person asking for it has to say
+// yes. The `error` beside it is the sentence saying what would move; the flag is
+// how a form knows to turn its Save into a Confirm rather than treating this like
+// a validation failure. Set it wherever an action asks for `confirmAllocations`,
+// so no form has to recognise the refusal by reading its wording.
+export type ActionResult = { error?: string; success?: boolean; needsConfirmation?: boolean };
 export type CreateResult<C> = { error?: string; created?: C[] };
 
 // Wraps an action body. `fallback` is what the user sees when the failure isn't

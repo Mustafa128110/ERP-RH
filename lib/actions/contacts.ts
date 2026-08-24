@@ -7,10 +7,23 @@ import { contacts, companies, documents, chequeRegister } from "@/lib/db/schema"
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import type { AuthSession } from "@/lib/auth/session";
+
+// A contact's name is printed on every document it is party to, so renaming one
+// changes six lists at once. Cancelling its documents (deleteContact) and
+// unlinking its cheques reach the last one — accounts — through the register.
+const READS = [
+  READ_DOMAIN.sales,
+  READ_DOMAIN.purchases,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.products,
+  READ_DOMAIN.expenses,
+  READ_DOMAIN.accounts,
+] as const;
 
 // Contacts are unified — no supplier/customer split. A write is allowed if the
 // user can create/edit in either the customers or suppliers module, so both a
@@ -182,6 +195,7 @@ export async function createContactsBatch(
         .values(valid)
         .returning({ id: contacts.id, name: contacts.displayName, companyId: contacts.companyId });
       invalidateLookups(CACHE.contacts);
+      invalidateReads(...READS);
       revalidatePath("/purchases/suppliers");
       revalidatePath("/contacts");
       await recordAudit({ action: "create", entity: "contact", summary: created.map((c) => c.name).slice(0, 5).join(", ") });
@@ -295,6 +309,7 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
       `);
 
       invalidateLookups(CACHE.contacts);
+      invalidateReads(...READS);
       revalidatePath("/purchases/suppliers");
       revalidatePath("/contacts");
       await recordAudit({ action: "update", entity: "contact", summary: `${rows.length} contact(s) edited` });
@@ -316,6 +331,7 @@ export async function updateContact(contactId: string, _prevState: ActionResult 
     // Scoped so a guessed id can't reach a contact outside the user's companies.
     await db.update(contacts).set(data).where(and(eq(contacts.id, contactId), await companyInScope(contacts.companyId)));
     invalidateLookups(CACHE.contacts);
+    invalidateReads(...READS);
     revalidatePath("/purchases/suppliers");
     revalidatePath("/contacts");
     await recordAudit({ action: "update", entity: "contact", entityId: contactId, summary: data.displayName, companyId: data.companyId });
@@ -404,7 +420,14 @@ export async function mergeContacts(
       await tx.update(contacts).set({ displayName }).where(eq(contacts.id, survivorId));
     });
 
-    invalidateLookups(CACHE.contacts);
+    // Cheques as well, and only on this path: the merge reassigns
+    // chequeRegister.contactId and documents.contactId and then deletes the
+    // losers, so the cached cheque list is left holding an id no contact has any
+    // more — a cheque picker would go on attributing cheques to a contact that
+    // no longer exists. The single-contact create/rename/update paths above
+    // write neither table, which is why they do not drop this key.
+    invalidateLookups(CACHE.contacts, CACHE.cheques);
+    invalidateReads(...READS);
     revalidatePath("/contacts");
     revalidatePath("/ledger");
     await recordAudit({

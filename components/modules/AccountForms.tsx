@@ -25,8 +25,27 @@ import { ComboBox } from "@/components/ui/ComboBox";
 import { todayISO } from "@/lib/format";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { inCompany } from "@/lib/contact-scope";
+import { optimistically } from "@/lib/optimistic-records";
 
 type CompanyOption = { id: string; name: string };
+
+// The two hooks every edit popup on this screen takes, so its list can move on
+// the press rather than after a round trip. Both are optional — without them a
+// form waits for the server and then closes, as they all did.
+//
+// `onSaving` hands the form's own FormData straight back and lets the list decide
+// what a row may honestly take from it; the list knows which of its cells are
+// stored verbatim and which are computed. `onDeleting` just says a delete is
+// going ahead, and is called from inside the action so a cancelled confirm()
+// never reaches it.
+//
+// Neither has a failure counterpart, and none is needed. What the list holds is
+// optimistic state made inside the action, so React puts the stored row back —
+// and brings the popup out of hiding with everything typed still in it — the
+// moment that action settles without the write having happened. See
+// lib/optimistic-records.ts.
+type SavingHook = { onSaving?: (formData: FormData) => void };
+type DeletingHook = { onDeleting?: () => void };
 
 // --- Bank account ---
 
@@ -106,13 +125,14 @@ export function BankAccountEditForm({
   defaults,
   companyOptions,
   onDone,
+  onSaving,
 }: {
   accountId: string;
   defaults: BankAccountValues;
   companyOptions: CompanyOption[];
   onDone?: () => void;
-}) {
-  const [state, action, pending] = useActionState(updateBankAccount.bind(null, accountId), undefined);
+} & SavingHook) {
+  const [state, action, pending] = useActionState(optimistically(updateBankAccount.bind(null, accountId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -131,8 +151,8 @@ export function BankAccountEditForm({
   );
 }
 
-export function DeleteBankAccountButton({ accountId, onDone }: { accountId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteBankAccount, undefined);
+export function DeleteBankAccountButton({ accountId, onDone, onDeleting }: { accountId: string; onDone?: () => void } & DeletingHook) {
+  const [state, action, pending] = useActionState(optimistically(deleteBankAccount, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -309,13 +329,14 @@ export function CashAccountEditForm({
   defaults,
   companyOptions,
   onDone,
+  onSaving,
 }: {
   accountId: string;
   defaults: CashAccountValues;
   companyOptions: CompanyOption[];
   onDone?: () => void;
-}) {
-  const [state, action, pending] = useActionState(updateCashAccount.bind(null, accountId), undefined);
+} & SavingHook) {
+  const [state, action, pending] = useActionState(optimistically(updateCashAccount.bind(null, accountId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -334,8 +355,8 @@ export function CashAccountEditForm({
   );
 }
 
-export function DeleteCashAccountButton({ accountId, onDone }: { accountId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteCashAccount, undefined);
+export function DeleteCashAccountButton({ accountId, onDone, onDeleting }: { accountId: string; onDone?: () => void } & DeletingHook) {
+  const [state, action, pending] = useActionState(optimistically(deleteCashAccount, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -807,6 +828,7 @@ export function ChequeEditForm({
   bankAccountOptions,
   contactOptions,
   onDone,
+  onSaving,
 }: {
   chequeId: string;
   defaults: ChequeValues;
@@ -816,8 +838,8 @@ export function ChequeEditForm({
   bankAccountOptions: { id: string; label: string; companyId: string | null }[];
   contactOptions: { id: string; displayName: string; companyId: string | null }[];
   onDone?: () => void;
-}) {
-  const [state, action, pending] = useActionState(updateCheque.bind(null, chequeId), undefined);
+} & SavingHook) {
+  const [state, action, pending] = useActionState(optimistically(updateCheque.bind(null, chequeId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -836,8 +858,8 @@ export function ChequeEditForm({
   );
 }
 
-export function DeleteChequeButton({ chequeId, onDone }: { chequeId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteCheque, undefined);
+export function DeleteChequeButton({ chequeId, onDone, onDeleting }: { chequeId: string; onDone?: () => void } & DeletingHook) {
+  const [state, action, pending] = useActionState(optimistically(deleteCheque, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

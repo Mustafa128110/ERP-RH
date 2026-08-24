@@ -16,7 +16,7 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
@@ -24,6 +24,18 @@ import { recordAudit } from "@/lib/actions/audit";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { financialDocumentError } from "@/lib/financial-input";
+
+// One transfer writes both sides of the trade, so it changes both companies'
+// lists: a sale, a purchase, the two ledgers behind them, and the stock that
+// moved. It settles nothing, so accounts is untouched.
+const READS = [
+  READ_DOMAIN.sales,
+  READ_DOMAIN.purchases,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.products,
+  READ_DOMAIN.stock,
+] as const;
 
 // One company selling to the other was two jobs done by hand: a sale in the
 // seller and a matching purchase in the buyer, typed twice, with two chances to
@@ -227,6 +239,7 @@ async function clearLines(tx: InterCompanyTx, documentIds: string[]) {
 // sides, so the cached lookups and every page reading them are stale.
 function invalidateInterCompanyViews() {
   invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.contacts, CACHE.cheques);
+  invalidateReads(...READS);
   revalidatePath("/inventory/inter-company");
   revalidatePath("/sales");
   revalidatePath("/purchases/stock");

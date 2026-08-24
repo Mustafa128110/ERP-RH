@@ -23,11 +23,13 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, getAvailableCheques, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
 import { financialDocumentError } from "@/lib/financial-input";
 import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
+import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment-allocation";
+import { changeSummary } from "@/lib/audit-constants";
 import { DEFAULT_SALE_TYPE, isSaleType } from "@/lib/sale-constants";
 import { round1 } from "@/lib/format";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
@@ -37,6 +39,21 @@ import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
+
+// A sale writes the invoice, the stock it took out, the customer's ledger and
+// whatever settled it. `purchases` is deliberately absent — this file names no
+// PURCHASE_INVOICE, so the purchase list cannot show anything it wrote — and
+// `accounts` is present because adjustSettlementBalance moves a balance in raw
+// SQL that no ORM write here reveals.
+const READS = [
+  READ_DOMAIN.sales,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.products,
+  READ_DOMAIN.stock,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.expenses,
+  READ_DOMAIN.accounts,
+] as const;
 
 export interface SaleItemRow {
   itemName: string;
@@ -71,7 +88,7 @@ export async function listSales(filters: SalesFilters = {}) {
   );
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:sales:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.sales, `${session.userId}:sales:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   // The lines query used to wait on the document ids from the first query, which
   // made two ~170ms round trips where one would do. Selecting lines by the same
@@ -433,9 +450,16 @@ async function resolveLineRows(
 ) {
   const itemIds = await resolveItemIds(tx, lines.map((line) => ({ companyId, itemId: line.itemId || null, itemName: line.itemName || null })));
   const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
+  // "assume-base": a sale is never refused over a conversion nobody has entered
+  // yet. A line whose unit has no multiplier to the item's base unit counts its
+  // quantity as base units — the same thing this resolver already does for an item
+  // with no base unit — so the invoice, the ledger and the customer are correct
+  // and only the stock figure is approximate. Entering the conversion on the
+  // products page and re-saving the sale puts that right.
   const baseQuantities = await resolveBaseQuantities(
     tx,
     lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+    "assume-base",
   );
   return lines.map((l, i) => {
     const quantity = Number(l.quantity);
@@ -627,6 +651,13 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
         await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, debit: String(balance) });
       }
 
+      // A customer who has paid ahead has money sitting on their account with
+      // nowhere to go. This invoice is somewhere for it to go: recomputing the
+      // queue lets the standing advance settle against it the moment it exists,
+      // instead of leaving an invoice reading "outstanding" next to a receipt
+      // reading "unapplied".
+      await recomputeParty(tx, companyId, resolvedContactId);
+
       return doc.id;
     });
   } catch (e) {
@@ -642,7 +673,11 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   // missing from the item picker (and the products/stock pages) for the 5-minute
   // TTL, even though its stock movement is already recorded.
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  invalidateReads(...READS);
+  // /sales is the entry form — the page you are standing on when a sale saves.
+  // The list the sale has to appear in is /sales/invoices, a different route.
   revalidatePath("/sales");
+  revalidatePath("/sales/invoices");
   revalidatePath("/inventory/products");
   revalidatePath("/inventory/stock");
   // An outstanding balance lands on the customer's ledger row.
@@ -714,6 +749,9 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       .select({
         number: documents.number,
         companyId: documents.companyId,
+        contactId: documents.contactId,
+        grandTotal: documents.grandTotal,
+        documentDate: documents.documentDate,
         paidAmount: documents.paidAmount,
         bankAccountId: documents.bankAccountId,
         cashAccountId: documents.cashAccountId,
@@ -729,8 +767,24 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       .where(and(eq(marketPurchaseRequests.saleDocumentId, documentId), eq(marketPurchaseRequests.status, "confirmed")))
       .limit(1);
     if (confirmedMarketPurchase) return { error: "This sale has a confirmed market purchase. Cancel that market purchase before editing the sale." };
-    const [allocatedPayment] = await db.select({ id: paymentAllocations.id }).from(paymentAllocations).where(eq(paymentAllocations.invoiceDocumentId, documentId)).limit(1);
-    if (allocatedPayment) return { error: "This invoice has FIFO receipts allocated to it. Edit the receipt instead of rewriting the settled invoice." };
+    // Receipts already allocated to this invoice no longer block the edit. They
+    // are released below, the edit is applied, and FIFO is rebuilt for the whole
+    // party — so an invoice edited down hands its excess to the next outstanding
+    // one instead of asking the user to unpick the receipts by hand.
+    //
+    // The one case that still needs a word first is the one where money has to
+    // move: an invoice reduced below what is already settled against it. The
+    // caller confirms by listing the affected receipts (previewSaleEdit) and
+    // sending them back with `confirmAllocations`.
+    const [allocated] = await db
+      .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
+      .from(paymentAllocations)
+      .where(eq(paymentAllocations.invoiceDocumentId, documentId));
+    const allocatedAmount = Number(allocated?.amount ?? 0);
+    const releasedByEdit = Number((allocatedAmount - Math.max(0, balance)).toFixed(2));
+    if (releasedByEdit > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
+      return { needsConfirmation: true, error: `This invoice already has ${allocatedAmount.toFixed(2)} settled against it, and the new total leaves room for less. Confirm the change to release ${releasedByEdit.toFixed(2)} to the customer's next outstanding invoice.` };
+    }
     if (existingDoc.companyId !== companyId) return { error: "A posted sale can't be moved to another company. Delete it and enter it in the correct company." };
     let vanishedDuringSave = false;
 
@@ -755,15 +809,22 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         .where(eq(chequeRegister.documentId, documentId))
         .limit(1)
         .for("update");
+      // Hand back the receipts before anything reads paid_amount. What is left is
+      // the part payment taken at the counter, which is the only piece that came
+      // through this invoice's own bank or cash account — the allocated piece
+      // arrived through separate payment documents that are still posted, and
+      // refunding it here would credit the same money twice.
+      const { released } = await releaseInvoiceAllocations(tx, [documentId]);
+      const tillPaid = Math.max(0, Number(lockedDoc.paidAmount) - released);
       // Reverse whatever was settled before applying the new figure — handles a
       // changed total, a changed part payment, and paid/unpaid flips in one pass.
       // Keyed on the amount rather than the is_paid flag, so a part payment gets
       // its actual amount back rather than nothing.
-      if (Number(lockedDoc.paidAmount) > 0) {
+      if (tillPaid > 0) {
         await adjustSettlementBalance(
           tx,
           "in",
-          lockedDoc.paidAmount,
+          tillPaid.toFixed(2),
           lockedDoc.bankAccountId,
           lockedDoc.cashAccountId,
           existingCheque?.id ?? null,
@@ -844,6 +905,16 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
           })),
         );
       }
+
+      // Settlement is rebuilt from scratch for the party, in date order, rather
+      // than patched: this edit may have changed the amount, the date or the
+      // customer, and all three move the invoice's place in the queue. Both
+      // parties when the customer changed — the invoice has left one account and
+      // joined another, and each has to be re-run.
+      await recomputeParty(tx, companyId, resolvedContactId);
+      if (existingDoc.contactId && existingDoc.contactId !== resolvedContactId) {
+        await recomputeParty(tx, existingDoc.companyId, existingDoc.contactId);
+      }
     });
     if (vanishedDuringSave) return { error: "Sale not found — it may already have been deleted." };
 
@@ -852,11 +923,27 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     // missing from the item picker (and the products/stock pages) for the 5-minute
     // TTL, even though its stock movement is already recorded.
     invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+    invalidateReads(...READS);
     revalidatePath("/sales");
+    revalidatePath("/sales/invoices");
     revalidatePath("/inventory/products");
     revalidatePath("/inventory/stock");
     revalidatePath("/ledger");
-    await recordAudit({ action: "update", entity: "sale", entityId: documentId, summary: existingDoc.number, companyId, detail: `Total ${grandTotal}` });
+    await recordAudit({
+      action: "update",
+      entity: "sale",
+      entityId: documentId,
+      summary: existingDoc.number,
+      companyId,
+      // Field level, old → new: this is the trail a correction leaves. Falls back
+      // to the total when nothing tracked moved, so the entry is never blank.
+      detail: changeSummary([
+        ["Total", existingDoc.grandTotal, grandTotal.toFixed(2)],
+        ["Date", existingDoc.documentDate, documentDate],
+        ["Paid", existingDoc.paidAmount, paidAmount.toFixed(2)],
+        ["Customer", existingDoc.contactId, contactId || contactName],
+      ]) || `Total ${grandTotal}`,
+    });
     return { success: true };
   });
 }
@@ -874,6 +961,7 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     .select({
       number: documents.number,
       companyId: documents.companyId,
+      contactId: documents.contactId,
       grandTotal: documents.grandTotal,
       paidAmount: documents.paidAmount,
       bankAccountId: documents.bankAccountId,
@@ -890,8 +978,21 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     .where(and(eq(marketPurchaseRequests.saleDocumentId, documentId), eq(marketPurchaseRequests.status, "confirmed")))
     .limit(1);
   if (confirmedMarketPurchase) return { error: "Cancel the confirmed market purchase before cancelling this sale." };
-  const [allocation] = await db.select({ id: paymentAllocations.id }).from(paymentAllocations).where(eq(paymentAllocations.invoiceDocumentId, documentId)).limit(1);
-  if (allocation) return { error: "This invoice has FIFO payments allocated to it. Cancel or edit those receipts before cancelling the invoice." };
+  // Allocated receipts no longer stop the cancellation. They are released below
+  // and FIFO is rebuilt for the customer, so the receipts land on whatever is
+  // still outstanding rather than having to be cancelled and re-entered.
+  //
+  // A confirmation is still required, because this moves other people's money
+  // around: the caller lists the affected receipts (previewLedgerRowDelete) and
+  // sends `confirmAllocations` back.
+  const [allocated] = await db
+    .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId));
+  const allocatedAmount = Number(allocated?.amount ?? 0);
+  if (allocatedAmount > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
+    return { needsConfirmation: true, error: `This invoice has ${allocatedAmount.toFixed(2)} of receipts settled against it. Confirm the cancellation to release them to the customer's other outstanding invoices.` };
+  }
   requirePermission(session, "sales", "delete", { companyId: existingDoc.companyId });
   let vanishedDuringDelete = false;
 
@@ -917,12 +1018,18 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
         .where(eq(chequeRegister.documentId, documentId))
         .limit(1)
         .for("update");
-      // Give back exactly what came in — the part payment, not the whole total.
-      if (Number(lockedDoc.paidAmount) > 0) {
+      // Hand back the receipts before anything reads paid_amount. What is left is
+      // the part payment taken at this invoice's own counter, and that is the only
+      // piece this invoice's bank or cash account should be credited back — the
+      // allocated piece arrived through separate payment documents that are still
+      // posted, and refunding it here would credit the same money twice.
+      const { released } = await releaseInvoiceAllocations(tx, [documentId]);
+      const tillPaid = Math.max(0, Number(lockedDoc.paidAmount) - released);
+      if (tillPaid > 0) {
         await adjustSettlementBalance(
           tx,
           "in",
-          lockedDoc.paidAmount,
+          tillPaid.toFixed(2),
           lockedDoc.bankAccountId,
           lockedDoc.cashAccountId,
           existingCheque?.id ?? null,
@@ -957,6 +1064,11 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
         WHERE document_id = ${documentId}::uuid
       `);
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
+      // The invoice is gone from the queue, so every receipt on this customer's
+      // account has to be walked again from the oldest item forward. Receipts that
+      // were sitting on this invoice move to whatever is still outstanding, and any
+      // remainder becomes an advance rather than vanishing with the invoice.
+      await recomputeParty(tx, existingDoc.companyId, existingDoc.contactId);
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't cancel this sale.") };
@@ -968,7 +1080,9 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
   // missing from the item picker (and the products/stock pages) for the 5-minute
   // TTL, even though its stock movement is already recorded.
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  invalidateReads(...READS);
   revalidatePath("/sales");
+  revalidatePath("/sales/invoices");
   revalidatePath("/inventory/products");
   revalidatePath("/inventory/stock");
   revalidatePath("/ledger");
@@ -978,7 +1092,9 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     entityId: documentId,
     summary: existingDoc.number,
     companyId: existingDoc.companyId,
-    detail: `Total ${existingDoc.grandTotal}`,
+    detail: allocatedAmount > 0
+      ? `Total ${existingDoc.grandTotal}; released ${allocatedAmount.toFixed(2)} of settled receipts`
+      : `Total ${existingDoc.grandTotal}`,
   });
   return { success: true };
   });

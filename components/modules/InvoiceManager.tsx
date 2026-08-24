@@ -12,6 +12,7 @@ import { money } from "@/lib/format";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
 import { InvoiceImageRenderer } from "@/components/modules/InvoiceDocument";
+import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 import type { UnitConversionOption } from "@/lib/unit-conversion";
 
@@ -35,6 +36,7 @@ export type SaleFormOptions = {
 };
 
 type SaleDetail = NonNullable<Awaited<ReturnType<typeof getSale>>>;
+type ChequeOptions = Awaited<ReturnType<typeof listChequesForSales>>;
 
 // The invoice number column lives in the component — it needs the line items,
 // which the row itself can't carry (a Row holds primitives).
@@ -86,15 +88,59 @@ export function InvoiceManager({
   const [imaging, setImaging] = useState<Invoice | null>(null);
   const capturing = useRef(false);
 
+  // Rows the list shows, which is the server's list plus whatever is in flight.
+  // The rows here are already-formatted table rows, so a saved edit changes no
+  // cell until the payload lands — nothing is guessed at, least of all money.
+  // What it does buy is the fade and the instant delete, and those are what the
+  // wait was actually costing.
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id");
+
+  // Details already fetched, keyed by sale id. Opening a row costs two round
+  // trips to a database 170ms away; a pointer resting on the row is enough notice
+  // to have made them already. Kept on a ref so warming never renders.
+  const warmed = useRef(new Map<string, { detail: SaleDetail; cheques: ChequeOptions }>());
+  const warming = useRef(new Set<string>());
+
+  async function warm(id: string) {
+    if (warmed.current.has(id) || warming.current.has(id)) return;
+    warming.current.add(id);
+    try {
+      const [detail, cheques] = await Promise.all([getSale(id), listChequesForSales(id)]);
+      if (detail) warmed.current.set(id, { detail, cheques });
+    } catch {
+      // A failed warm is not a failure — the click below will ask again, and if
+      // the network is genuinely gone that is where it belongs to be reported.
+    } finally {
+      warming.current.delete(id);
+    }
+  }
+
+  // Called from inside the form's own action when a save or a cancellation starts,
+  // and it is not housekeeping: the warm copy above was taken before this write,
+  // so handing it to the next open would show the sale as it used to be — worse
+  // than the round trip it saves.
+  function forgetWarm(id: string) {
+    warmed.current.delete(id);
+  }
+
   function close() {
     setEditing(null);
   }
 
   async function openEdit(id: string) {
+    const ready = warmed.current.get(id);
+    if (ready) {
+      setChequeOptions(ready.cheques);
+      setEditing(ready.detail);
+      return;
+    }
     setLoadingId(id);
     const [detail, cheques] = await Promise.all([getSale(id), listChequesForSales(id)]);
     setLoadingId(null);
     if (!detail) return;
+    // Worth keeping even though this open is already paid for: the same row is
+    // often opened twice in a row while a correction is being worked out.
+    warmed.current.set(id, { detail, cheques });
     setChequeOptions(cheques);
     setEditing(detail);
   }
@@ -207,9 +253,11 @@ export function InvoiceManager({
 
       <DataTable
         columns={[...allColumns, downloadColumn("pdf", pdfId), downloadColumn("png", pngId)]}
-        rows={rows}
+        rows={shown}
         idKey="id"
         onRowClick={(row) => void openEdit(String(row.id))}
+        onRowIntent={(row) => void warm(String(row.id))}
+        pendingIds={pending}
         selected={selected}
         onSelectedChange={setSelected}
         // One invoice at a time: a sale is a document with its own lines and
@@ -226,14 +274,34 @@ export function InvoiceManager({
       {imaging && <InvoiceImageRenderer invoice={imaging} onReady={(node) => void captureImage(node)} />}
 
       {editing && (
-        <Dialog title="Edit Sale" onClose={close} size="xwide">
+        // Hidden rather than closed while this sale's write is in the air. The
+        // server may still have something to say — a stock shortfall, a question
+        // about receipts to release — and a hidden popup keeps every typed line
+        // and the question itself standing; a closed one would have thrown both
+        // away. `pending` empties when the action settles, so a refusal brings the
+        // popup straight back, and a success closes it for real from onDone.
+        <Dialog title="Edit Sale" onClose={close} size="xwide" hidden={pending.includes(editing.id)}>
           <div className="flex flex-col gap-3">
             {/* The printable copy still exists, one click away — it just isn't
                 what a row opens any more. */}
             <Link href={`/sales/invoices/${editing.id}`} className="w-fit text-sm font-medium text-navy-800 hover:underline">
               Printable invoice ↗
             </Link>
-            <SaleFormPage saleId={editing.id} defaults={editing} {...formOptions} chequeOptions={chequeOptions} onDone={close} />
+            <SaleFormPage
+              saleId={editing.id}
+              defaults={editing}
+              {...formOptions}
+              chequeOptions={chequeOptions}
+              onDone={close}
+              onSaving={() => {
+                forgetWarm(editing.id);
+                patch(editing.id);
+              }}
+              onDeleting={() => {
+                forgetWarm(editing.id);
+                remove(editing.id);
+              }}
+            />
           </div>
         </Dialog>
       )}

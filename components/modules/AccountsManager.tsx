@@ -25,6 +25,8 @@ import {
 import { CashTransferDialog, DeleteCashTransferButton, transferAccounts } from "@/components/modules/CashTransferForm";
 import type { CashTransferRow } from "@/lib/actions/transfers";
 import { formatDate } from "@/lib/format";
+import { patchFromFormData } from "@/lib/optimistic-records";
+import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import { isChequeSpent, UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { bankAccountLabel } from "@/lib/account-label";
 
@@ -117,10 +119,25 @@ export function AccountsManager({
   const [showSpent, setShowSpent] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
 
+  // Four lists on one screen, so four of these — each tab's rows are the server's
+  // list plus whatever is in flight for it. Every field these forms post is
+  // stored verbatim (`.set(values)` in lib/actions/accounts.ts, balances
+  // included, which are editable here on purpose), so a row can take the whole
+  // of what was typed rather than a safe subset of it.
+  //
+  // Nothing here needs warming: a row's detail is already in the props, so
+  // opening one has never cost a round trip. The wait was only ever on the write.
+  const bank = useOptimisticRecords(bankAccounts, "id");
+  const cash = useOptimisticRecords(cashAccounts, "id");
+  const cheque = useOptimisticRecords(cheques, "id");
+  const transfer = useOptimisticRecords(transfers, "id");
+
   const companyName = (id: string | null) => (id ? (companyOptions.find((c) => c.id === id)?.name ?? "—") : "Global");
   // Bank, branch and account title — the same label the pickers, the payments
-  // list and the transfers list all use (lib/account-label.ts).
-  const bankAccountOptions = bankAccounts.map((b) => ({ id: b.id, label: bankAccountLabel(b), companyId: b.companyId }));
+  // list and the transfers list all use (lib/account-label.ts). Off the optimistic
+  // list, so a bank account renamed on its own tab reads the new way in the cheque
+  // list and in the transfer picker at once.
+  const bankAccountOptions = bank.records.map((b) => ({ id: b.id, label: bankAccountLabel(b), companyId: b.companyId }));
   const bankAccountFor = (id: string | null) => (id ? (bankAccountOptions.find((b) => b.id === id)?.label ?? "—") : "—");
   const contactName = (id: string | null) => (id ? (contactOptions.find((c) => c.id === id)?.displayName ?? "—") : "—");
 
@@ -128,7 +145,7 @@ export function AccountsManager({
     setModal(null);
   }
 
-  const bankRows: Row[] = bankAccounts.map((b) => ({
+  const bankRows: Row[] = bank.records.map((b) => ({
     id: b.id,
     bankName: b.bankName,
     branchName: b.branchName ?? "—",
@@ -139,11 +156,11 @@ export function AccountsManager({
     status: b.isActive ? "Active" : "Inactive",
   }));
   function openEditBank(row: Row) {
-    const account = bankAccounts.find((b) => b.id === row.id);
+    const account = bank.records.find((b) => b.id === row.id);
     if (account) setModal({ kind: "edit-bank", row: account });
   }
 
-  const cashRows: Row[] = cashAccounts.map((c) => ({
+  const cashRows: Row[] = cash.records.map((c) => ({
     id: c.id,
     name: c.name,
     balance: c.currentBalance ?? "0",
@@ -151,14 +168,15 @@ export function AccountsManager({
     status: c.isActive ? "Active" : "Inactive",
   }));
   function openEditCash(row: Row) {
-    const account = cashAccounts.find((c) => c.id === row.id);
+    const account = cash.records.find((c) => c.id === row.id);
     if (account) setModal({ kind: "edit-cash", row: account });
   }
 
   // Spent cheques stay in the register but off the working list — see the
-  // checkbox on the cheques tab.
-  const spentCount = cheques.filter((c) => isChequeSpent(c.status)).length;
-  const chequeRows: Row[] = cheques
+  // checkbox on the cheques tab. Marking one cleared therefore takes it off this
+  // list on the press, which is exactly what the person doing it meant.
+  const spentCount = cheque.records.filter((c) => isChequeSpent(c.status)).length;
+  const chequeRows: Row[] = cheque.records
     .filter((c) => showSpent || !isChequeSpent(c.status))
     .map((c) => ({
       id: c.id,
@@ -172,11 +190,11 @@ export function AccountsManager({
       company: companyName(c.companyId),
     }));
   function openEditCheque(row: Row) {
-    const cheque = cheques.find((c) => c.id === row.id);
-    if (cheque) setModal({ kind: "edit-cheque", row: cheque });
+    const found = cheque.records.find((c) => c.id === row.id);
+    if (found) setModal({ kind: "edit-cheque", row: found });
   }
 
-  const transferRows: Row[] = transfers.map((t) => ({
+  const transferRows: Row[] = transfer.records.map((t) => ({
     id: t.id,
     number: t.number,
     date: formatDate(t.documentDate),
@@ -189,20 +207,20 @@ export function AccountsManager({
   // it's four fields, and changing the accounts means moving the money back and
   // out again anyway.
   function openTransfer(row: Row) {
-    const transfer = transfers.find((t) => t.id === row.id);
-    if (transfer) setModal({ kind: "view-transfer", row: transfer });
+    const found = transfer.records.find((t) => t.id === row.id);
+    if (found) setModal({ kind: "view-transfer", row: found });
   }
 
   // Both kinds of account in one list, which is what the transfer form picks
   // from — plus the cheques still in hand, which can only be a source: paying a
   // transfer out with one spends it.
   const accountsForTransfer = transferAccounts(
-    bankAccounts.map((b) => ({ id: b.id, name: bankAccountLabel(b) })),
-    cashAccounts.map((c) => ({ id: c.id, name: c.name })),
+    bank.records.map((b) => ({ id: b.id, name: bankAccountLabel(b) })),
+    cash.records.map((c) => ({ id: c.id, name: c.name })),
     // In hand only: a cheque already received against a payment or issued
     // against one is spoken for, and taking it here would cut it loose from the
     // document it settled.
-    cheques.filter((c) => c.status === UNSPENT_CHEQUE_STATUS).map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` })),
+    cheque.records.filter((c) => c.status === UNSPENT_CHEQUE_STATUS).map((c) => ({ id: c.id, name: `${c.chequeNumber} (${c.amount})` })),
   );
 
   // Whatever the open tab makes, same as the button beside it.
@@ -274,6 +292,7 @@ export function AccountsManager({
           rows={cashRows}
           idKey="id"
           onRowClick={openEditCash}
+          pendingIds={cash.pending}
           emptyMessage="No cash accounts yet."
           searchPlaceholder="Search cash accounts…"
         />
@@ -285,6 +304,7 @@ export function AccountsManager({
           rows={bankRows}
           idKey="id"
           onRowClick={openEditBank}
+          pendingIds={bank.pending}
           emptyMessage="No bank accounts yet."
           searchPlaceholder="Search bank accounts…"
         />
@@ -305,6 +325,7 @@ export function AccountsManager({
             rows={chequeRows}
             idKey="id"
             onRowClick={openEditCheque}
+            pendingIds={cheque.pending}
             emptyMessage={showSpent ? "No cheques yet." : "No cheques in hand."}
             searchPlaceholder="Search cheques…"
           />
@@ -317,6 +338,7 @@ export function AccountsManager({
           rows={transferRows}
           idKey="id"
           onRowClick={openTransfer}
+          pendingIds={transfer.pending}
           emptyMessage="No transfers yet — move money between your cash drawers and bank accounts here."
           searchPlaceholder="Search transfers…"
         />
@@ -327,7 +349,11 @@ export function AccountsManager({
       )}
 
       {modal?.kind === "view-transfer" && (
-        <Dialog title={`${modal.row.from} → ${modal.row.to}`} onClose={close}>
+        // Hidden rather than closed while the cancellation is in the air, the same
+        // as the edit popups below: `pending` empties when the action settles, so a
+        // refusal brings this straight back with the error on it, and a success
+        // closes it for real from onDone.
+        <Dialog title={`${modal.row.from} → ${modal.row.to}`} onClose={close} hidden={transfer.pending.includes(modal.row.id)}>
           <div className="flex flex-col gap-4">
             <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
               <dt className="text-steel">Reference</dt>
@@ -340,18 +366,35 @@ export function AccountsManager({
               <dd className="text-ink">{modal.row.company}</dd>
             </dl>
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteCashTransferButton transferId={modal.row.id} onDone={close} />
+              <DeleteCashTransferButton transferId={modal.row.id} onDone={close} onDeleting={() => transfer.remove(modal.row.id)} />
             </div>
           </div>
         </Dialog>
       )}
 
       {modal?.kind === "edit-bank" && (
-        <Dialog title={modal.row.accountTitle} onClose={close}>
+        <Dialog title={modal.row.accountTitle} onClose={close} hidden={bank.pending.includes(modal.row.id)}>
           <div className="flex flex-col gap-4">
-            <BankAccountEditForm accountId={modal.row.id} defaults={modal.row} companyOptions={companyOptions} onDone={close} />
+            <BankAccountEditForm
+              accountId={modal.row.id}
+              defaults={modal.row}
+              companyOptions={companyOptions}
+              onDone={close}
+              // Everything this form posts is stored as typed, so the row can take
+              // the lot. The two ticks are set by hand: `patchFromFormData` only
+              // copies fields the record holds as a string, and an unticked box
+              // posts nothing at all — so reading them off the record instead of
+              // off the form would leave a box that was just cleared still ticked.
+              onSaving={(formData) =>
+                bank.patch(modal.row.id, {
+                  ...patchFromFormData(modal.row, formData),
+                  isDefault: formData.get("isDefault") === "on",
+                  isActive: formData.get("isActive") === "on",
+                })
+              }
+            />
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteBankAccountButton accountId={modal.row.id} onDone={close} />
+              <DeleteBankAccountButton accountId={modal.row.id} onDone={close} onDeleting={() => bank.remove(modal.row.id)} />
             </div>
           </div>
         </Dialog>
@@ -360,11 +403,23 @@ export function AccountsManager({
       {modal?.kind === "batch-bank" && <BankAccountBatchAddDialog companyOptions={companyOptions} onClose={() => setModal(null)} onDone={close} />}
 
       {modal?.kind === "edit-cash" && (
-        <Dialog title={modal.row.name} onClose={close}>
+        <Dialog title={modal.row.name} onClose={close} hidden={cash.pending.includes(modal.row.id)}>
           <div className="flex flex-col gap-4">
-            <CashAccountEditForm accountId={modal.row.id} defaults={modal.row} companyOptions={companyOptions} onDone={close} />
+            <CashAccountEditForm
+              accountId={modal.row.id}
+              defaults={modal.row}
+              companyOptions={companyOptions}
+              onDone={close}
+              onSaving={(formData) =>
+                cash.patch(modal.row.id, {
+                  ...patchFromFormData(modal.row, formData),
+                  isDefault: formData.get("isDefault") === "on",
+                  isActive: formData.get("isActive") === "on",
+                })
+              }
+            />
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteCashAccountButton accountId={modal.row.id} onDone={close} />
+              <DeleteCashAccountButton accountId={modal.row.id} onDone={close} onDeleting={() => cash.remove(modal.row.id)} />
             </div>
           </div>
         </Dialog>
@@ -382,7 +437,7 @@ export function AccountsManager({
         />
       )}
       {modal?.kind === "edit-cheque" && (
-        <Dialog title={modal.row.chequeNumber} onClose={close}>
+        <Dialog title={modal.row.chequeNumber} onClose={close} hidden={cheque.pending.includes(modal.row.id)}>
           <div className="flex flex-col gap-4">
             <ChequeEditForm
               chequeId={modal.row.id}
@@ -391,9 +446,18 @@ export function AccountsManager({
               bankAccountOptions={bankAccountOptions}
               contactOptions={contactOptions}
               onDone={close}
+              // A new status takes effect on the press, which on this screen also
+              // means a cheque marked cleared leaves the working list at once —
+              // see the filter above.
+              onSaving={(formData) =>
+                cheque.patch(modal.row.id, {
+                  ...patchFromFormData(modal.row, formData),
+                  issuedByCompany: formData.get("issuedByCompany") === "on",
+                })
+              }
             />
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteChequeButton chequeId={modal.row.id} onDone={close} />
+              <DeleteChequeButton chequeId={modal.row.id} onDone={close} onDeleting={() => cheque.remove(modal.row.id)} />
             </div>
           </div>
         </Dialog>

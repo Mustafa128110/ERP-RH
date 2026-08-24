@@ -30,11 +30,11 @@ export function TaxManager({ taxes }: { taxes: Tax[] }) {
       emptyMessage="No taxes yet."
       dialogTitle={(t) => t.name}
       renderBatchDialog={({ onClose, onDone }) => <TaxBatchAddDialog onClose={onClose} onDone={onDone} />}
-      renderEditBody={({ record, onDone }) => (
+      renderEditBody={({ record, onDone, onSaving, onDeleting }) => (
         <>
-          <TaxEditForm taxId={record.id} defaults={record} onDone={onDone} />
+          <TaxEditForm taxId={record.id} defaults={record} onDone={onDone} onSaving={onSaving} />
           <DangerZone>
-            <DeleteTaxButton taxId={record.id} onDone={onDone} />
+            <DeleteTaxButton taxId={record.id} onDone={onDone} onDeleting={onDeleting} />
           </DangerZone>
         </>
       )}

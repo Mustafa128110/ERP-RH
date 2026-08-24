@@ -134,9 +134,11 @@ export function StockTransferFormPage({
   // New transfers are entered back to back, so a created one clears the form
   // rather than navigating away (see SaleForm for why this isn't an effect). An
   // edit keeps what's on screen — it's still the transfer you're looking at.
-  // One id per open form: sent with every submit, claimed by the server inside
-  // the same transaction as the transfer, so a replayed submit can't post twice.
-  const [operationId] = useState(() => crypto.randomUUID());
+  // One id per *save*, not per open form: claimed by the server inside the same
+  // transaction as the transfer, so a replayed submit can't post twice — but the
+  // claim outlives the save by a day, so a form kept open for the next transfer
+  // has to stop sending the spent one. Re-minted on a confirmed success only.
+  const [operationId, setOperationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: TransferActionState, formData: FormData) => {
     // A transport failure must not throw into the error boundary — that would
     // lose the form (and its operation id), and a restored draft would mint a
@@ -151,6 +153,11 @@ export function StockTransferFormPage({
     if (result?.success) {
       // Saved — the local copy has nothing left to protect.
       clearDraft(transferDraftKey);
+      // Spent id: the server holds the claim for a day, so reusing it would have
+      // the next transfer refused as a replay of this one — "already recorded",
+      // nothing written. Safe to replace only here, where the response came back;
+      // a failure keeps it so a lost response can't post the transfer twice.
+      setOperationId(crypto.randomUUID());
       if (onDone) onDone();
       else if (!isEdit) resetForm();
     }

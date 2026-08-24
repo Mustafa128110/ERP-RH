@@ -10,7 +10,7 @@ import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { SETTING_DEFS } from "@/lib/setting-constants";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 
 // The settings table has existed since the first migration and nothing had ever
 // read or written it — the Settings page was a hard-coded list of numbers
@@ -69,6 +69,8 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
       .onConflictDoUpdate({ target: [settings.companyId, settings.key], set: { value: sql`excluded.value` } });
 
     invalidateLookups(CACHE.settings);
+    // low_stock_qty is read per company by the stock list to mark a row low.
+    invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/settings");
     await recordAudit({ action: "update", entity: "settings", summary: "Company settings changed", companyId });
     return { success: true };

@@ -8,6 +8,7 @@ import { getSession, invalidateSessions } from "@/lib/auth/session";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { isTheme, nearestStep, type ThemePreference } from "@/lib/preference-constants";
+import { invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 
 // Display preferences — theme and zoom — for the person who is signed in.
 //
@@ -28,6 +29,12 @@ async function writePrefs(patch: { uiTheme?: ThemePreference; uiScale?: number }
   // without this the theme would flip back on the next render and stay wrong
   // until the cache aged out (lib/auth/session.ts).
   invalidateSessions();
+
+  // The expense list names whoever entered each row, joined from this table. A
+  // theme change cannot alter that name, but this writes the same row the join
+  // reads and the coverage rule in lib/cache.check.ts can't tell the two columns
+  // apart — one prefix drop on a preference change is the cheaper side of that.
+  invalidateReads(READ_DOMAIN.expenses);
 
   // Applied on <html> in the root layout, so every route's markup depends on
   // these values — not just the settings page the button was pressed on.

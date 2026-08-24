@@ -88,6 +88,12 @@ export const documentTypeCodeEnum = pgEnum("document_type_code", [
   "MARKET_PURCHASE",
   "CREDIT_NOTE",
   "DEBIT_NOTE",
+  // A party's opening balance — the figure the account starts from, before any
+  // invoice or payment on file. One per company/contact, pointed at by
+  // contact_opening_balances. It is a document rather than a column so that the
+  // FIFO queues, payment_allocations, the audit trail and the statement itself
+  // can all treat it as the oldest settleable item without an exception each.
+  "OPENING_BALANCE",
 ]);
 
 export const documentSeriesEnum = pgEnum("document_series", [
@@ -110,6 +116,7 @@ export const documentSeriesEnum = pgEnum("document_series", [
   "MP",
   "CN",
   "DB",
+  "OB",
 ]);
 
 // --- Identity & Companies ---
@@ -622,8 +629,33 @@ export const paymentAllocations = pgTable(
   ],
 );
 
-export const marketPurchaseStatusEnum = pgEnum("market_purchase_status", ["pending", "confirmed", "cancelled"]);
+// Which document holds a party's opening balance. The figure itself lives on
+// that document (grand_total for the magnitude, its single ledger_entries row
+// for the direction — debit means the party owes us), so there is exactly one
+// place a balance is written and no second copy to drift.
+//
+// This table exists for the primary key: "one editable opening balance per
+// party" is an invariant, and documents alone cannot express it — a partial
+// unique index would have to test document_types.code, which an index predicate
+// cannot reach. ON DELETE CASCADE because the pointer is meaningless without the
+// document it points at.
+export const contactOpeningBalances = pgTable(
+  "contact_opening_balances",
+  {
+    companyId: uuid("company_id").notNull().references(() => companies.id),
+    contactId: uuid("contact_id").notNull().references(() => contacts.id),
+    documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyId, table.contactId] }),
+    // Reading one party's statement resolves the opening balance by document id
+    // as well, when walking back from a ledger row to what it is.
+    unique().on(table.documentId),
+  ],
+);
 
+export const marketPurchaseStatusEnum = pgEnum("market_purchase_status", ["pending", "confirmed", "cancelled"]);
 export const marketPurchaseRequests = pgTable(
   "market_purchase_requests",
   {

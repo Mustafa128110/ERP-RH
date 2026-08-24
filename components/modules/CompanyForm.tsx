@@ -4,6 +4,7 @@ import { useActionState, useEffect } from "react";
 import { updateCompany, deleteCompany, createCompaniesBatch, type CompanyBatchRow } from "@/lib/actions/companies";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { optimistically } from "@/lib/optimistic-records";
 
 interface CompanyValues {
   name: string;
@@ -45,8 +46,23 @@ function Fields({ defaults }: { defaults?: CompanyValues }) {
   );
 }
 
-export function CompanyEditForm({ companyId, defaults, onDone }: { companyId: string; defaults: CompanyValues; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(updateCompany.bind(null, companyId), undefined);
+export function CompanyEditForm({
+  companyId,
+  defaults,
+  onDone,
+  onSaving,
+}: {
+  companyId: string;
+  defaults: CompanyValues;
+  onDone?: () => void;
+  // The list's hook: the row takes the change and the popup steps aside the moment
+  // Save is pressed. Optional — without it this form waits for the server and then
+  // closes, as it always did. No matching failure callback is needed: the popup's
+  // visibility comes from the list's pending set, which React clears when this
+  // action settles. See lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
+}) {
+  const [state, action, pending] = useActionState(optimistically(updateCompany.bind(null, companyId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -125,8 +141,17 @@ export function CompanyBatchAddDialog({ onClose, onDone }: { onClose: () => void
   );
 }
 
-export function DeleteCompanyButton({ companyId, onDone }: { companyId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteCompany, undefined);
+export function DeleteCompanyButton({
+  companyId,
+  onDone,
+  onDeleting,
+}: {
+  companyId: string;
+  onDone?: () => void;
+  onDeleting?: () => void;
+}) {
+  // Inside the action, so it runs after the confirm() below has had its say.
+  const [state, action, pending] = useActionState(optimistically(deleteCompany, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

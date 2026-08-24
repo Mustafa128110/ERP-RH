@@ -17,7 +17,7 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { adjustSettlementBalance, adjustSettlementBalancesBatch, type SettlementType } from "@/lib/actions/settlement";
 import { resolveExpenseCategoryId, resolveExpenseCategoryIds } from "@/lib/actions/resolve-refs";
-import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, getAvailableCheques, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
@@ -38,7 +38,7 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
   requirePermission(session, "expenses", "view");
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:expenses:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.expenses, `${session.userId}:expenses:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   const rows = await db
     .select({
@@ -202,6 +202,9 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
     });
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    // The accounts screen shows the balance this expense moved, and the cheque
+    // that paid it stops being available.
+    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({
@@ -258,6 +261,9 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
     });
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    // The accounts screen shows the balance this expense moved, and the cheque
+    // that paid it stops being available.
+    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({ action: "create", entity: "expense", summary: expenseCategoryName || "Expense", companyId: values.companyId, detail: `Amount ${values.amount}` });
@@ -319,6 +325,9 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
     if (companyChanged) return { error: "An expense can't be moved to another company. Delete it and enter it in the correct company." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    // The accounts screen shows the balance this expense moved, and the cheque
+    // that paid it stops being available.
+    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({ action: "update", entity: "expense", entityId: expenseId, summary: expenseCategoryName || "Expense", companyId: values.companyId, detail: `Amount ${values.amount}` });
@@ -358,6 +367,9 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
     if (missing) return { error: "Expense not found — it may already be cancelled." };
 
     invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    // The accounts screen shows the balance this expense moved, and the cheque
+    // that paid it stops being available.
+    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({ action: "cancel", entity: "expense", entityId: expenseId, summary: expenseId });

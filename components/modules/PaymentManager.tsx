@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
@@ -21,11 +21,13 @@ import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
 import type { ContactBalanceHint } from "@/lib/payment-constants";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
+import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import { useCachedOptions } from "@/lib/client-cache";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type PaymentDetail = NonNullable<Awaited<ReturnType<typeof getPayment>>>;
+type PaymentCheques = Awaited<ReturnType<typeof listChequesForPayments>>;
 
 interface PaymentRow {
   id: string;
@@ -55,6 +57,30 @@ const buildColumns = (): ColumnDef[] => [
   { key: "method", label: "Method" },
   { key: "company", label: "Company" },
 ];
+
+// What a payment row can honestly take from the form before the server has
+// answered — and it is only these two.
+//
+// `amount` and `paymentDate` are stored verbatim (`grandTotal: values.amount`,
+// `documentDate: values.paymentDate` in lib/actions/payments.ts), and they are
+// the same raw values the row builder below formats, so the amount and the date
+// change to exactly what was typed. A cheque payment posts no amount at all — it
+// settles for the cheque's own registered figure, resolved server-side — so that
+// key is simply absent and nothing is claimed about it.
+//
+// The contact is deliberately left alone even though the form posts one. An
+// unrecognised name becomes a *new* contact on save, so it has no id yet; and the
+// grouping key below is built from the contact id while the cell shows the name,
+// so moving one without the other would file the row under a party it doesn't
+// belong to. It waits for the payload.
+function typedIntoRow(formData: FormData): Partial<PaymentRow> {
+  const values: Partial<PaymentRow> = {};
+  const amount = formData.get("amount");
+  const paymentDate = formData.get("paymentDate");
+  if (typeof amount === "string" && amount !== "") values.grandTotal = amount;
+  if (typeof paymentDate === "string" && paymentDate !== "") values.documentDate = paymentDate;
+  return values;
+}
 
 
 export function PaymentManager({
@@ -101,6 +127,40 @@ export function PaymentManager({
   const [choosing, setChoosing] = useState<DayGroup<PaymentRow> | null>(null);
   const router = useRouter();
 
+  // The payments this list shows, which is the server's list plus whatever is in
+  // flight. Applied to the payments themselves rather than to the grouped rows
+  // below, so an edited amount re-totals its day line and a cancelled payment
+  // leaves the group — or takes the whole line with it if it was the only one.
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(payments, "id");
+
+  // Details already fetched, keyed by payment id. Opening one costs two round
+  // trips to a database 170ms away; a pointer resting on the row is enough notice
+  // to have made them already. Kept on a ref so warming never renders.
+  const warmed = useRef(new Map<string, { detail: PaymentDetail; cheques: PaymentCheques }>());
+  const warming = useRef(new Set<string>());
+
+  async function warm(id: string) {
+    if (warmed.current.has(id) || warming.current.has(id)) return;
+    warming.current.add(id);
+    try {
+      const [detail, cheques] = await Promise.all([getPayment(id), listChequesForPayments(id)]);
+      if (detail) warmed.current.set(id, { detail, cheques });
+    } catch {
+      // A failed warm is not a failure — the click will ask again, and if the
+      // network is genuinely gone that is where it belongs to be reported.
+    } finally {
+      warming.current.delete(id);
+    }
+  }
+
+  // Called from inside the form's own action when a save or a cancellation
+  // starts, and it is not housekeeping: the warm copy was taken before this
+  // write, so handing it to the next open would show the payment as it used to
+  // be — worse than the round trip it saves.
+  function forgetWarm(id: string) {
+    warmed.current.delete(id);
+  }
+
   function close() {
     setBatchOpen(false);
     setEditing(null);
@@ -108,11 +168,21 @@ export function PaymentManager({
   }
 
   async function openEdit(id: string) {
+    const ready = warmed.current.get(id);
+    if (ready) {
+      setChoosing(null);
+      setEditChequeOptions(ready.cheques);
+      setEditing(ready.detail);
+      return;
+    }
     setLoadingId(id);
     const [detail, cheques] = await Promise.all([getPayment(id), listChequesForPayments(id)]);
     setLoadingId(null);
     setChoosing(null);
     if (detail) {
+      // Worth keeping even though this open is already paid for: the same payment
+      // is often opened twice in a row while a correction is worked out.
+      warmed.current.set(id, { detail, cheques });
       setEditing(detail);
       setEditChequeOptions(cheques);
     }
@@ -122,12 +192,16 @@ export function PaymentManager({
   // "this party, this day, this much" instead of repeating the party three times
   // with nothing tying the amounts together.
   const groups = groupSameDay(
-    payments,
+    shown,
     (p) => (p.contactId ? `${p.companyId}|${p.contactId}|${p.documentDate}|${p.code}` : null),
     (p) => p.grandTotal,
   );
   const byRowId = new Map(groups.map((g) => [g.key, g]));
   const columns = buildColumns();
+
+  // A row stands for a group, and `pending` holds payment ids, so a line fades
+  // when any payment folded into it is in flight.
+  const pendingRowIds = pending.length === 0 ? pending : groups.filter((g) => g.members.some((m) => pending.includes(m.id))).map((g) => g.key);
 
   const rows: Row[] = groups.map(({ key, members, total }) => {
     const first = members[0];
@@ -159,7 +233,7 @@ export function PaymentManager({
     <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Payments"
-        subtitle={`${payments.length} payment(s)${payments.length !== groups.length ? ` on ${groups.length} line(s)` : ""}${filtered ? " matching" : ""}`}
+        subtitle={`${shown.length} payment(s)${shown.length !== groups.length ? ` on ${groups.length} line(s)` : ""}${filtered ? " matching" : ""}`}
       >
         {filters}
         <button
@@ -190,6 +264,16 @@ export function PaymentManager({
           if (group.members.length === 1) openEdit(group.members[0].id);
           else setChoosing(group);
         }}
+        // A line standing for several payments has no single record to warm, and
+        // fetching all of them on a hover would cost more than the wait it saves.
+        // Those are warmed from the chooser below instead, on the way past.
+        onRowIntent={(row) => {
+          const group = byRowId.get(String(row.id));
+          if (!group || group.members.length !== 1) return;
+          if (group.members[0].code === "PURCHASE_INVOICE") return;
+          void warm(group.members[0].id);
+        }}
+        pendingIds={pendingRowIds}
         emptyMessage={filtered ? "No payments match these filters." : "No payments yet."}
         searchPlaceholder="Search payments…"
       />
@@ -218,6 +302,8 @@ export function PaymentManager({
                 <button
                   type="button"
                   onClick={() => openEdit(p.id)}
+                  onPointerEnter={() => void warm(p.id)}
+                  onTouchStart={() => void warm(p.id)}
                   className="flex w-full items-baseline justify-between gap-4 border-b border-sand px-1 py-3 text-left hover:bg-brass-100"
                 >
                   <span className="text-ink">{p.number}</span>
@@ -235,7 +321,18 @@ export function PaymentManager({
       )}
 
       {editing && (
-        <Dialog title={editing.direction === "made" ? "Edit Payment Made" : "Edit Payment Received"} onClose={close}>
+        // Hidden rather than closed while this payment's write is in the air. The
+        // server may still have something to say — a cancellation that would put
+        // settled invoices back to outstanding is refused once, with the figures —
+        // and a hidden popup keeps that question and everything typed standing;
+        // a closed one would have thrown both away. `pending` empties when the
+        // action settles, so a refusal brings the popup straight back, and a
+        // success closes it for real from onDone.
+        <Dialog
+          title={editing.direction === "made" ? "Edit Payment Made" : "Edit Payment Received"}
+          onClose={close}
+          hidden={pending.includes(editing.id)}
+        >
           <div className="flex flex-col gap-4">
             <PaymentEditForm
               paymentId={editing.id}
@@ -247,9 +344,20 @@ export function PaymentManager({
               cashAccountOptions={cashAccountOptions}
               chequeOptions={editChequeOptions}
               onDone={close}
+              onSaving={(formData) => {
+                forgetWarm(editing.id);
+                patch(editing.id, typedIntoRow(formData));
+              }}
             />
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeletePaymentButton paymentId={editing.id} onDone={close} />
+              <DeletePaymentButton
+                paymentId={editing.id}
+                onDone={close}
+                onDeleting={() => {
+                  forgetWarm(editing.id);
+                  remove(editing.id);
+                }}
+              />
             </div>
           </div>
         </Dialog>

@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission } from "@/lib/auth/permissions";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 
@@ -36,6 +36,8 @@ export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateRe
 
     const created = await db.insert(brands).values(valid).returning({ id: brands.id, name: brands.name });
     invalidateLookups(CACHE.brands);
+    // The product list carries each item's brand name, so a rename changes it.
+    invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
     await recordAudit({ action: "create", entity: "brand", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -52,6 +54,8 @@ export async function updateBrand(brandId: string, _prevState: ActionResult | un
 
     await db.update(brands).set(values).where(eq(brands.id, brandId));
     invalidateLookups(CACHE.brands);
+    // The product list carries each item's brand name, so a rename changes it.
+    invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
     await recordAudit({ action: "update", entity: "brand", entityId: brandId, summary: values.name });
     return { success: true };
@@ -67,6 +71,8 @@ export async function deleteBrand(_prevState: ActionResult | undefined, formData
     await db.delete(brands).where(eq(brands.id, brandId));
 
     invalidateLookups(CACHE.brands);
+    // The product list carries each item's brand name, so a rename changes it.
+    invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
     await recordAudit({ action: "delete", entity: "brand", entityId: brandId, summary: brandId });
     return { success: true };

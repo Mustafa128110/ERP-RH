@@ -4,6 +4,7 @@ import { useActionState, useEffect } from "react";
 import { updateUnit, deleteUnit, createUnitsBatch, type UnitBatchRow } from "@/lib/actions/units";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { optimistically } from "@/lib/optimistic-records";
 
 interface UnitValues {
   name: string;
@@ -29,12 +30,19 @@ export function UnitEditForm({
   unitId,
   defaults,
   onDone,
+  onSaving,
 }: {
   unitId: string;
   defaults: UnitValues;
   onDone?: () => void;
+  // The list's hook: the row takes the change and the popup steps aside the moment
+  // Save is pressed. Optional — without it this form waits for the server and then
+  // closes, as it always did. No matching failure callback is needed: the popup's
+  // visibility comes from the list's pending set, which React clears when this
+  // action settles. See lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
 }) {
-  const [state, action, pending] = useActionState(updateUnit.bind(null, unitId), undefined);
+  const [state, action, pending] = useActionState(optimistically(updateUnit.bind(null, unitId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -98,8 +106,17 @@ export function UnitBatchAddDialog({
   );
 }
 
-export function DeleteUnitButton({ unitId, onDone }: { unitId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteUnit, undefined);
+export function DeleteUnitButton({
+  unitId,
+  onDone,
+  onDeleting,
+}: {
+  unitId: string;
+  onDone?: () => void;
+  onDeleting?: () => void;
+}) {
+  // Inside the action, so it runs after the confirm() below has had its say.
+  const [state, action, pending] = useActionState(optimistically(deleteUnit, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

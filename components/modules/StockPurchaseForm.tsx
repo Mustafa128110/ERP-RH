@@ -9,8 +9,9 @@ import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { landedUnitCost, money, perUnitShare, resolveAdjustment, round1, todayISO } from "@/lib/format";
 
-import { fieldClass, labelClass, labelTextClass, errorTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, confirmNoticeClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { inCompany } from "@/lib/contact-scope";
+import { optimistically } from "@/lib/optimistic-records";
 import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
@@ -105,6 +106,7 @@ export function StockPurchaseCreateForm({
   purchaseId,
   defaults,
   onDone,
+  onSaving,
 }: {
   companyOptions: Option[];
   supplierOptions: ScopedOption[];
@@ -121,6 +123,17 @@ export function StockPurchaseCreateForm({
   purchaseId?: string;
   defaults?: PurchaseDefaults;
   onDone: () => void;
+  // The list's hook, passed only when this form is editing an existing purchase:
+  // the row is marked in flight and the popup steps aside the moment Save is
+  // pressed. Called from inside the action below, which is the only place React
+  // accepts an optimistic update from.
+  //
+  // Nothing has to report a failure back. The list derives whether this popup is
+  // hidden from its own pending set, and React clears that when the action
+  // settles — so an error, or the question about payments to release, brings the
+  // popup back with every typed line and the question itself still standing. See
+  // lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
 }) {
   const isEdit = !!purchaseId;
   // The draft key is composed per render from the logged-in user — SessionSeed
@@ -128,22 +141,34 @@ export function StockPurchaseCreateForm({
   // already carries the scoped key.
   const userId = useClientUserId();
   const purchaseDraftKey = userId ? `${PURCHASE_DRAFT_KEY}:${userId}` : PURCHASE_DRAFT_KEY;
-  // One id per open form: sent with every submit, claimed by the server inside
-  // the same transaction as the purchase, so a replayed submit can't post twice.
-  const [operationId] = useState(() => crypto.randomUUID());
+  // One id per *save*, not per open form. It is claimed by the server inside the
+  // same transaction as the purchase, so a replayed submit can't post twice — but
+  // the claim outlives the save by a day, so "Next Purchase" has to stop sending
+  // the spent one. Re-minted on a confirmed success only; see the effect below.
+  const [operationId, setOperationId] = useState(() => crypto.randomUUID());
+  // Reducing a purchase below what has already been paid against it releases the
+  // difference onto the supplier's next outstanding bill. That is allowed — nobody
+  // has to go and unlink payments by hand first — but it is not done silently: the
+  // server refuses once, saying what would move, and this holds the acknowledgement
+  // for exactly the next submit. Set from the result rather than left sticky, so a
+  // second, different reduction is asked about again.
+  const [confirming, setConfirming] = useState(false);
   // Wrapped so a transport failure (response lost after the server committed)
   // becomes an inline error instead of throwing into the error boundary — that
   // would lose the form and its operation id, and a restored draft would mint a
   // fresh id and post the purchase twice. The form survives; a replayed Save is
   // refused server-side as a duplicate.
   const [state, action, pending] = useActionState(
-    async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
+    optimistically(async (prev: { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean } | undefined, formData: FormData) => {
+      let result: { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean };
       try {
-        return isEdit ? await updateStockPurchase(purchaseId!, prev, formData) : await createStockPurchase(prev, formData);
+        result = isEdit ? await updateStockPurchase(purchaseId!, prev, formData) : await createStockPurchase(prev, formData);
       } catch {
         return { error: TRANSPORT_ERROR_MESSAGE };
       }
-    },
+      setConfirming(!!result?.needsConfirmation);
+      return result;
+    }, onSaving),
     undefined,
   );
   // The saved lines plus one blank row: the grid only grows when its last row is
@@ -266,6 +291,21 @@ export function StockPurchaseCreateForm({
     if (!state?.success) return;
     // Saved — the local copy has nothing left to protect.
     clearDraft(purchaseDraftKey);
+    // This purchase's id is spent: the server holds the claim for a day, so
+    // sending it again would have the next purchase refused as a replay of this
+    // one — saying "already recorded" while writing nothing. A confirmed success
+    // is the one moment it is safe to mint a new one: the response came back, so
+    // there is no unknown outcome left for the old id to protect. A failure keeps
+    // it, on purpose — after a lost response the save may well have landed, and
+    // the spent id is what stops the retry from posting it twice.
+    //
+    // lib/document-entry.check.ts requires this re-mint to sit within 15 source
+    // lines of the `state?.success` guard above, so it can't be hoisted into a
+    // named handler. The synchronous call here is intentional: it fires exactly
+    // once per confirmed save, and there is no subsequent state change that would
+    // cascade from it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOperationId(crypto.randomUUID());
     if (startNext.current) {
       startNext.current = false;
       // The list behind the popup still has to learn about what was just saved;
@@ -390,6 +430,7 @@ export function StockPurchaseCreateForm({
     <>
     <form ref={formRef} action={action} className="flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
+      <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <input
         type="hidden"
         name="linesJson"
@@ -735,14 +776,16 @@ export function StockPurchaseCreateForm({
         </div>
       )}
 
-      {state?.error && <p className={errorTextClass}>{state.error}</p>}
+      {state?.error && (
+        <p className={state.needsConfirmation ? confirmNoticeClass : errorTextClass}>{state.error}</p>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
           disabled={pending}
-          className="h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
+          className={`h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40${confirming ? " ring-2 ring-warning" : ""}`}
         >
-          {pending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save" : "Create Purchase"}
+          {pending ? (isEdit ? "Saving…" : "Creating…") : confirming ? "Confirm & Save" : isEdit ? "Save" : "Create Purchase"}
         </button>
         {/* Both are submit buttons on the same form — the only difference is the
             flag set on the way down, which the save effect reads to decide
@@ -768,8 +811,39 @@ export function StockPurchaseCreateForm({
   );
 }
 
-export function DeleteStockPurchaseButton({ purchaseId, onDone }: { purchaseId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteStockPurchase, undefined);
+export function DeleteStockPurchaseButton({
+  purchaseId,
+  onDone,
+  onDeleting,
+}: {
+  purchaseId: string;
+  onDone?: () => void;
+  // The list drops the row when this is called, from inside the action below so it
+  // runs after the confirm() has had its say. Nothing reports a failure back: if
+  // the server answers with the question about payments to release instead of a
+  // cancellation, React reverts the removal as this action settles and the popup
+  // returns with that question on it. See lib/optimistic-records.ts.
+  onDeleting?: () => void;
+}) {
+  // Payments settled against this bill don't block the cancellation and don't have
+  // to be unlinked by hand — they are released onto whatever else is still owed to
+  // the supplier. But that is money moving between documents, so the server refuses
+  // once and says how much; that sentence becomes the question, and the next press
+  // sends the answer back. One submit only, so a later cancellation is asked again.
+  const [confirming, setConfirming] = useState(false);
+  const [state, action, pending] = useActionState(
+    optimistically(async (prev: { error?: string; success?: boolean; needsConfirmation?: boolean } | undefined, formData: FormData) => {
+      let result: { error?: string; success?: boolean; needsConfirmation?: boolean };
+      try {
+        result = await deleteStockPurchase(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+      setConfirming(!!result?.needsConfirmation);
+      return result;
+    }, onDeleting),
+    undefined,
+  );
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -780,14 +854,20 @@ export function DeleteStockPurchaseButton({ purchaseId, onDone }: { purchaseId: 
     <form
       action={action}
       onSubmit={(e) => {
+        // Already asked, and asked more precisely than this: the amber sentence
+        // beside the button names the payments that would move.
+        if (confirming) return;
         if (!confirm("Cancel this purchase? Its history will remain and its stock and accounting effects will be reversed.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="documentId" value={purchaseId} />
+      <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <button type="submit" disabled={pending} className="text-sm font-medium text-error hover:underline disabled:opacity-40">
-        {pending ? "Cancelling…" : "Cancel this purchase"}
+        {pending ? "Cancelling…" : confirming ? "Confirm cancellation" : "Cancel this purchase"}
       </button>
-      {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
+      {state?.error && (
+        <p className={`mt-2 ${state.needsConfirmation ? confirmNoticeClass : errorTextClass}`}>{state.error}</p>
+      )}
     </form>
   );
 }

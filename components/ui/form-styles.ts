@@ -64,3 +64,13 @@ export const quickAddInlineClass =
 // --- Inline messages ---------------------------------------------------------
 export const errorTextClass = "text-sm text-error";
 export const successTextClass = "text-sm text-success";
+
+// A refusal that is a question rather than a fault. Some writes are legal but
+// move money another document is already settled against — reducing an invoice
+// below what has been received against it, cancelling a bill a payment is sitting
+// on — and those wait for a yes instead of going ahead quietly. Amber, not red:
+// red is where a form has stopped, this is where it is asking. The server decides
+// (it holds the allocations) and says so with `needsConfirmation`; the form's only
+// job is to show the sentence and offer the button.
+export const confirmNoticeClass =
+  "rounded border border-warning/40 bg-warning-tint px-3 py-2 text-sm text-warning";

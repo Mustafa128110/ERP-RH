@@ -22,6 +22,16 @@ export function formatDate(value: string | Date): string {
   return `${String(day).padStart(2, "0")}-${String(month).padStart(2, "0")}-${year}`;
 }
 
+// A stamp with the clock on it, local time, seconds kept: two edits a minute
+// apart are the same minute on a date-only stamp, and "who changed it last" is
+// exactly the question an audit trail is read to answer. Same day-first ordering
+// as formatDate, so the two read as one format.
+export function formatTimestamp(value: string | Date): string {
+  const d = value instanceof Date ? value : new Date(value);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${formatDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // A column that mixes dates with words (a report's "Last Sold" can be the word
 // "Never") gets this: format only what is actually a date, pass everything else
 // through untouched.

@@ -29,11 +29,11 @@ export function UnitManager({ units }: { units: Unit[] }) {
       emptyMessage="No units yet."
       dialogTitle={(u) => u.name}
       renderBatchDialog={({ onClose, onDone }) => <UnitBatchAddDialog onClose={onClose} onDone={onDone} />}
-      renderEditBody={({ record, onDone }) => (
+      renderEditBody={({ record, onDone, onSaving, onDeleting }) => (
         <>
-          <UnitEditForm unitId={record.id} defaults={record} onDone={onDone} />
+          <UnitEditForm unitId={record.id} defaults={record} onDone={onDone} onSaving={onSaving} />
           <DangerZone>
-            <DeleteUnitButton unitId={record.id} onDone={onDone} />
+            <DeleteUnitButton unitId={record.id} onDone={onDone} onDeleting={onDeleting} />
           </DangerZone>
         </>
       )}

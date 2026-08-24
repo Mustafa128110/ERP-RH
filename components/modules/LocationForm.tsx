@@ -4,6 +4,7 @@ import { useActionState, useEffect } from "react";
 import { updateLocation, deleteLocation, createLocationsBatch, type LocationBatchRow } from "@/lib/actions/locations";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { optimistically } from "@/lib/optimistic-records";
 
 // Must match locationTypeEnum in lib/db/schema.ts.
 const LOCATION_TYPES = ["shop", "warehouse", "transit", "damaged", "reserved"] as const;
@@ -44,8 +45,23 @@ function Fields({ defaults }: { defaults?: LocationValues }) {
   );
 }
 
-export function LocationEditForm({ locationId, defaults, onDone }: { locationId: string; defaults: LocationValues; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(updateLocation.bind(null, locationId), undefined);
+export function LocationEditForm({
+  locationId,
+  defaults,
+  onDone,
+  onSaving,
+}: {
+  locationId: string;
+  defaults: LocationValues;
+  onDone?: () => void;
+  // The list's hook: the row takes the change and the popup steps aside the moment
+  // Save is pressed. Optional — without it this form waits for the server and then
+  // closes, as it always did. No matching failure callback is needed: the popup's
+  // visibility comes from the list's pending set, which React clears when this
+  // action settles. See lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
+}) {
+  const [state, action, pending] = useActionState(optimistically(updateLocation.bind(null, locationId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -121,8 +137,17 @@ export function LocationBatchAddDialog({
   );
 }
 
-export function DeleteLocationButton({ locationId, onDone }: { locationId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteLocation, undefined);
+export function DeleteLocationButton({
+  locationId,
+  onDone,
+  onDeleting,
+}: {
+  locationId: string;
+  onDone?: () => void;
+  onDeleting?: () => void;
+}) {
+  // Inside the action, so it runs after the confirm() below has had its say.
+  const [state, action, pending] = useActionState(optimistically(deleteLocation, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

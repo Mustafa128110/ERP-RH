@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   createProductsBatch,
   getProductsForEdit,
@@ -19,7 +19,7 @@ import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { CategoryBatchAddDialog } from "@/components/modules/CategoryForm";
 import { BrandBatchAddDialog } from "@/components/modules/BrandForm";
-import { errorTextClass, inputClass, labelClass, labelTextClass } from "@/components/ui/form-styles";
+import { errorTextClass, inputClass, labelClass, labelTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION, locationFormValue } from "@/lib/location-constants";
 import { money, qty, todayISO } from "@/lib/format";
@@ -172,6 +172,8 @@ export function ProductsBatchEditDialog({
   brandOptions,
   onClose,
   onDone,
+  onSaving,
+  hidden,
 }: {
   itemIds: string[];
   // Already loaded by the products page for the add dialog — no reason to fetch
@@ -181,11 +183,28 @@ export function ProductsBatchEditDialog({
   brandOptions: Option[];
   onClose: () => void;
   onDone: () => void;
+  // The list's hook: the ticked rows take what was typed and this grid steps
+  // aside on the press, rather than after one round trip for every product in
+  // it. Only rows that already exist are reported — a row added in this grid
+  // creates a product and has no id until the server makes one.
+  //
+  // Nothing reports a failure back. The list holds these as optimistic state
+  // made inside the transition below, so React puts the stored values back —
+  // and brings this grid out of hiding with every typed cell still in it — the
+  // moment that transition ends without a save having happened.
+  onSaving?: (edits: { id: string; values: Record<string, string> }[]) => void;
+  // Set by the list while this batch is in flight. The grid goes to
+  // `display: none` rather than closing, so an error keeps every typed cell.
+  hidden?: boolean;
 }) {
   const [data, setData] = useState<ProductEditData | null>(null);
   const [rows, setRows] = useState<EditRow[]>([]);
   const [loadError, setLoadError] = useState(false);
-  const [pending, setPending] = useState(false);
+  // A transition rather than a boolean: React only honours an optimistic update
+  // made inside one, and Save here is a plain function rather than a form
+  // action, so the transition has to be opened by hand. It stays pending — and
+  // the list's optimistic rows stay applied — until the async callback returns.
+  const [pending, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
 
@@ -244,38 +263,81 @@ export function ProductsBatchEditDialog({
     setRows((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function submit() {
-    setPending(true);
+  // What a product row can honestly take from this grid before the server has
+  // answered: the four cells the list actually shows. The rates are read-only
+  // here, and the stock figures are recomputed from the documents this save
+  // writes, so neither is guessed at.
+  //
+  // A row added in this grid is left out — it creates a product and has no id
+  // until the server makes one, so there is no row in the list for it to move.
+  //
+  // Category and brand carry the typed text rather than the picked id: an
+  // unrecognised name becomes a *new* category or brand on save, and the text is
+  // what the cell shows either way. The company comes from the option list, and
+  // only when the id resolves — an unresolvable one would blank a cell that was
+  // right.
+  function typedIntoRows() {
+    return rows
+      .filter((r) => r.id)
+      .map((r) => {
+        const values: Record<string, string> = {
+          name: r.name,
+          sku: r.sku,
+          category: r.category.text,
+          brand: r.brand.text,
+        };
+        const company = companyOptions.find((c) => c.id === r.companyId)?.name;
+        if (company) values.company = company;
+        return { id: r.id, values };
+      });
+  }
+
+  function submit() {
     setError(null);
-    const result = await updateProductsBatch(
-      { mode, locationId, reason, documentDate },
-      rows.map((r) => ({
-        id: r.id,
-        companyId: r.companyId,
-        name: r.name,
-        sku: r.sku,
-        urduName: r.urduName,
-        categoryId: r.category.id,
-        categoryName: r.category.text,
-        brandId: r.brand.id,
-        brandName: r.brand.text,
-        taxable: r.taxable,
-        isActive: r.isActive,
-        unitId: r.unit.id,
-        unitName: r.unit.text,
-        supplierId: r.supplier.id,
-        supplierName: r.supplier.text,
-        purchaseQty: r.purchaseQty,
-        purchaseRate: r.purchaseRate,
-        targetQty: r.targetQty,
-      })),
-    );
-    setPending(false);
-    if (result.error) {
-      setError(result.error);
-      return;
-    }
-    onDone();
+    startSaving(async () => {
+      // First thing inside the transition, because React only honours an
+      // optimistic update made in one. The ticked rows take the typed cells and
+      // this grid steps out of the way now, on the press, rather than after a
+      // round trip that covers every product in the batch.
+      onSaving?.(typedIntoRows());
+      let result: { error?: string };
+      try {
+        result = await updateProductsBatch(
+          { mode, locationId, reason, documentDate },
+          rows.map((r) => ({
+            id: r.id,
+            companyId: r.companyId,
+            name: r.name,
+            sku: r.sku,
+            urduName: r.urduName,
+            categoryId: r.category.id,
+            categoryName: r.category.text,
+            brandId: r.brand.id,
+            brandName: r.brand.text,
+            taxable: r.taxable,
+            isActive: r.isActive,
+            unitId: r.unit.id,
+            unitName: r.unit.text,
+            supplierId: r.supplier.id,
+            supplierName: r.supplier.text,
+            purchaseQty: r.purchaseQty,
+            purchaseRate: r.purchaseRate,
+            targetQty: r.targetQty,
+          })),
+        );
+      } catch {
+        // Thrown rather than returned means the request never arrived. Reported
+        // here, in the grid that is about to come back out of hiding with every
+        // typed cell still in it, rather than escaping this transition and
+        // taking the whole grid down with it.
+        result = { error: TRANSPORT_ERROR_MESSAGE };
+      }
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      onDone();
+    });
   }
 
   // What's on hand where the adjustment is aimed, so "set to 12" is a decision
@@ -313,6 +375,7 @@ export function ProductsBatchEditDialog({
       title={`Edit ${rows.length || itemIds.length} product${(rows.length || itemIds.length) === 1 ? "" : "s"}`}
       onClose={onClose}
       size="wide"
+      hidden={hidden}
       footer={
         <div className="flex flex-wrap items-center justify-between gap-3">
           <button type="button" onClick={addRow} disabled={!data} className="text-sm font-medium text-navy-800 hover:underline disabled:opacity-40">

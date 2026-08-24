@@ -17,7 +17,7 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { averageCosts } from "@/lib/queries/stock-cost";
@@ -298,6 +298,9 @@ async function writeTransferLines(
 // lookup lists and every page reading stock are stale.
 function invalidateTransferViews() {
   invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.cheques);
+  // Moving stock changes on-hand per location, and the product list carries
+  // on-hand beside each rate.
+  invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
   revalidatePath("/inventory/stock-transfers");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");

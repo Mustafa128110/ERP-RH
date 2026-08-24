@@ -26,11 +26,11 @@ export function BrandManager({ brands }: { brands: Brand[] }) {
       emptyMessage="No brands yet."
       dialogTitle={(b) => b.name}
       renderBatchDialog={({ onClose, onDone }) => <BrandBatchAddDialog onClose={onClose} onDone={onDone} />}
-      renderEditBody={({ record, onDone }) => (
+      renderEditBody={({ record, onDone, onSaving, onDeleting }) => (
         <>
-          <BrandEditForm brandId={record.id} defaults={record} onDone={onDone} />
+          <BrandEditForm brandId={record.id} defaults={record} onDone={onDone} onSaving={onSaving} />
           <DangerZone>
-            <DeleteBrandButton brandId={record.id} onDone={onDone} />
+            <DeleteBrandButton brandId={record.id} onDone={onDone} onDeleting={onDeleting} />
           </DangerZone>
         </>
       )}

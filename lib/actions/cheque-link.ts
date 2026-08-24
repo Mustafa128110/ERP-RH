@@ -3,7 +3,8 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import { chequeRegister } from "@/lib/db/schema";
 import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
 import { invalidate } from "@/lib/cache";
-import { CACHE } from "@/lib/cache-keys";
+import { CACHE, READ_DOMAIN } from "@/lib/cache-keys";
+import { invalidateReads } from "@/lib/read-cache";
 
 // Settling with a cheque is the one settlement that consumes a shared,
 // exhaustible resource: the register's cheques are offered unlinked, but the
@@ -47,4 +48,10 @@ export async function linkCheque(tx: Tx, chequeId: string, documentId: string, d
     .returning({ id: chequeRegister.id });
   if (linked.length === 0) throw new ChequeUnavailableError();
   invalidate(CACHE.cheques);
+  // The three lists that name the cheque settling a row. Dropped from inside the
+  // caller's transaction, like the lookup above: if the commit then fails, a
+  // cache entry was thrown away for nothing, which costs one re-read. Every
+  // caller invalidates the same domains again after its commit, which is what
+  // makes a reader that repopulated mid-transaction correct anyway.
+  invalidateReads(READ_DOMAIN.payments, READ_DOMAIN.expenses, READ_DOMAIN.accounts);
 }

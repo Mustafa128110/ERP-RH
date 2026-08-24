@@ -56,6 +56,7 @@ export function Dialog({
   children,
   size = "form",
   footer,
+  hidden,
 }: {
   onClose: () => void;
   title: string;
@@ -64,6 +65,17 @@ export function Dialog({
   // Pinned below the scroll area, so Save/Cancel stay reachable without
   // scrolling to the bottom of a long form.
   footer?: React.ReactNode;
+  // Out of the way, but still mounted — display:none rather than unmounted.
+  //
+  // A list screen hides its edit dialog the moment Save is pressed, so the row
+  // behind it can show the change while the write is still in the air
+  // (lib/use-optimistic-records). If the server then has something to say —
+  // "that name is taken", or a request to confirm releasing settled money — the
+  // dialog comes back, and it has to come back with everything still in it.
+  // Unmounting would drop the typed values, the action's result, and the Confirm
+  // state that goes with it; keeping the DOM alive behind display:none loses
+  // nothing, which is the whole reason this isn't just an early close.
+  hidden?: boolean;
 }) {
   // Kept in a ref so the registration effect can run once (empty deps) without
   // going stale when the parent passes a new onClose each render.
@@ -92,7 +104,9 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-scrim/50 backdrop-blur-sm sm:items-center sm:p-6"
+      className={`fixed inset-0 z-50 flex items-stretch justify-center bg-scrim/50 backdrop-blur-sm sm:items-center sm:p-6 ${
+        hidden ? "hidden" : ""
+      }`}
       onClick={onClose}
       role="presentation"
     >

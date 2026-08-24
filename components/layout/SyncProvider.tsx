@@ -21,6 +21,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import { useOffline } from "next/offline";
 import { useClientUserId } from "@/lib/client-user";
 import {
   createLocalOutboxStore,
@@ -44,8 +45,9 @@ import { invalidateClientCache } from "@/lib/client-cache";
 import { noteOfflineCacheInvalidated } from "@/lib/offline-readiness";
 
 type SyncContextValue = {
-  // True when the browser believes it has a network connection. Advisory only —
-  // the drain treats an actual submit failure as authoritative.
+  // True when neither connectivity signal says otherwise: the browser reports an
+  // interface, and Next's own detection has not seen a request fail. Advisory
+  // only — the drain treats an actual submit failure as authoritative.
   online: boolean;
   // The queue for the current user, in queue order (oldest first).
   entries: OutboxEntry[];
@@ -104,10 +106,105 @@ function getOnlineSnapshot() {
 
 const getOnlineServerSnapshot = () => true;
 
+// The drain's own deadline on a single submit.
+//
+// With experimental.useOffline enabled a Server Action called with no usable
+// network no longer rejects — Next holds it pending and re-runs it when the
+// connection returns. For a form the user is watching that is exactly right.
+// The drain is not a form: it marks the entry `syncing`, holds the tray's
+// spinner, and its `syncingRef` guard means every later drain queues behind the
+// one promise. A submit that never settles would wedge the queue with no
+// backoff and no FAILED surfacing — the queue would look busy forever.
+//
+// So the drain keeps a deadline of its own and treats the overrun as transient,
+// which is the outcome it already knows how to handle: the entry stays pending,
+// backoff retries it, and reconnecting restarts the drain. Abandoning an
+// in-flight attempt is safe because the entry keeps its operation id — whichever
+// copy reaches the server first commits, and the other is refused as a duplicate,
+// which drainOutbox treats as confirmed. 30s is far longer than any real round
+// trip to this database and far shorter than "stuck".
+const SUBMIT_DEADLINE_MS = 30_000;
+
+function withDeadline(work: Promise<SubmitOutcome>): Promise<SubmitOutcome> {
+  return new Promise<SubmitOutcome>((resolve) => {
+    const timer = setTimeout(() => resolve({ status: "transient" }), SUBMIT_DEADLINE_MS);
+    const settle = (outcome: SubmitOutcome) => {
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    // sendEntry catches its own failures, so the rejection path is belt and
+    // braces — but an unhandled rejection here would be a queue that never moves.
+    work.then(settle, () => settle({ status: "transient" }));
+  });
+}
+
+// Maps an entry to the server call its kind implies. The entry's id is the
+// operation id in every branch, which is what makes the whole queue exactly-once
+// even when a response is lost. Module scope on purpose: it closes over nothing
+// but the imported actions, so it needs no identity churn per render.
+async function sendEntry(entry: OutboxEntry): Promise<SubmitOutcome> {
+  try {
+    if (entry.kind === "quotation") {
+      const p = entry.payload as {
+        companyId: string;
+        contactId: string;
+        contactName: string;
+        documentDate: string;
+        validUntil: string;
+        discountTotal: string;
+        taxTotal: string;
+        shippingTotal: string;
+        linesJson: string;
+      };
+      const formData = new FormData();
+      formData.set("operationId", entry.id);
+      formData.set("companyId", p.companyId);
+      formData.set("contactId", p.contactId);
+      formData.set("contactName", p.contactName);
+      formData.set("documentDate", p.documentDate);
+      formData.set("validUntil", p.validUntil);
+      formData.set("discountTotal", p.discountTotal);
+      formData.set("taxTotal", p.taxTotal);
+      formData.set("shippingTotal", p.shippingTotal);
+      formData.set("linesJson", p.linesJson);
+      const result = await createQuotation(undefined, formData);
+      return result.error ? { status: "failed", error: result.error } : { status: "confirmed" };
+    }
+    if (entry.kind === "expense") {
+      const result = await createExpensesBatch(entry.payload as ExpenseBatchRow[], entry.id);
+      return result.error ? { status: "failed", error: result.error } : { status: "confirmed" };
+    }
+    const result = await createPaymentsBatch(entry.payload as PaymentBatchRow[], entry.id);
+    return result.error ? { status: "failed", error: result.error } : { status: "confirmed" };
+  } catch {
+    // The request never got a definitive answer (network, server hiccup).
+    // The entry stays pending; the caller retries with backoff or on the
+    // next `online` event. Never claim failure, never claim success.
+    return { status: "transient" };
+  }
+}
+
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const userId = useClientUserId();
   const router = useRouter();
-  const online = useSyncExternalStore(subscribeOnline, getOnlineSnapshot, getOnlineServerSnapshot);
+  // Two connectivity signals, both read pessimistically.
+  //
+  // navigator.onLine is accurate the instant the page hydrates — including a
+  // cold open with the interface already down, where no `offline` event ever
+  // fires because nothing transitioned — but it reports true for a device on
+  // WiFi with no upstream, which is the shop's actual failure mode.
+  //
+  // useOffline() catches exactly that case: it flips on a failed navigation,
+  // prefetch or Server Action, not just on the browser event. But it starts as
+  // false (server render and first hydration frame) and only becomes accurate
+  // once something has been attempted.
+  //
+  // Neither is sufficient alone, so offline-according-to-either is the honest
+  // answer. Both hooks are called unconditionally — `a && !b` would short-circuit
+  // past one of them.
+  const browserOnline = useSyncExternalStore(subscribeOnline, getOnlineSnapshot, getOnlineServerSnapshot);
+  const detectedOffline = useOffline();
+  const online = browserOnline && !detectedOffline;
   const [entries, setEntries] = useState<OutboxEntry[]>([]);
   const [cancelled, setCancelled] = useState<CancelledEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -176,53 +273,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // --- The drain -------------------------------------------------------------
-  // submit maps an entry to the server call its kind implies. The entry's id is
-  // the operation id in every branch, which is what makes the whole queue
-  // exactly-once even when a response is lost.
-  const submit = useCallback(
-    async (entry: OutboxEntry): Promise<SubmitOutcome> => {
-      try {
-        if (entry.kind === "quotation") {
-          const p = entry.payload as {
-            companyId: string;
-            contactId: string;
-            contactName: string;
-            documentDate: string;
-            validUntil: string;
-            discountTotal: string;
-            taxTotal: string;
-            shippingTotal: string;
-            linesJson: string;
-          };
-          const formData = new FormData();
-          formData.set("operationId", entry.id);
-          formData.set("companyId", p.companyId);
-          formData.set("contactId", p.contactId);
-          formData.set("contactName", p.contactName);
-          formData.set("documentDate", p.documentDate);
-          formData.set("validUntil", p.validUntil);
-          formData.set("discountTotal", p.discountTotal);
-          formData.set("taxTotal", p.taxTotal);
-          formData.set("shippingTotal", p.shippingTotal);
-          formData.set("linesJson", p.linesJson);
-          const result = await createQuotation(undefined, formData);
-          return result.error ? { status: "failed", error: result.error } : { status: "confirmed" };
-        }
-        if (entry.kind === "expense") {
-          const result = await createExpensesBatch(entry.payload as ExpenseBatchRow[], entry.id);
-          return result.error ? { status: "failed", error: result.error } : { status: "confirmed" };
-        }
-        const result = await createPaymentsBatch(entry.payload as PaymentBatchRow[], entry.id);
-        return result.error ? { status: "failed", error: result.error } : { status: "confirmed" };
-      } catch {
-        // The request never got a definitive answer (network, server hiccup).
-        // The entry stays pending; the caller retries with backoff or on the
-        // next `online` event. Never claim failure, never claim success.
-        return { status: "transient" };
-      }
-    },
-    [],
-  );
+  // sendEntry (module scope, above) makes the call; withDeadline stops a submit
+  // that Next is holding pending for a returning network from wedging the queue.
+  const submit = useCallback((entry: OutboxEntry): Promise<SubmitOutcome> => withDeadline(sendEntry(entry)), []);
 
   // The drain reads the store through refs only, so it can be a stable callback
   // and effects may call it without re-subscribing every render.
@@ -308,6 +361,21 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [runDrain]);
+
+  // The other half of the reconnect signal. The `online` event above only fires
+  // when the network interface itself comes back; on WiFi with a dead upstream
+  // it never fires at all, and the queue used to sit there until a backoff timer
+  // happened to come round (or ran out of attempts and went FAILED). useOffline()
+  // flips back to false when Next's own connectivity check succeeds, which is the
+  // first honest moment to try again.
+  //
+  // Note this only ever *starts* a drain. The drain's own gate stays on
+  // navigator.onLine: if Next's detection were ever wrong in the pessimistic
+  // direction, a queue that refused to drain would be worse than one that tries
+  // and backs off.
+  useEffect(() => {
+    if (online) void runDrain();
+  }, [online, runDrain]);
 
   // On mount (a reload with a queue waiting) and whenever the user id resolves,
   // try to drain. Reload during an outage leaves the queue exactly where it

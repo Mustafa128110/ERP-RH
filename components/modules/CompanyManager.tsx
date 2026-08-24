@@ -40,11 +40,11 @@ export function CompanyManager({ companies }: { companies: Company[] }) {
       emptyMessage="No companies yet."
       dialogTitle={(c) => c.name}
       renderBatchDialog={({ onClose, onDone }) => <CompanyBatchAddDialog onClose={onClose} onDone={onDone} />}
-      renderEditBody={({ record, onDone }) => (
+      renderEditBody={({ record, onDone, onSaving, onDeleting }) => (
         <>
-          <CompanyEditForm companyId={record.id} defaults={record} onDone={onDone} />
+          <CompanyEditForm companyId={record.id} defaults={record} onDone={onDone} onSaving={onSaving} />
           <DangerZone>
-            <DeleteCompanyButton companyId={record.id} onDone={onDone} />
+            <DeleteCompanyButton companyId={record.id} onDone={onDone} onDeleting={onDeleting} />
           </DangerZone>
         </>
       )}

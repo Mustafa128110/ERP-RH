@@ -4,6 +4,7 @@ import { useActionState, useEffect } from "react";
 import { updateBrand, deleteBrand, createBrandsBatch, type BrandBatchRow } from "@/lib/actions/brands";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { optimistically } from "@/lib/optimistic-records";
 
 // Brands are global reference data — no company scope, no company field.
 interface BrandValues {
@@ -21,8 +22,27 @@ function Fields({ defaults }: { defaults?: BrandValues }) {
   );
 }
 
-export function BrandEditForm({ brandId, defaults, onDone }: { brandId: string; defaults: BrandValues; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(updateBrand.bind(null, brandId), undefined);
+export function BrandEditForm({
+  brandId,
+  defaults,
+  onDone,
+  onSaving,
+}: {
+  brandId: string;
+  defaults: BrandValues;
+  onDone?: () => void;
+  // The list's hook, optional. Given it, the row changes and the popup steps aside
+  // the moment Save is pressed; without it this form waits for the server and then
+  // closes, exactly as it always did. See lib/optimistic-records.ts —
+  // `optimistically` is what puts the update inside the action, which is the only
+  // place React will accept it.
+  //
+  // There is no matching failure callback: the popup's visibility comes from the
+  // list's pending set, and React clears that when this action settles — so an
+  // error, or a request to confirm, brings the popup back on its own.
+  onSaving?: (formData: FormData) => void;
+}) {
+  const [state, action, pending] = useActionState(optimistically(updateBrand.bind(null, brandId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -79,8 +99,19 @@ export function BrandBatchAddDialog({
   );
 }
 
-export function DeleteBrandButton({ brandId, onDone }: { brandId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteBrand, undefined);
+export function DeleteBrandButton({
+  brandId,
+  onDone,
+  onDeleting,
+}: {
+  brandId: string;
+  onDone?: () => void;
+  onDeleting?: () => void;
+}) {
+  // onDeleting runs inside the action, which is after the confirm() below has had
+  // its say: cancelling the prompt prevents the submit, so the action never runs
+  // and the row never moves.
+  const [state, action, pending] = useActionState(optimistically(deleteBrand, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

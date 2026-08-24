@@ -39,8 +39,12 @@ import {
   getTaxes,
   getUnits,
   invalidateLookups,
+  invalidateReads,
+  READ_DOMAIN,
 } from "@/lib/queries/lookups";
 import { resolveContactId, resolveExpenseCategoryId, resolveItemIds, resolveLocationId, resolveUnitIds } from "@/lib/actions/resolve-refs";
+import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment-allocation";
+import { changeSummary } from "@/lib/audit-constants";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { inCompany } from "@/lib/contact-scope";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
@@ -54,6 +58,19 @@ import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/
 import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { settingsForCompanies } from "@/lib/queries/settings";
+
+// The buying-side mirror of sales.ts. `payments` is in the set because
+// listPayments takes PURCHASE_INVOICE rows too — a delivery ticked "paid" is
+// money out — and `sales` is absent because nothing here names SALES_INVOICE.
+const READS = [
+  READ_DOMAIN.purchases,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.products,
+  READ_DOMAIN.stock,
+  READ_DOMAIN.expenses,
+  READ_DOMAIN.accounts,
+] as const;
 
 export interface StockPurchaseItemRow {
   itemName: string;
@@ -76,7 +93,7 @@ export async function listStockPurchases(companyId?: string) {
   const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:purchases:${cacheScope}:${stableReadKey(companyId)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.purchases, `${session.userId}:purchases:${cacheScope}:${stableReadKey(companyId)}`, async () => {
 
   // Same shape as listSales: selecting lines by document type rather than by a
   // list of ids drops the dependency between the two queries, so they overlap
@@ -576,6 +593,12 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           userId: session.userId,
         });
       }
+
+      // A supplier we have paid ahead of has an advance standing on the account.
+      // This bill is something for it to settle against, so the queue is walked
+      // again now rather than leaving a new bill reading "outstanding" beside a
+      // payment with nowhere to go.
+      await recomputeParty(tx, companyId, resolvedContactId);
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
@@ -591,6 +614,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -685,6 +709,8 @@ export async function updateStockPurchase(
       number: documents.number,
       companyId: documents.companyId,
       documentTypeId: documents.documentTypeId,
+      contactId: documents.contactId,
+      documentDate: documents.documentDate,
       isPaid: documents.isPaid,
       grandTotal: documents.grandTotal,
       bankAccountId: documents.bankAccountId,
@@ -695,12 +721,19 @@ export async function updateStockPurchase(
     .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
-  const [allocation] = await db
-    .select({ id: paymentAllocations.id })
+  // Allocated payments no longer block the edit. They are released inside the
+  // transaction and FIFO is rebuilt for the supplier afterwards, so an edit moves
+  // the allocations rather than requiring them to be unpicked by hand first.
+  //
+  // The one case that needs a decision is an edit that leaves less room than is
+  // already settled: the excess has to go somewhere, and where it goes is the
+  // supplier's next outstanding bill. The caller lists the affected payments
+  // (previewLedgerRowEdit) and sends `confirmAllocations` back.
+  const [allocated] = await db
+    .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
     .from(paymentAllocations)
-    .where(eq(paymentAllocations.invoiceDocumentId, documentId))
-    .limit(1);
-  if (allocation) return { error: "This purchase has FIFO payments allocated to it. Cancel or edit those payments before editing the purchase." };
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId));
+  const allocatedAmount = Number(allocated?.amount ?? 0);
   if (existingDoc.companyId !== companyId) return { error: "A posted purchase can't be moved to another company. Delete it and enter it in the correct company." };
   const [documentType] = await db.select().from(documentTypes).where(eq(documentTypes.id, existingDoc.documentTypeId)).limit(1);
 
@@ -712,6 +745,18 @@ export async function updateStockPurchase(
   const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
   const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
   if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
+  // How much room the payables queue will have for this bill after the save: a
+  // purchase marked paid settles at its own counter and leaves the queue
+  // altogether, an unpaid one offers the goods portion (the freight has already
+  // gone out as an expense). Anything settled beyond that has to be released.
+  const settleableAfterSave = isPaid ? 0 : goodsTotal;
+  const releasedByEdit = Number((allocatedAmount - settleableAfterSave).toFixed(2));
+  if (releasedByEdit > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
+    return {
+      needsConfirmation: true,
+      error: `This purchase already has ${allocatedAmount.toFixed(2)} settled against it, and the new total leaves room for less. Confirm the change to release ${releasedByEdit.toFixed(2)} to the supplier's next outstanding bill.`,
+    };
+  }
   let vanishedDuringSave = false;
 
   await db.transaction(async (tx) => {
@@ -736,6 +781,12 @@ export async function updateStockPurchase(
       .where(eq(chequeRegister.documentId, documentId))
       .limit(1)
       .for("update");
+    // Hand back the allocated payments before paid_amount is rewritten below.
+    // Unlike the sales side this update *sets* paid_amount rather than adding to
+    // it, so leaving the allocations in place would leave payment_allocations rows
+    // pointing at money the new paid_amount no longer accounts for. The recompute
+    // at the end of the transaction puts back whatever still fits.
+    await releaseInvoiceAllocations(tx, [documentId]);
     // The freight expense from this purchase's last save, if any. A merge can
     // leave several (the losers' expenses travel to the survivor), so every
     // linked row is reversed and dropped, and one new expense is written for
@@ -877,6 +928,16 @@ export async function updateStockPurchase(
         userId: session.userId,
       });
     }
+
+    // Rebuild the payables queue for this supplier from the oldest bill forward.
+    // The edit may have changed this bill's amount or its date, either of which
+    // moves its position, so the payments are walked again rather than patched.
+    await recomputeParty(tx, companyId, resolvedContactId);
+    // Moved to a different supplier: the one it left has a bill fewer, so its
+    // payments need re-walking too.
+    if (existingDoc.contactId && existingDoc.contactId !== resolvedContactId) {
+      await recomputeParty(tx, existingDoc.companyId, existingDoc.contactId);
+    }
   });
   if (vanishedDuringSave) return { error: "Purchase not found — it may already have been deleted." };
 
@@ -886,12 +947,25 @@ export async function updateStockPurchase(
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
   revalidatePath("/ledger");
   revalidatePath("/expenses");
-  await recordAudit({ action: "update", entity: "purchase", entityId: documentId, summary: existingDoc.number, companyId, detail: `Total ${grandTotal}` });
+  await recordAudit({
+    action: "update",
+    entity: "purchase",
+    entityId: documentId,
+    summary: existingDoc.number,
+    companyId,
+    detail: changeSummary([
+      ["Total", existingDoc.grandTotal, grandTotal.toFixed(2)],
+      ["Date", existingDoc.documentDate, documentDate],
+      ["Paid", existingDoc.isPaid ? "yes" : "no", isPaid ? "yes" : "no"],
+      ["Supplier", existingDoc.contactId, contactId || contactName],
+    ]) || `Total ${grandTotal}`,
+  });
   return { success: true };
   });
 }
@@ -909,6 +983,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     .select({
       number: documents.number,
       companyId: documents.companyId,
+      contactId: documents.contactId,
       isPaid: documents.isPaid,
       grandTotal: documents.grandTotal,
       bankAccountId: documents.bankAccountId,
@@ -919,12 +994,18 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
-  const [allocation] = await db
-    .select({ id: paymentAllocations.id })
+  // Allocated payments are released and re-walked rather than blocking the
+  // cancellation — see the same change in updateStockPurchase. The confirmation is
+  // required because the payments move to other bills, which is not something to
+  // do behind the user's back.
+  const [allocated] = await db
+    .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
     .from(paymentAllocations)
-    .where(eq(paymentAllocations.invoiceDocumentId, documentId))
-    .limit(1);
-  if (allocation) return { error: "This purchase has FIFO payments allocated to it. Cancel or edit those payments before cancelling the purchase." };
+    .where(eq(paymentAllocations.invoiceDocumentId, documentId));
+  const allocatedAmount = Number(allocated?.amount ?? 0);
+  if (allocatedAmount > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
+    return { needsConfirmation: true, error: `This purchase has ${allocatedAmount.toFixed(2)} of payments settled against it. Confirm the cancellation to release them to the supplier's other outstanding bills.` };
+  }
   requirePermission(session, "purchases", "delete", { companyId: existingDoc.companyId });
   let vanishedDuringDelete = false;
 
@@ -961,6 +1042,12 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
         .from(expenses)
         .where(eq(expenses.documentId, documentId));
       const oldShippingPaid = round1(linkedExpenses.reduce((sum, e) => sum + Number(e.amount), 0));
+      // Give the allocated payments back before the settlement reversal below.
+      // payment_allocations.invoice_document_id is ON DELETE RESTRICT, so a bill
+      // with allocations could not be removed anyway — but the reason to release
+      // first is that those payments are separate posted documents which have to
+      // survive this cancellation and find another bill.
+      await releaseInvoiceAllocations(tx, [documentId]);
       // Same rule as update: the old settlement covered the goods only when a
       // freight expense was linked (post-change data), the whole total before.
       if (lockedDoc.isPaid) {
@@ -1012,6 +1099,10 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
         .update(documents)
         .set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() })
         .where(eq(documents.id, documentId));
+      // The bill has left the payables queue, so every payment made to this
+      // supplier is walked again: what was sitting on this bill moves onto the
+      // next outstanding one, and any surplus stands as an advance.
+      await recomputeParty(tx, existingDoc.companyId, existingDoc.contactId);
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't delete — this purchase is still referenced elsewhere.") };
@@ -1024,6 +1115,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -1035,7 +1127,9 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     entityId: documentId,
     summary: existingDoc.number,
     companyId: existingDoc.companyId,
-    detail: `Total ${existingDoc.grandTotal}`,
+    detail: allocatedAmount > 0
+      ? `Total ${existingDoc.grandTotal}; released ${allocatedAmount.toFixed(2)} of settled payments`
+      : `Total ${existingDoc.grandTotal}`,
   });
   return { success: true };
   });
@@ -1263,6 +1357,7 @@ export async function mergeStockPurchases(
   // Same set of views a create or delete invalidates: the merge moves stock
   // between documents, rewrites a payable and re-points freight expenses.
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");

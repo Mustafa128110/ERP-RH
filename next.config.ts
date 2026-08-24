@@ -5,6 +5,20 @@ const nextConfig: NextConfig = {
     // Keeps Turbopack's compiler artifacts on disk between dev server restarts,
     // so a restart doesn't recompile all 54 routes from cold.
     turbopackFileSystemCacheForDev: true,
+    // A Server Action called with no usable network stops rejecting: Next holds
+    // it pending and re-runs it when the connection returns. Every form in the
+    // app gets that, not just the three the outbox knows how to queue — a shop
+    // on a dropping link no longer loses what was typed into a sale.
+    //
+    // This is only safe because every create claims a client-minted operationId
+    // as the first statement of its transaction (lib/actions/operation-id.ts),
+    // so an automatic re-run of a call that actually committed is refused as a
+    // duplicate rather than posted twice. Do not weaken that.
+    //
+    // Turning the flag off restores today's TRANSPORT_ERROR_MESSAGE behaviour
+    // with no other code change: useOffline() then returns false everywhere,
+    // which the callers already read as "online".
+    useOffline: true,
   },
   // No value in advertising the framework to every response.
   poweredByHeader: false,

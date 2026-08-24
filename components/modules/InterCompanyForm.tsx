@@ -138,9 +138,11 @@ export function InterCompanyFormPage({
   // New sales are entered back to back, so a created one clears the form rather
   // than navigating away. An edit keeps what's on screen — it's still the sale
   // you're looking at.
-  // One id per open form: sent with every submit, claimed by the server inside
-  // the same transaction as the sale, so a replayed submit can't post twice.
-  const [operationId] = useState(() => crypto.randomUUID());
+  // One id per *save*, not per open form: claimed by the server inside the same
+  // transaction as the sale, so a replayed submit can't post twice — but the claim
+  // outlives the save by a day, so a form kept open for the next one has to stop
+  // sending the spent id. Re-minted on a confirmed success only.
+  const [operationId, setOperationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(async (prev: InterCompanyResult | undefined, formData: FormData) => {
     // A transport failure must not throw into the error boundary — that would
     // lose the form (and its operation id), and a restored draft would mint a
@@ -155,6 +157,11 @@ export function InterCompanyFormPage({
     if (result?.success) {
       // Saved — the local copy has nothing left to protect.
       clearDraft(intercompanyDraftKey);
+      // Spent id: the server holds the claim for a day, so reusing it would have
+      // the next transfer refused as a replay of this one — "already recorded",
+      // nothing written. Safe to replace only here, where the response came back;
+      // a failure keeps it so a lost response can't post both documents twice.
+      setOperationId(crypto.randomUUID());
       if (onDone) onDone();
       else if (!isEdit) resetForm();
     }

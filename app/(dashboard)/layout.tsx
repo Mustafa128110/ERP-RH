@@ -6,6 +6,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { KeyboardShortcuts } from "@/components/layout/KeyboardShortcuts";
 import { SessionSeed } from "@/components/layout/SessionSeed";
 import { SyncProvider } from "@/components/layout/SyncProvider";
+import { OfflineNotice } from "@/components/layout/OfflineNotice";
 import { OfflineReadiness } from "@/components/layout/OfflineReadiness";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -35,6 +36,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="print:hidden">
           <Topbar username={session.name} companies={companies} selected={selected} />
         </div>
+        {/* Sits above the scroll container, not inside it, so the sentence stays
+            put while a long list scrolls under it. Renders nothing when online. */}
+        <OfflineNotice />
         {/* Tighter gutters on a phone — 24px each side of a 360px screen is a
             sixth of it. pb picks up the home-indicator inset on iOS, which
             otherwise sits over the last row of a list. */}

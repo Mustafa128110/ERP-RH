@@ -7,6 +7,8 @@ import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Icon } from "@/components/ui/Icon";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
+import { patchFromFormData } from "@/lib/optimistic-records";
+import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 
 // The master-data list screen, written once.
@@ -64,22 +66,32 @@ export function RecordManager<T extends { id: string }>({
   // Passed as one slot rather than two because a few of these put something
   // between them, and a `renderDelete` that most callers pass would be a prop
   // that exists to be ignored.
-  renderEditBody: (args: { record: T; onDone: () => void }) => ReactNode;
+  //
+  // The last two are what make a save feel instant, and both are optional on the
+  // form that receives them, so a screen whose form doesn't take them yet goes on
+  // working exactly as it did:
+  //
+  //   onSaving   — the form calls this from inside its action, with the FormData
+  //                being submitted. The row takes those values and the popup
+  //                steps aside. It has to be inside the action; see
+  //                lib/optimistic-records.ts for why.
+  //   onDeleting — the same thing for the delete button: the row leaves.
+  //
+  // There is no onFailed to pass. The popup's own visibility is derived from the
+  // pending set below, which React reverts when the action settles — so an error,
+  // or a question the server wants answered, brings the popup back on its own.
+  renderEditBody: (args: {
+    record: T;
+    onDone: () => void;
+    onSaving: (formData: FormData) => void;
+    onDeleting: () => void;
+  }) => ReactNode;
 }) {
   const [modal, setModal] = useState<{ kind: "batch" } | { kind: "edit"; record: T } | null>(null);
 
-  // A local copy lets a successful batch create land immediately. The action's
-  // revalidated RSC response then reconciles order and database-generated ids.
-  const [local, setLocal] = useState(records);
-  // The server is the source of truth: whenever the page re-renders with fresh
-  // records from the action response, the optimistic copy steps aside.
-  // Done with the "adjust state during render" pattern (guarded by a comparison)
-  // rather than an effect, which the linter rightly flags for cascading renders.
-  const [prevRecords, setPrevRecords] = useState(records);
-  if (records !== prevRecords) {
-    setPrevRecords(records);
-    setLocal(records);
-  }
+  // What this list shows: the records the server sent, with whatever the user has
+  // just done to them laid over the top — see lib/use-optimistic-records.ts.
+  const { records: shown, pending, insert, patch, remove } = useOptimisticRecords(records, "id");
 
   // Every action behind these forms invalidates its route. Next includes that
   // refreshed RSC payload in the action response, so another router.refresh()
@@ -88,14 +100,14 @@ export function RecordManager<T extends { id: string }>({
     setModal(null);
   }
 
-  const rows = local.map(toRow);
+  const rows = shown.map(toRow);
   const many = plural ?? `${noun}s`;
 
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title={title} subtitle={`${local.length} ${local.length === 1 ? noun : many}`}>
+      <PageHeader title={title} subtitle={`${shown.length} ${shown.length === 1 ? noun : many}`}>
         {headerActions}
         {/* The noun moved out of the button and into its label: the plus is the
             same gesture on every list, and the heading directly above it
@@ -116,11 +128,12 @@ export function RecordManager<T extends { id: string }>({
         rows={rows}
         idKey="id"
         onRowClick={(row) => {
-          const record = local.find((r) => r.id === String(row.id));
+          const record = shown.find((r) => r.id === String(row.id));
           if (record) setModal({ kind: "edit", record });
         }}
         emptyMessage={emptyMessage}
         searchPlaceholder={searchPlaceholder}
+        pendingIds={pending}
       />
 
       {modal?.kind === "batch" &&
@@ -130,14 +143,28 @@ export function RecordManager<T extends { id: string }>({
           // and the action response reconciles the list with what the server
           // stored.
           onDone: (created) => {
-            if (created?.length) setLocal((prev) => [...(created as T[]), ...prev]);
+            if (created?.length) insert(created as T[]);
             close();
           },
         })}
 
       {modal?.kind === "edit" && (
-        <Dialog title={dialogTitle(modal.record)} onClose={close}>
-          <div className="flex flex-col gap-4">{renderEditBody({ record: modal.record, onDone: close })}</div>
+        // Hidden rather than closed while this record's write is in the air,
+        // because the server may still have something to say — a name already
+        // taken, a delete a foreign key refuses. A hidden popup keeps the typed
+        // values and the message it is about to show; a closed one would have
+        // thrown both away. `pending` empties when the action settles, so a
+        // refusal brings the popup straight back; a success closes it for real
+        // from the form's own onDone.
+        <Dialog title={dialogTitle(modal.record)} onClose={close} hidden={pending.includes(modal.record.id)}>
+          <div className="flex flex-col gap-4">
+            {renderEditBody({
+              record: modal.record,
+              onDone: close,
+              onSaving: (formData) => patch(modal.record.id, patchFromFormData(modal.record, formData)),
+              onDeleting: () => remove(modal.record.id),
+            })}
+          </div>
         </Dialog>
       )}
     </div>

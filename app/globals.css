@@ -440,6 +440,17 @@ tr[data-focused="true"] {
   box-shadow: inset 2px 0 0 0 var(--color-navy-800);
 }
 
+/* A row showing an edit the database hasn't confirmed yet
+ * (lib/use-optimistic-records). The values on it are already the new ones — this
+ * is the only thing on screen that distinguishes "saved" from "saving", so it has
+ * to be visible without being alarming: the row reads as slightly not-yet-there
+ * and settles the moment the write lands. Usually that is a few hundred
+ * milliseconds, which is also why it fades in rather than blinking. */
+tr[data-pending] {
+  opacity: 0.55;
+  transition: opacity 120ms ease-out;
+}
+
 /*
  * Phone layout for the list tables.
  *

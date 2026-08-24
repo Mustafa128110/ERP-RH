@@ -20,10 +20,13 @@ import {
   deleteButtonClass,
   errorTextClass,
   successTextClass,
+  confirmNoticeClass,
+  TRANSPORT_ERROR_MESSAGE,
 } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
 import { todayISO, money } from "@/lib/format";
 import { inCompany } from "@/lib/contact-scope";
+import { optimistically } from "@/lib/optimistic-records";
 import { useClientUserId } from "@/lib/client-user";
 import { useSync } from "@/components/layout/SyncProvider";
 import { ChequeQuickAddButton, chequeDialogOptions } from "@/components/modules/AccountForms";
@@ -480,6 +483,7 @@ export function PaymentEditForm({
   cashAccountOptions,
   chequeOptions,
   onDone,
+  onSaving,
 }: {
   paymentId: string;
   direction: PaymentDirection;
@@ -490,8 +494,14 @@ export function PaymentEditForm({
   cashAccountOptions: CashOption[];
   chequeOptions: ChequeOption[];
   onDone?: () => void;
+  // The list's hook: the row takes the new amount and date and the popup steps
+  // aside the moment Save is pressed. Optional — without it this form waits for
+  // the server and then closes, as it always did. No matching failure callback is
+  // needed: the popup's visibility comes from the list's pending set, which React
+  // clears when this action settles. See lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
 }) {
-  const [state, action, pending] = useActionState(updatePayment.bind(null, paymentId), undefined);
+  const [state, action, pending] = useActionState(optimistically(updatePayment.bind(null, paymentId), onSaving), undefined);
   const [contactId, setContactId] = useState(defaults.contactId ?? "");
   const [contactText, setContactText] = useState(() => contactOptions.find((c) => c.id === defaults.contactId)?.name ?? "");
 
@@ -529,8 +539,38 @@ export function PaymentEditForm({
   );
 }
 
-export function DeletePaymentButton({ paymentId, onDone }: { paymentId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deletePayment, undefined);
+export function DeletePaymentButton({
+  paymentId,
+  onDone,
+  onDeleting,
+}: {
+  paymentId: string;
+  onDone?: () => void;
+  // The list drops the row when this is called, from inside the action below so
+  // it runs after the confirm() has had its say. Nothing reports a failure back:
+  // if the server answers with the question about settled invoices instead of a
+  // deletion, React reverts the removal as this action settles and the popup
+  // returns with that question on it. See lib/optimistic-records.ts.
+  onDeleting?: () => void;
+}) {
+  // Cancelling a payment that is settling invoices puts those invoices back to
+  // outstanding. Nothing has to be unlinked first, but the server refuses once and
+  // says what it is settling — that sentence becomes the question, and the next
+  // press sends the answer back. One submit only.
+  const [confirming, setConfirming] = useState(false);
+  const [state, action, pending] = useActionState(
+    optimistically(async (prev: { error?: string; success?: boolean; needsConfirmation?: boolean } | undefined, formData: FormData) => {
+      let result: { error?: string; success?: boolean; needsConfirmation?: boolean };
+      try {
+        result = await deletePayment(prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+      setConfirming(!!result?.needsConfirmation);
+      return result;
+    }, onDeleting),
+    undefined,
+  );
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -538,12 +578,22 @@ export function DeletePaymentButton({ paymentId, onDone }: { paymentId: string; 
   }, [state?.success]);
 
   return (
-    <form action={action} onSubmit={(e) => { if (!confirm("Cancel this payment? Its history will remain and FIFO settlements will be recalculated.")) e.preventDefault(); }}>
+    <form
+      action={action}
+      onSubmit={(e) => {
+        // Already asked, and asked more precisely than this.
+        if (confirming) return;
+        if (!confirm("Cancel this payment? Its history will remain and FIFO settlements will be recalculated.")) e.preventDefault();
+      }}
+    >
       <input type="hidden" name="paymentId" value={paymentId} />
+      <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Cancelling…" : "Cancel this payment"}
+        {pending ? "Cancelling…" : confirming ? "Confirm cancellation" : "Cancel this payment"}
       </button>
-      {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
+      {state?.error && (
+        <p className={`mt-2 ${state.needsConfirmation ? confirmNoticeClass : errorTextClass}`}>{state.error}</p>
+      )}
     </form>
   );
 }

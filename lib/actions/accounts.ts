@@ -7,7 +7,7 @@ import { bankAccounts, cashAccounts, chequeRegister } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { CHEQUE_TYPES, CHEQUE_STATUSES } from "@/lib/cheque-constants";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { bankAccountLabel } from "@/lib/account-label";
@@ -23,13 +23,22 @@ import { cachedPageRead } from "@/lib/read-cache";
 
 // Accounts and cheques all read from the same three cached lookups, and any
 // write to any of them can change what the others offer.
-const invalidateAccounts = () => invalidateLookups(CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
+//
+// The page reads go with them. Beyond the accounts screen itself: payments and
+// expenses both name the account or cheque that settled them, and the ledger
+// joins the settlement accounts to drop payments booked against another
+// company's account — so renaming a bank account changes four lists, and the
+// coverage rule in lib/cache.check.ts is what says so.
+const invalidateAccounts = () => {
+  invalidateLookups(CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
+  invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses, READ_DOMAIN.ledger);
+};
 
 export async function listBankAccounts() {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
   const scope = (await getScopeCompanyIds()).sort().join(",");
-  return cachedPageRead(`${session.userId}:accounts:bank:${scope}`, async () =>
+  return cachedPageRead(READ_DOMAIN.accounts, `${session.userId}:accounts:bank:${scope}`, async () =>
     db.select().from(bankAccounts).where(await companyInPermissionScope(bankAccounts.companyId, session, "accounts")),
   );
 }
@@ -38,7 +47,7 @@ export async function listCashAccounts() {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
   const scope = (await getScopeCompanyIds()).sort().join(",");
-  return cachedPageRead(`${session.userId}:accounts:cash:${scope}`, async () =>
+  return cachedPageRead(READ_DOMAIN.accounts, `${session.userId}:accounts:cash:${scope}`, async () =>
     db.select().from(cashAccounts).where(await companyInPermissionScope(cashAccounts.companyId, session, "accounts")),
   );
 }
@@ -47,7 +56,7 @@ export async function listCheques() {
   const session = await getSession();
   requirePermission(session, "cheques", "view");
   const scope = (await getScopeCompanyIds()).sort().join(",");
-  return cachedPageRead(`${session.userId}:accounts:cheques:${scope}`, async () =>
+  return cachedPageRead(READ_DOMAIN.accounts, `${session.userId}:accounts:cheques:${scope}`, async () =>
     db.select().from(chequeRegister).where(await companyInPermissionScope(chequeRegister.companyId, session, "cheques")),
   );
 }

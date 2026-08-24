@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { locations, locationTypeEnum } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission } from "@/lib/auth/permissions";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 
@@ -42,6 +42,8 @@ export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<Cr
 
     const created = await db.insert(locations).values(valid).returning({ id: locations.id, name: locations.name });
     invalidateLookups(CACHE.locations);
+    // Stock on hand is reported per location, by name.
+    invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/inventory/warehouses");
     await recordAudit({ action: "create", entity: "location", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -59,6 +61,8 @@ export async function updateLocation(locationId: string, _prevState: ActionResul
 
     await db.update(locations).set(values).where(eq(locations.id, locationId));
     invalidateLookups(CACHE.locations);
+    // Stock on hand is reported per location, by name.
+    invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/inventory/warehouses");
     await recordAudit({ action: "update", entity: "location", entityId: locationId, summary: values.name });
     return { success: true };
@@ -74,6 +78,8 @@ export async function deleteLocation(_prevState: ActionResult | undefined, formD
     await db.delete(locations).where(eq(locations.id, locationId));
 
     invalidateLookups(CACHE.locations);
+    // Stock on hand is reported per location, by name.
+    invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/inventory/warehouses");
     await recordAudit({ action: "delete", entity: "location", entityId: locationId, summary: locationId });
     return { success: true };

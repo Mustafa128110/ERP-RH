@@ -17,7 +17,7 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { averageCosts } from "@/lib/queries/stock-cost";
@@ -302,6 +302,8 @@ export async function createStockAdjustment(
   }
 
   invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.cheques);
+  // An adjustment is a stock movement, and the product list carries on-hand.
+  invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
   revalidatePath("/inventory/stock-adjustments");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -343,9 +345,11 @@ export async function approveStockAdjustment(_prevState: ActionResult | undefine
     });
 
     invalidateLookups(CACHE.items);
+    invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
     revalidatePath("/inventory/stock-adjustments");
     revalidatePath(`/inventory/stock-adjustments/${documentId}`);
     revalidatePath("/inventory/stock");
+    revalidatePath("/inventory/products");
     await recordAudit({ action: "approve", entity: "stock adjustment", entityId: documentId, summary: pending.number, companyId: pending.companyId, detail: pending.reason });
     return { success: true };
   });
@@ -388,8 +392,10 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
   }
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+  invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
   revalidatePath("/inventory/stock-adjustments");
   revalidatePath("/inventory/stock");
+  revalidatePath("/inventory/products");
   await recordAudit({ action: "cancel", entity: "stock adjustment", entityId: documentId, summary: doomed.number, companyId: doomed.companyId, detail: doomed.reason });
   return { success: true };
   });

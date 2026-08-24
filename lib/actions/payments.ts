@@ -13,6 +13,7 @@ import {
   bankAccounts,
   cashAccounts,
   chequeRegister,
+  paymentAllocations,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission, PermissionError } from "@/lib/auth/permissions";
@@ -20,16 +21,30 @@ import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/
 import { ensureDocumentType, nextDocumentNumber, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, adjustSettlementBalancesBatch, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
 import { resolveContactId, resolveContactIds } from "@/lib/actions/resolve-refs";
-import { CACHE, getAvailableCheques, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, getAvailableCheques, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { paymentLedgerSide } from "@/lib/payment-constants";
 import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
 import { recordAudit } from "@/lib/actions/audit";
+import { changeSummary } from "@/lib/audit-constants";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { allocatePaymentsFifo, reallocateAccountPaymentsFifo, releasePaymentAllocations } from "@/lib/actions/payment-allocation";
+
+// A payment settles invoices, so it changes the party's balance and how much of
+// each invoice is still owed — hence `purchases` and `products` alongside the
+// obvious three. It moves no stock, and it names no SALES_INVOICE, so the sales
+// and stock lists stay warm.
+const READS = [
+  READ_DOMAIN.payments,
+  READ_DOMAIN.purchases,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.products,
+  READ_DOMAIN.expenses,
+  READ_DOMAIN.accounts,
+] as const;
 
 export type PaymentDirection = "made" | "received";
 export type PaymentType = SettlementType;
@@ -83,7 +98,7 @@ export async function listPayments(filters: PaymentFilters = {}) {
     filters.direction === "made" ? (["PAYMENT_MADE"] as const) : filters.direction === "received" ? (["PAYMENT_RECEIVED"] as const) : (["PAYMENT_MADE", "PAYMENT_RECEIVED"] as const);
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:payments:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.payments, `${session.userId}:payments:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   const rows = await db
     .select({
@@ -279,6 +294,7 @@ export async function createPayment(
   }
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
+  invalidateReads(...READS);
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
@@ -513,6 +529,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
   }
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
+  invalidateReads(...READS);
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
@@ -545,6 +562,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         code: documentTypes.code,
         companyId: documents.companyId,
         amount: documents.grandTotal,
+        documentDate: documents.documentDate,
         bankAccountId: documents.bankAccountId,
         cashAccountId: documents.cashAccountId,
         contactId: documents.contactId,
@@ -636,6 +654,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
     if (vanishedDuringSave) return { error: "Payment not found — it may already have been deleted." };
 
     invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
+    invalidateReads(...READS);
     revalidatePath("/payments");
     revalidatePath("/ledger");
     await recordAudit({
@@ -644,7 +663,11 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
       entityId: paymentId,
       summary: existing.number,
       companyId: existing.companyId,
-      detail: `Amount ${values.amount}`,
+      detail: changeSummary([
+        ["Amount", existing.amount, values.amount],
+        ["Date", existing.documentDate, values.paymentDate],
+        ["Contact", existing.contactId, values.contactId || values.contactName],
+      ]) || `Amount ${values.amount}`,
     });
     return { success: true };
   });
@@ -692,6 +715,21 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
   }
 
   const direction: PaymentDirection = existing.code === "PAYMENT_MADE" ? "made" : "received";
+  // Cancelling a payment un-settles whatever it was covering. Those invoices go
+  // back to outstanding or partial, which is a change to documents the person
+  // cancelling may not have in front of them — so it is confirmed first, with the
+  // affected invoices listed by previewLedgerRowDelete.
+  const [allocated] = await db
+    .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
+    .from(paymentAllocations)
+    .where(eq(paymentAllocations.paymentDocumentId, paymentId));
+  const allocatedAmount = Number(allocated?.amount ?? 0);
+  if (allocatedAmount > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
+    return {
+      needsConfirmation: true,
+      error: `This payment is settling ${allocatedAmount.toFixed(2)} against ${direction === "made" ? "supplier bills" : "customer invoices"}. Confirm the cancellation to return them to outstanding.`,
+    };
+  }
   let vanishedDuringDelete = false;
 
   try {
@@ -745,6 +783,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
   if (vanishedDuringDelete) return { error: "Payment not found — it may already have been deleted." };
 
   invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+  invalidateReads(...READS);
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
@@ -753,7 +792,9 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
     entityId: paymentId,
     summary: existing.number,
     companyId: existing.companyId,
-    detail: `Amount ${existing.amount}`,
+    detail: allocatedAmount > 0
+      ? `Amount ${existing.amount}; un-settled ${allocatedAmount.toFixed(2)}`
+      : `Amount ${existing.amount}`,
   });
   return { success: true };
   });

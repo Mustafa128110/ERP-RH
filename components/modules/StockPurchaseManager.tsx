@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { StockPurchaseCreateForm, DeleteStockPurchaseButton } from "@/components/modules/StockPurchaseForm";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
@@ -15,9 +15,11 @@ import { Icon } from "@/components/ui/Icon";
 import { StatusPill } from "@/components/ui/StatusPill";
 import type { ColumnDef, Row } from "@/lib/table";
 import { MergePurchasesDialog } from "@/components/modules/MergePurchasesDialog";
+import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 type PurchaseDetail = NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>;
+type PurchaseCheques = Awaited<ReturnType<typeof listChequesForPurchases>>;
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
@@ -90,6 +92,42 @@ export function StockPurchaseManager({
   const [editing, setEditing] = useState<PurchaseDetail | null>(null);
   const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
 
+  // Rows the list shows, which is the server's list plus whatever is in flight.
+  // The rows here are already-formatted totals with their own line items, so a
+  // saved edit changes no cell until the payload lands — nothing is guessed at,
+  // least of all money. What it does buy is the fade and the instant cancel, and
+  // those are what the wait was actually costing.
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id");
+
+  // Details already fetched, keyed by purchase id. A click here costs two round
+  // trips to a database 170ms away with nothing on screen to say so; a pointer
+  // resting on the row is enough notice to have made them already. Kept on a ref
+  // so warming never renders.
+  const warmed = useRef(new Map<string, { detail: PurchaseDetail; cheques: PurchaseCheques }>());
+  const warming = useRef(new Set<string>());
+
+  async function warm(id: string) {
+    if (warmed.current.has(id) || warming.current.has(id)) return;
+    warming.current.add(id);
+    try {
+      const [detail, cheques] = await Promise.all([getStockPurchase(id), listChequesForPurchases(id)]);
+      if (detail) warmed.current.set(id, { detail, cheques });
+    } catch {
+      // A failed warm is not a failure — the click will ask again, and if the
+      // network is genuinely gone that is where it belongs to be reported.
+    } finally {
+      warming.current.delete(id);
+    }
+  }
+
+  // Called from inside the form's own action when a save or a cancellation
+  // starts, and it is not housekeeping: the warm copy was taken before this
+  // write, so handing it to the next open would show the purchase as it used to
+  // be — worse than the round trip it saves.
+  function forgetWarm(id: string) {
+    warmed.current.delete(id);
+  }
+
   function close() {
     setOpen(false);
     setEditing(null);
@@ -97,8 +135,17 @@ export function StockPurchaseManager({
   }
 
   async function openEdit(id: string) {
+    const ready = warmed.current.get(id);
+    if (ready) {
+      setEditChequeOptions(ready.cheques);
+      setEditing(ready.detail);
+      return;
+    }
     const [detail, cheques] = await Promise.all([getStockPurchase(id), listChequesForPurchases(id)]);
     if (detail) {
+      // Worth keeping even though this open is already paid for: the same purchase
+      // is often opened twice in a row while a correction is worked out.
+      warmed.current.set(id, { detail, cheques });
       setEditing(detail);
       setEditChequeOptions(cheques);
     }
@@ -151,7 +198,7 @@ export function StockPurchaseManager({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title="Stock Purchase" subtitle={`${rows.length} purchase(s)`}>
+      <PageHeader title="Stock Purchase" subtitle={`${shown.length} purchase(s)`}>
         <button
           type="button"
           onClick={() => setMergeOpen(true)}
@@ -181,9 +228,11 @@ export function StockPurchaseManager({
 
       <DataTable
         columns={columns}
-        rows={rows as unknown as Row[]}
+        rows={shown as unknown as Row[]}
         idKey="id"
         onRowClick={(row) => void openEdit(String(row.id))}
+        onRowIntent={(row) => void warm(String(row.id))}
+        pendingIds={pending}
         emptyMessage="No purchases yet."
         searchPlaceholder="Search purchases…"
       />
@@ -211,7 +260,14 @@ export function StockPurchaseManager({
       )}
 
       {editing && (
-        <Dialog title="Edit Stock Purchase" onClose={close} size="xwide">
+        // Hidden rather than closed while this purchase's write is in the air. The
+        // server may still have something to say — a cancellation that would
+        // release settled payments is refused once, with the figures — and a hidden
+        // popup keeps that question and every typed line standing; a closed one
+        // would have thrown both away. `pending` empties when the action settles,
+        // so a refusal brings the popup straight back, and a success closes it for
+        // real from onDone.
+        <Dialog title="Edit Stock Purchase" onClose={close} size="xwide" hidden={pending.includes(editing.id)}>
           <div className="flex flex-col gap-4">
             <StockPurchaseCreateForm
               purchaseId={editing.id}
@@ -229,9 +285,20 @@ export function StockPurchaseManager({
               conversionOptions={conversionOptions}
               taxSettings={taxSettings}
               onDone={close}
+              onSaving={() => {
+                forgetWarm(editing.id);
+                patch(editing.id);
+              }}
             />
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteStockPurchaseButton purchaseId={editing.id} onDone={close} />
+              <DeleteStockPurchaseButton
+                purchaseId={editing.id}
+                onDone={close}
+                onDeleting={() => {
+                  forgetWarm(editing.id);
+                  remove(editing.id);
+                }}
+              />
             </div>
           </div>
         </Dialog>

@@ -157,7 +157,7 @@ export function QuotationForm({
     },
   });
 
-  const { enqueue } = useSync();
+  const { enqueue, online } = useSync();
 
   // Set when "Queue for later" could not be written to local storage — the
   // quotation stays on screen (and in its draft) instead of the queue silently
@@ -492,15 +492,31 @@ export function QuotationForm({
               <button
                 type="button"
                 onClick={queueQuotation}
-                disabled={locked || filled.length === 0}
+                // `pending` is in here for a reason beyond tidiness. With
+                // experimental.useOffline a Create pressed offline does not fail
+                // — Next holds the request and re-runs it when the connection
+                // returns — so queueing on top of it would send this quotation
+                // twice under two different operation ids, which is the one case
+                // the duplicate guard cannot catch.
+                disabled={pending || locked || filled.length === 0}
                 className="h-11 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"
-                title="Keep this quotation locally and send it when the connection returns"
+                title={
+                  pending
+                    ? "A save is already in flight — it lands on its own when the connection returns"
+                    : "Keep this quotation locally and send it when the connection returns"
+                }
               >
                 Queue for later
               </button>
             )}
             <button type="submit" disabled={pending || locked} className={submitClass}>
-              {pending ? "Saving…" : isEdit ? "Save Quotation" : "Create Quotation"}
+              {pending
+                ? online
+                  ? "Saving…"
+                  : "Saving — will send when back online…"
+                : isEdit
+                  ? "Save Quotation"
+                  : "Create Quotation"}
             </button>
           </div>
         </div>

@@ -7,6 +7,7 @@ import { getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants";
+import { READ_DOMAIN } from "@/lib/cache-keys";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { settingsForCompanies } from "@/lib/queries/settings";
 
@@ -56,7 +57,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
   requirePermission(session, "stock", "view");
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:stock:${cacheScope}:${stableReadKey({ locationId, companyId })}`, async () => {
+  return cachedPageRead(READ_DOMAIN.stock, `${session.userId}:stock:${cacheScope}:${stableReadKey({ locationId, companyId })}`, async () => {
 
   // Aggregated in SQL (GROUP BY) instead of pulling every inventory_transactions
   // row ever recorded to Node and reducing in JS — that scaled with total

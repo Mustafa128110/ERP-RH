@@ -18,7 +18,7 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { SKU_SCOPE, formatSku, nextSequenceRange, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
 import { ensureDocumentType } from "@/lib/actions/document-numbering";
@@ -35,6 +35,11 @@ import { cachedPageRead } from "@/lib/read-cache";
 
 export type { ProductRateRow } from "@/lib/queries/products";
 
+// An item's name, unit and rates are read by the sales and purchase lists, the
+// stock list, and the product list itself. A price-only edit changes fewer, but
+// this file's writes reach all four.
+const READS = [READ_DOMAIN.products, READ_DOMAIN.sales, READ_DOMAIN.purchases, READ_DOMAIN.stock] as const;
+
 // Auth, then delegate. The SQL lives in lib/queries/products.ts so a check can
 // import and run the real query — this file is "use server", and nothing in it
 // is reachable from a test.
@@ -44,7 +49,7 @@ export async function listProductsWithRates(): Promise<ProductRateRow[]> {
   const companyIds = (await getScopeCompanyIds()).filter(
     (companyId) => session.globalPermissions.has("products.view") || session.permissionsByCompany.get(companyId)?.has("products.view"),
   );
-  return cachedPageRead(`${session.userId}:products:${[...companyIds].sort().join(",")}`, () => queryProductRates(companyIds));
+  return cachedPageRead(READ_DOMAIN.products, `${session.userId}:products:${[...companyIds].sort().join(",")}`, () => queryProductRates(companyIds));
 }
 
 // The SKU the batch dialog shows as each row's placeholder before you save. A
@@ -133,6 +138,7 @@ export async function createProductsBatch(
       });
 
       invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands);
+      invalidateReads(...READS);
       revalidatePath("/inventory/products");
       await recordAudit({
         action: "create",
@@ -493,6 +499,7 @@ export async function updateProductsBatch(
     if (documentError) return { error: documentError };
 
     invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands, CACHE.units);
+    invalidateReads(...READS);
     revalidatePath("/inventory/products");
     revalidatePath("/inventory/stock");
     await recordAudit({
@@ -862,6 +869,7 @@ export async function mergeProducts(
   }
 
   invalidateLookups(CACHE.items);
+  invalidateReads(...READS);
   revalidatePath("/inventory/products");
   revalidatePath("/inventory/stock");
   revalidatePath("/dashboard");

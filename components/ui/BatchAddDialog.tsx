@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useOffline } from "next/offline";
 import { Dialog } from "@/components/ui/Dialog";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { clearDraft, readDraft, saveDraft } from "@/lib/draft";
@@ -84,6 +85,13 @@ export function BatchAddDialog<T, C = unknown>({
   const [rows, setRows] = useState<T[]>(initial ?? Array.from({ length: initialRows }, emptyRow));
   const [restoredFromDraft, setRestoredFromDraft] = useState(initial !== null);
   const [pending, setPending] = useState(false);
+  // With experimental.useOffline a save pressed with no network stays pending
+  // instead of failing, so "Saving…" would sit there looking frozen for a reason
+  // the user can't see. This is that reason. (Read straight from next/offline
+  // rather than the sync provider: this is a ui/ leaf, and by the time a save is
+  // pending a request has been attempted, which is exactly when the hook is
+  // accurate.)
+  const offline = useOffline();
   const [error, setError] = useState<string | null>(null);
   // True when the queue for later couldn't be written to local storage — the
   // dialog stays open because the rows are only safe in this page, and the
@@ -179,6 +187,14 @@ export function BatchAddDialog<T, C = unknown>({
             {onQueue && (
               <button
                 type="button"
+                // Disabled while a save is in flight, and that is not cosmetic.
+                // With experimental.useOffline a Save pressed offline does not
+                // fail — Next holds the request and re-runs it when the
+                // connection returns — so queueing on top of it would send the
+                // same rows twice under two different operation ids, which is
+                // the one thing the duplicate guard cannot catch. Exactly one
+                // in-flight copy of a batch, always.
+                disabled={pending}
                 onClick={() => {
                   // The rows have moved out of this grid into the outbox — the
                   // local draft would otherwise offer them back next time and a
@@ -190,8 +206,12 @@ export function BatchAddDialog<T, C = unknown>({
                     onClose();
                   }
                 }}
-                className="h-10 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory"
-                title="Keep this work locally and send it when the connection returns"
+                className="h-10 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"
+                title={
+                  pending
+                    ? "A save is already in flight — it lands on its own when the connection returns"
+                    : "Keep this work locally and send it when the connection returns"
+                }
               >
                 Queue for later
               </button>
@@ -209,7 +229,7 @@ export function BatchAddDialog<T, C = unknown>({
               data-dialog-submit
               className="h-10 rounded bg-navy-800 px-5 text-sm font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
             >
-              {pending ? "Saving…" : "Save"}
+              {pending ? (offline ? "Saving — will send when back online…" : "Saving…") : "Save"}
             </button>
           </div>
         </div>

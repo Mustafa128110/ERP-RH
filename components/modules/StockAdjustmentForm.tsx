@@ -98,9 +98,11 @@ export function StockAdjustmentFormPage({
     focusCell(0, 0);
   }
 
-  // One id per open form: sent with every submit, claimed by the server inside
-  // the same transaction as the adjustment, so a replayed submit can't post twice.
-  const [operationId] = useState(() => crypto.randomUUID());
+  // One id per *save*, not per open form: claimed by the server inside the same
+  // transaction as the adjustment, so a replayed submit can't post twice — but the
+  // claim outlives the save by a day, so a form that clears itself for the next
+  // adjustment has to stop sending the spent id. Re-minted on success only.
+  const [operationId, setOperationId] = useState(() => crypto.randomUUID());
   const [state, action, pending] = useActionState(
     async (prev: { error?: string; success?: boolean; id?: string; status?: "posted" | "pending" } | undefined, formData: FormData) => {
       // A transport failure must not throw into the error boundary — that would
@@ -116,6 +118,12 @@ export function StockAdjustmentFormPage({
       if (result?.success) {
         // Saved — the local copy has nothing left to protect.
         clearDraft(adjustmentDraftKey);
+        // Spent id: the server holds the claim for a day, so reusing it would have
+        // the next adjustment refused as a replay of this one — "already
+        // recorded", nothing written. Safe to replace only here, where the
+        // response came back; a failure keeps it so a lost response can't post the
+        // adjustment twice.
+        setOperationId(crypto.randomUUID());
         if (onDone) onDone();
         else resetForm();
       }

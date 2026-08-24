@@ -1,11 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/actions/sales";
 import type { SettlementType } from "@/lib/actions/settlement";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, confirmNoticeClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
@@ -89,8 +89,9 @@ const SALE_DRAFT_KEY = "sale";
 const UNPAID_BY_DEFAULT_COMPANY = "M52";
 
 // createSale returns the new id, updateSale doesn't — one shape covers both so
-// the wrapped action has a single return type.
-type SaleActionState = { error?: string; success?: boolean; id?: string } | undefined;
+// the wrapped action has a single return type. `needsConfirmation` is the third
+// answer: not saved, not broken, waiting for a yes (see confirmNoticeClass).
+type SaleActionState = { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean } | undefined;
 
 const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
   { value: "account", label: "Account" },
@@ -137,6 +138,8 @@ export function SaleFormPage({
   defaults,
   title,
   onDone,
+  onSaving,
+  onDeleting,
 }: {
   companyOptions: Option[];
   customerOptions: ScopedOption[];
@@ -154,6 +157,19 @@ export function SaleFormPage({
   // which has a title bar of its own.
   title?: string;
   onDone?: () => void;
+  // The invoice list's hooks: the row takes the change and the popup steps aside
+  // the moment Save is pressed. Called from inside the action below, which is the
+  // only place React accepts an optimistic update from.
+  //
+  // Nothing has to report a failure back: the list derives whether this popup is
+  // hidden from its own pending set, and React clears that when the action settles
+  // — so an error, or a question about receipts to release, brings the popup back
+  // with every typed row and the question itself still standing. See
+  // lib/optimistic-records.ts.
+  onSaving?: (formData: FormData) => void;
+  // Forwarded to the cancel button below, which is inside this form and so can't
+  // be handed the callback by the list directly.
+  onDeleting?: () => void;
 }) {
   const router = useRouter();
   const isEdit = !!saleId;
@@ -321,10 +337,27 @@ export function SaleFormPage({
   //
   // New sales are entered back to back, so a created one clears the form and
   // stays put. A saved edit is finished business — it goes back to the list.
-  // One id per open form: sent with every submit, claimed by the server inside
-  // the same transaction as the sale, so a replayed submit can't post twice.
-  const [operationId] = useState(() => crypto.randomUUID());
+  //
+  // One id per *save*, not per open form. It is claimed by the server inside the
+  // same transaction as the sale, so a replayed submit can't post twice — but the
+  // claim outlives the save by a day, so a form that stays open for the next sale
+  // has to stop sending the spent one. Re-minted on a confirmed success only; see
+  // the success branch below for why a failure must keep it.
+  const [operationId, setOperationId] = useState(() => crypto.randomUUID());
+  // Reducing an invoice below what has already been received against it releases
+  // the difference onto the customer's next outstanding invoice. That is allowed —
+  // nobody has to go and unlink receipts by hand first — but it is not done
+  // silently: the server refuses once, saying what would move, and this holds the
+  // acknowledgement for exactly the next submit. Set from the result rather than
+  // left sticky, so a second, different reduction is asked about again.
+  const [confirming, setConfirming] = useState(false);
   const [state, action, pending] = useActionState(async (prev: SaleActionState, formData: FormData) => {
+    // First thing in the action, because React only honours an optimistic update
+    // made inside one. The list has the invoice row take the change and puts this
+    // popup out of the way. React reverts that the moment this action settles, so
+    // an error — or a question about receipts to release — brings the popup
+    // straight back with everything the user typed still in it.
+    onSaving?.(formData);
     // A transport failure (response lost after the server committed) must not
     // throw into the error boundary — that unmounts the form, and a restored
     // draft would mint a fresh operation id and post the sale twice. Keep the
@@ -335,10 +368,19 @@ export function SaleFormPage({
     } catch {
       return { error: TRANSPORT_ERROR_MESSAGE };
     }
+    setConfirming(!!result?.needsConfirmation);
     if (result?.success) {
       // Whatever happens next — a dialog closing, a route change, a page that
       // fails to re-render — this sale is saved, so its draft goes now.
       clearDraft(saleDraftKey);
+      // This sale's id is spent: the server holds the claim for a day, so sending
+      // it again would have the next sale refused as a replay of this one — saying
+      // "already recorded" while writing nothing. A confirmed success is the one
+      // moment it is safe to mint a new one: the response came back, so there is
+      // no unknown outcome left for the old id to protect. A failure keeps it, on
+      // purpose — after a lost response the save may well have landed, and the
+      // spent id is what stops the retry from posting it twice.
+      setOperationId(crypto.randomUUID());
       if (onDone) onDone();
       else if (isEdit) router.push("/sales/invoices");
       else resetForm();
@@ -489,6 +531,7 @@ export function SaleFormPage({
     <>
       <form ref={formRef} action={action} className="flex flex-col gap-5">
         <input type="hidden" name="operationId" value={operationId} />
+        <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
         <input
           type="hidden"
           name="linesJson"
@@ -511,7 +554,7 @@ export function SaleFormPage({
         <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           {title ? <h1 className="text-xl text-navy-800">{title}</h1> : <span />}
           {isEdit ? (
-            <DeleteSaleButton saleId={saleId!} onDone={onDone} />
+            <DeleteSaleButton saleId={saleId!} onDone={onDone} onDeleting={onDeleting} />
           ) : (
             <button
               type="button"
@@ -825,7 +868,9 @@ export function SaleFormPage({
           </div>
         )}
 
-        {state?.error && <p className={errorTextClass}>{state.error}</p>}
+        {state?.error && (
+          <p className={state.needsConfirmation ? confirmNoticeClass : errorTextClass}>{state.error}</p>
+        )}
         {state?.success &&
           (isEdit ? (
             <p className={successTextClass}>Saved.</p>
@@ -843,9 +888,9 @@ export function SaleFormPage({
           <button
             type="submit"
             disabled={pending}
-            className="h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
+            className={`h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40${confirming ? " ring-2 ring-warning" : ""}`}
           >
-            {pending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save" : "Create Sale"}
+            {pending ? (isEdit ? "Saving…" : "Creating…") : confirming ? "Confirm & Save" : isEdit ? "Save" : "Create Sale"}
           </button>
           <button
             type="button"
@@ -863,27 +908,71 @@ export function SaleFormPage({
 // A plain button, not a <form> of its own: it now sits in the sale form's own
 // heading row, and a form nested inside a form is invalid HTML — the browser
 // drops the inner one and the click does nothing.
-export function DeleteSaleButton({ saleId, onDone }: { saleId: string; onDone?: () => void }) {
+export function DeleteSaleButton({
+  saleId,
+  onDone,
+  onDeleting,
+}: {
+  saleId: string;
+  onDone?: () => void;
+  // The list drops the row when this is called. Nothing reports a failure back:
+  // the removal is optimistic state made inside the transition below, so React
+  // puts the row back by itself if that transition ends without the cancellation
+  // having happened. See lib/optimistic-records.ts.
+  onDeleting?: () => void;
+}) {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
+  // A transition rather than a boolean, because the optimistic removal below has
+  // to live inside one: React reverts an optimistic update the moment the
+  // transition that made it ends, and an async transition doesn't end until its
+  // callback returns. So the row stays gone for exactly as long as the round trip
+  // takes, and comes back by itself if the cancellation doesn't happen.
+  const [pending, startCancel] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  async function remove() {
-    if (!confirm("Cancel this sale? Its history will remain and its stock and accounting effects will be reversed.")) return;
-    setPending(true);
-    setError(null);
+  // Annotated rather than inferred: the two branches would otherwise widen to a
+  // union whose transport arm has no `needsConfirmation`, and the caller reads it.
+  async function post(confirmAllocations: boolean): Promise<{ error?: string; needsConfirmation?: boolean }> {
     const formData = new FormData();
     formData.set("documentId", saleId);
-    const result = await deleteSale(undefined, formData);
-    setPending(false);
-    if (result?.error) {
-      setError(result.error);
-      return;
+    if (confirmAllocations) formData.set("confirmAllocations", "1");
+    try {
+      return await deleteSale(undefined, formData);
+    } catch {
+      return { error: TRANSPORT_ERROR_MESSAGE };
     }
-    // Leaving the deleted sale behind is part of the delete, not a reaction to
-    // it. Inside a popup that means closing; on its own page, going back.
-    if (onDone) onDone();
-    else router.push("/sales/invoices");
+  }
+
+  function remove() {
+    if (!confirm("Cancel this sale? Its history will remain and its stock and accounting effects will be reversed.")) return;
+    setError(null);
+    startCancel(async () => {
+      // The list drops the row and puts the edit popup aside now, on this click,
+      // rather than after two round trips. Every path out of here either finishes
+      // the cancellation or leaves this transition without it, and in that second
+      // case React puts the row back on its own.
+      onDeleting?.();
+      let result = await post(false);
+      // Receipts settled against this invoice don't block the cancellation and
+      // don't have to be unlinked by hand — they are released onto whatever else the
+      // customer still owes on. But that is other people's money moving, so the
+      // server refuses once and says how much. Its sentence is the question; asking
+      // it and sending the answer back is the whole flow.
+      if (result?.needsConfirmation && result.error) {
+        // Saying no is a decision, not a failure: nothing was cancelled, and there
+        // is nothing to report back as an error.
+        if (!confirm(result.error)) return;
+        result = await post(true);
+      }
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      // Leaving the deleted sale behind is part of the delete, not a reaction to
+      // it. Inside a popup that means closing; on its own page, going back.
+      if (onDone) onDone();
+      else router.push("/sales/invoices");
+    });
   }
 
   return (

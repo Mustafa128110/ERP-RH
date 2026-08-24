@@ -27,7 +27,7 @@ import { bankAccountLabel } from "@/lib/account-label";
 import { CACHE } from "@/lib/cache-keys";
 import { settingsForCompanies } from "@/lib/queries/settings";
 import { queryItemOptions } from "@/lib/queries/item-options";
-export { CACHE } from "@/lib/cache-keys";
+export { CACHE, READ_DOMAIN } from "@/lib/cache-keys";
 
 // Dropdown option lists. Nearly forty near-identical copies of these were spread
 // across lib/actions/* — nine separate functions selected the full companies
@@ -67,8 +67,24 @@ export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][])
   // here safe to rely on. The one writer this misses is settlement.ts (it
   // takes a transaction handle, not a request); its callers all invalidate
   // after commit, which lands here.
-  invalidate(...keys, CACHE.dashboard, CACHE.reports, CACHE.pageReads);
+  //
+  // The page reads are deliberately NOT dropped here. This used to clear the
+  // whole `page_reads:` prefix, which meant one contact rename cost every list
+  // on every screen — for every user and every company scope — its cache entry,
+  // and the cache was never warm for anything. Writers now name the domains they
+  // can actually change through invalidateReads below.
+  invalidate(...keys, CACHE.dashboard, CACHE.reports);
 }
+
+// The cached list reads a write can change (lib/cache-keys.ts holds what each one
+// selects). Defined in lib/read-cache.ts beside the function that builds the keys
+// and re-exported here, so an action file needs one import line for both halves of
+// its invalidation.
+//
+// Separate from invalidateLookups rather than folded into it because the two
+// answer different questions: which reference lists this write changed, and which
+// screens' lists it changed. Most writes touch a different set of each.
+export { invalidateReads } from "@/lib/read-cache";
 
 async function requireAuth() {
   const session = await getSession();

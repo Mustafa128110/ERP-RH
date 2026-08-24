@@ -12,6 +12,7 @@ import { useClientUserId } from "@/lib/client-user";
 import { useSync } from "@/components/layout/SyncProvider";
 import { ChequeQuickAddButton, chequeDialogOptions } from "@/components/modules/AccountForms";
 import { inCompany } from "@/lib/contact-scope";
+import { optimistically } from "@/lib/optimistic-records";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
@@ -432,6 +433,7 @@ export function ExpenseEditForm({
   cashAccountOptions,
   chequeOptions,
   onDone,
+  onSaving,
 }: {
   expenseId: string;
   defaults: ExpenseValues;
@@ -443,8 +445,17 @@ export function ExpenseEditForm({
   cashAccountOptions: CashOption[];
   chequeOptions: ChequeOption[];
   onDone?: () => void;
+  // The list's hook: the row takes the new amount, date and note, and this popup
+  // steps aside the moment Save is pressed. Optional — without it this form waits
+  // for the server and then closes, as it always did.
+  //
+  // No matching failure callback is needed. What the list holds is optimistic
+  // state made inside the action below, so React puts the stored values back —
+  // and brings this popup out of hiding with everything typed still in it — the
+  // moment that action settles without a save having happened.
+  onSaving?: (formData: FormData) => void;
 }) {
-  const [state, action, pending] = useActionState(updateExpense.bind(null, expenseId), undefined);
+  const [state, action, pending] = useActionState(optimistically(updateExpense.bind(null, expenseId), onSaving), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -471,8 +482,21 @@ export function ExpenseEditForm({
   );
 }
 
-export function DeleteExpenseButton({ expenseId, onDone }: { expenseId: string; onDone?: () => void }) {
-  const [state, action, pending] = useActionState(deleteExpense, undefined);
+export function DeleteExpenseButton({
+  expenseId,
+  onDone,
+  onDeleting,
+}: {
+  expenseId: string;
+  onDone?: () => void;
+  // The list drops the row when this is called, from inside the action below so
+  // it runs after the confirm() has had its say rather than before it. Nothing
+  // reports a failure back: the removal is optimistic state made inside that
+  // action, so if the cancellation is refused React puts the row back on its own
+  // as the action settles.
+  onDeleting?: () => void;
+}) {
+  const [state, action, pending] = useActionState(optimistically(deleteExpense, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone?.();

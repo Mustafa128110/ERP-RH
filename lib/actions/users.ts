@@ -17,6 +17,7 @@ import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 
 export interface UserListItem {
   id: string;
@@ -203,6 +204,8 @@ export async function updateUser(userId: string, _prevState: ActionResult | unde
     // Status is what getSession() gates on, so a deactivation has to drop the
     // cached session rather than wait out its TTL.
     invalidateSessions();
+    // The expense list names whoever entered each row, joined from this table.
+    invalidateReads(READ_DOMAIN.expenses);
     revalidatePath("/users");
     await recordAudit({ action: "update", entity: "user", entityId: userId, summary: name, detail: `Status ${status}` });
     return { success: true };
@@ -282,6 +285,7 @@ export async function deleteUser(_prevState: ActionResult | undefined, formData:
     }
 
     invalidateSessions();
+    invalidateReads(READ_DOMAIN.expenses);
     revalidatePath("/users");
     await recordAudit({ action: "delete", entity: "user", entityId: userId, summary: target?.name ?? userId, detail: target?.email });
     if (authCleanupFailed) {

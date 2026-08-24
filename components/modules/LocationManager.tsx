@@ -38,11 +38,11 @@ export function LocationManager({ locations }: { locations: Location[] }) {
       emptyMessage="No locations yet."
       dialogTitle={(l) => l.name}
       renderBatchDialog={({ onClose, onDone }) => <LocationBatchAddDialog onClose={onClose} onDone={onDone} />}
-      renderEditBody={({ record, onDone }) => (
+      renderEditBody={({ record, onDone, onSaving, onDeleting }) => (
         <>
-          <LocationEditForm locationId={record.id} defaults={record} onDone={onDone} />
+          <LocationEditForm locationId={record.id} defaults={record} onDone={onDone} onSaving={onSaving} />
           <DangerZone>
-            <DeleteLocationButton locationId={record.id} onDone={onDone} />
+            <DeleteLocationButton locationId={record.id} onDone={onDone} onDeleting={onDeleting} />
           </DangerZone>
         </>
       )}

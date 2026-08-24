@@ -49,11 +49,39 @@ for (const file of ["lib/actions/sales.ts", "lib/actions/purchases.ts", "lib/act
   contains(file, '.for("update")');
 }
 
-// Private pages and RSC payloads must never enter a persistent browser cache.
+// Rendered pages and RSC payloads ARE cached now — the app has to stay readable
+// on a dropping shop link, and a full page load offline can get its HTML from
+// nowhere else. That was an explicit decision, so the invariant is no longer
+// "never cache private HTML"; it is that private HTML cannot outlive the session
+// that fetched it, and cannot be served in place of a live answer.
 const worker = read("public/sw.js");
 assert.ok(worker.includes('url.pathname.startsWith("/_next/static/")'));
-assert.ok(!worker.includes('request.mode === "navigate"'), "service worker must not intercept navigations");
-assert.ok(!worker.includes('cache.put(request, copy)') || worker.includes("if (!isPublicStatic) return"));
+// Two caches, and the split is the safety argument: the page cache has to be
+// droppable on sign-out without discarding the build assets, which are not
+// private at all and would otherwise be re-downloaded on every logout.
+assert.ok(worker.includes('const SHELL_CACHE = "erp-shell-v1"'), "private pages need their own cache generation");
+assert.ok(worker.includes('const STATIC_CACHE = "erp-static-v2"'), "public build output must not share the private cache");
+assert.ok(worker.includes("KEEP.includes(key)"), "activate must keep both caches — otherwise it wipes the page cache on every deploy");
+// Cleared on sign-out (Topbar's postMessage) AND on anything landing on /login,
+// which is where both logout and an expired session go. The second path is what
+// makes it reliable: the postMessage is racing a navigation away from the page,
+// and on a machine the whole shop shares a missed clear leaves one person's
+// books readable by the next.
+assert.ok(worker.includes("isLoginPath"), "the worker must recognise the no-session route");
+assert.equal(
+  worker.split("caches.delete(SHELL_CACHE)").length - 1,
+  2,
+  "the page cache must be dropped from both the sign-out message and the /login path",
+);
+// Never pin "you are not signed in" over a real route: a redirected or non-ok
+// response is not storable, which covers requireSession() sending an expired
+// session to /login and the unfollowed opaqueredirect browsers hand back for
+// some navigations.
+assert.ok(worker.includes("if (!response.ok || response.redirected) return false;"), "redirects must not be cached");
+// Network-first for pages, never cache-first. A cached page answers a request
+// that could not be made; it must never answer one that could.
+assert.ok(worker.includes("function networkFirst"), "pages must go through the network-first path");
+assert.ok(worker.includes("networkFirst(request, isRsc ? rscKey(request, url) : request)"), "pages and RSC payloads must both use it");
 assert.ok(!worker.includes('const CACHE = "erp-v1"'), "the old private-page cache generation must be retired");
 
 // Every browser CSV export uses the shared formula-injection escaping.

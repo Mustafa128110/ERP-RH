@@ -5,18 +5,17 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { DetailHover } from "@/components/ui/DetailHover";
 import type { ColumnDef, Row } from "@/lib/table";
 import type { AuditRow } from "@/lib/actions/audit";
+import { formatTimestamp } from "@/lib/format";
 
 // The audit log used to be four invented rows in lib/modules.ts, shown as if
 // they were history. It reads real audit_logs rows now, written by every
 // mutation in lib/actions (see lib/actions/audit.ts).
 
 // Local time, and the seconds kept: two edits a minute apart are the same minute
-// on a date-only stamp, and "who changed it last" is exactly the question.
-function when(value: Date): string {
-  const d = new Date(value);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
+// on a date-only stamp, and "who changed it last" is exactly the question. The
+// party statement's own history panel reads the same stamps, so the format is
+// shared rather than written twice.
+const when = formatTimestamp;
 
 const columns: ColumnDef[] = [
   { key: "when", label: "When" },

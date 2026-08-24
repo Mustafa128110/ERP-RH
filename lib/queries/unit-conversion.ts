@@ -18,10 +18,27 @@ export type QuantityToConvert = {
   quantity: number;
 };
 
+// What a line whose unit has no conversion to the item's base unit does to the
+// document it is on.
+//
+// "throw" is the strict rule every stock-moving document started with: no
+// multiplier, no save. "assume-base" lets the document through and counts the
+// entered quantity as base units — which is what the statement below *already*
+// does for the two other cases where the multiplier is unknown (the item has no
+// base unit, or the line has no unit at all). A missing conversion is a setup gap
+// on the products page, and it is not a reason to turn a customer away at the
+// counter; the stock figure it leaves behind is put right by entering the
+// conversion and re-saving the document.
+export type MissingConversionPolicy = "throw" | "assume-base";
+
 // Establish missing base units and convert an entire document in one database
 // statement. `multiplier` means one from-unit equals N base units. The caller
 // receives results in the same order as the submitted lines.
-export async function resolveBaseQuantities(tx: Tx, lines: QuantityToConvert[]): Promise<number[]> {
+export async function resolveBaseQuantities(
+  tx: Tx,
+  lines: QuantityToConvert[],
+  onMissing: MissingConversionPolicy = "throw",
+): Promise<number[]> {
   if (lines.length === 0) return [];
 
   const values = sql.join(
@@ -69,9 +86,16 @@ export async function resolveBaseQuantities(tx: Tx, lines: QuantityToConvert[]):
     ORDER BY line_index
   `);
 
-  if (rows.length !== lines.length || rows.some((row) => row.missing || row.base_quantity === null)) {
+  // A short row set means the statement didn't answer for every line. That is a
+  // fault, not a missing setting, and no policy makes it safe to guess past.
+  if (rows.length !== lines.length) throw new MissingUnitConversionError();
+  if (onMissing === "throw" && rows.some((row) => row.missing || row.base_quantity === null)) {
     throw new MissingUnitConversionError();
   }
-  return rows.map((row) => Number(row.base_quantity));
+  // `Math.abs`, matching the quantity handed to the statement above: the sign of a
+  // movement is the caller's `stockMovement`, never the base quantity's.
+  return rows.map((row, index) =>
+    row.base_quantity === null ? Math.abs(lines[index].quantity) : Number(row.base_quantity),
+  );
 }
 

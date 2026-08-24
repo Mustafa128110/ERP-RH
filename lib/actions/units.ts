@@ -6,9 +6,13 @@ import { db } from "@/lib/db";
 import { units } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission } from "@/lib/auth/permissions";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+
+// A unit symbol is printed on every sale line, purchase line and stock row, and
+// on-hand is totalled per unit — so renaming "Bag" is visible on three screens.
+const READS = [READ_DOMAIN.sales, READ_DOMAIN.purchases, READ_DOMAIN.stock] as const;
 
 export async function listUnits() {
   const session = await getSession();
@@ -50,6 +54,7 @@ export async function createUnitsBatch(rows: UnitBatchRow[]): Promise<CreateResu
       .values(valid.map((r) => ({ name: r.name.trim(), symbol: r.symbol.trim() || null })))
       .returning({ id: units.id, name: units.name, symbol: units.symbol });
     invalidateLookups(CACHE.units);
+    invalidateReads(...READS);
     revalidatePath("/inventory/units");
     await recordAudit({ action: "create", entity: "unit", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -66,6 +71,7 @@ export async function updateUnit(unitId: string, _prevState: ActionResult | unde
 
     await db.update(units).set(values).where(eq(units.id, unitId));
     invalidateLookups(CACHE.units);
+    invalidateReads(...READS);
     revalidatePath("/inventory/units");
     await recordAudit({ action: "update", entity: "unit", entityId: unitId, summary: values.name });
     return { success: true };
@@ -81,6 +87,7 @@ export async function deleteUnit(_prevState: ActionResult | undefined, formData:
     await db.delete(units).where(eq(units.id, unitId));
 
     invalidateLookups(CACHE.units);
+    invalidateReads(...READS);
     revalidatePath("/inventory/units");
     await recordAudit({ action: "delete", entity: "unit", entityId: unitId, summary: unitId });
     return { success: true };

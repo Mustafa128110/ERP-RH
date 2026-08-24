@@ -7,7 +7,7 @@ import { bankAccounts, cashAccounts, chequeRegister, companies, documentNumberLe
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalancesBatch } from "@/lib/actions/settlement";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
@@ -204,6 +204,9 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       });
 
       invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
+      // Both balances moved, and a cheque may have been consumed. The transfer
+      // documents themselves are JOURNAL_ENTRY, which no cached list shows.
+      invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses);
       revalidatePath("/accounts");
       revalidatePath("/dashboard");
       await recordAudit({ action: "create", entity: "cash transfer", summary: `${fromValue} to ${toValue}`, companyId, detail: `Amount ${total}` });
@@ -254,6 +257,7 @@ export async function deleteCashTransfer(_prevState: ActionResult | undefined, f
     if (!changed) return { error: "Transfer not found — it may already be cancelled." };
 
     invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
+    invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses);
     revalidatePath("/accounts");
     revalidatePath("/dashboard");
     await recordAudit({ action: "cancel", entity: "cash transfer", entityId: outDoc.id, summary: outDoc.number, companyId: outDoc.companyId });

@@ -26,13 +26,24 @@ import { adjustSettlementBalance, SettlementScopeError, type SettlementType } fr
 import { resolveExpenseCategoryId } from "@/lib/actions/resolve-refs";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { recordAudit } from "@/lib/actions/audit";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { linkCheque } from "@/lib/actions/cheque-link";
 import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { round1 } from "@/lib/format";
 
 const REVALIDATION_PATHS = ["/purchases/market", "/inventory/stock", "/inventory/products", "/expenses", "/dashboard"];
+// The same five screens, as cached reads. A market purchase is a MARKET_PURCHASE
+// document, which no cached list shows — it reaches stock and products through the
+// movements it books, and expenses/payments/accounts through the expense row and
+// the cheque or account that paid for it.
+const READS = [
+  READ_DOMAIN.stock,
+  READ_DOMAIN.products,
+  READ_DOMAIN.expenses,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.accounts,
+] as const;
 const confirmationDocuments = alias(documents, "confirmation_documents");
 
 export async function listMarketPurchaseRequests() {
@@ -238,6 +249,7 @@ export async function confirmMarketPurchases(
     }
 
     invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.expenseCategories, CACHE.cheques);
+    invalidateReads(...READS);
     for (const path of REVALIDATION_PATHS) revalidatePath(path);
     await recordAudit({ action: "create", entity: "market purchase", entityId: createdId, summary: number, companyId, detail: `${input.selected.length} item(s)` });
     return { success: true, id: createdId };
@@ -285,6 +297,7 @@ export async function cancelMarketPurchase(_prevState: ActionResult | undefined,
     });
 
     invalidateLookups(CACHE.items, CACHE.expenseCategories, CACHE.cheques);
+    invalidateReads(...READS);
     for (const path of REVALIDATION_PATHS) revalidatePath(path);
     await recordAudit({ action: "cancel", entity: "market purchase", entityId: documentId, summary: existing.number, companyId: existing.companyId });
     return { success: true };

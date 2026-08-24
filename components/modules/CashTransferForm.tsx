@@ -5,6 +5,7 @@ import { createCashTransfer, deleteCashTransfer } from "@/lib/actions/transfers"
 import { Dialog } from "@/components/ui/Dialog";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
+import { optimistically } from "@/lib/optimistic-records";
 import { todayISO } from "@/lib/format";
 
 type Option = { id: string; name: string };
@@ -133,8 +134,20 @@ export function CashTransferDialog({
   );
 }
 
-export function DeleteCashTransferButton({ transferId, onDone }: { transferId: string; onDone: () => void }) {
-  const [state, action, pending] = useActionState(deleteCashTransfer, undefined);
+export function DeleteCashTransferButton({
+  transferId,
+  onDone,
+  onDeleting,
+}: {
+  transferId: string;
+  onDone: () => void;
+  // The list drops the row when this is called, from inside the action below so
+  // it runs after the confirm() has had its say. Nothing reports a failure back:
+  // the removal is optimistic state made inside that action, so a refusal puts
+  // the row back on its own as the action settles.
+  onDeleting?: () => void;
+}) {
+  const [state, action, pending] = useActionState(optimistically(deleteCashTransfer, onDeleting), undefined);
 
   useEffect(() => {
     if (state?.success) onDone();

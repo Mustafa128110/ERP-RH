@@ -12,6 +12,7 @@ import { exportProductsCsv, importProductsCsv } from "@/lib/actions/products";
 import { PRODUCT_CSV_COLUMNS } from "@/lib/csv-columns";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
+import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 
 // No S.No column here — DataTable numbers every row itself.
@@ -70,6 +71,14 @@ export function ProductsManager({
   const [selected, setSelected] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
 
+  // Rows the list shows, which is the server's list plus whatever is in flight.
+  // The edit grid changes several products at once, so this is where the batch
+  // stops being a wait and becomes a list that has already moved: every ticked
+  // row takes its typed name, code, category and brand on the press and fades
+  // until the payload lands. The rate columns are derived server-side and the
+  // grid can't edit them, so they are left alone rather than guessed at.
+  const { records: shown, pending, patch } = useOptimisticRecords(rows, "id");
+
   function closeBatch() {
     setBatchOpen(false);
   }
@@ -91,7 +100,7 @@ export function ProductsManager({
     <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Products"
-        subtitle={selected.length > 0 ? `${selected.length} of ${rows.length} item(s) selected` : `${rows.length} item(s)`}
+        subtitle={selected.length > 0 ? `${selected.length} of ${shown.length} item(s) selected` : `${shown.length} item(s)`}
       >
         <button
           type="button"
@@ -131,22 +140,31 @@ export function ProductsManager({
           keyboard route through the list ends where the mouse route does. */}
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={shown}
         idKey="id"
         selected={selected}
         onSelectedChange={setSelected}
         onBatchEdit={() => setEditOpen(true)}
+        pendingIds={pending}
         searchPlaceholder="Search products…"
       />
 
       {editOpen && (
+        // Hidden rather than closed while the batch is in the air. The grid holds
+        // a screenful of typed cells across however many products were ticked, so
+        // a refusal has to find them all still there — a closed dialog would have
+        // thrown the lot away. `pending` empties when the save settles, so an
+        // error brings the grid straight back and a success closes it for real
+        // from onDone.
         <ProductsBatchEditDialog
           itemIds={selected}
           companyOptions={companyOptions}
           categoryOptions={categoryOptions}
           brandOptions={brandOptions}
+          hidden={selected.some((id) => pending.includes(id))}
           onClose={() => setEditOpen(false)}
           onDone={closeEdit}
+          onSaving={(edits) => edits.forEach((e) => patch(e.id, e.values))}
         />
       )}
 
