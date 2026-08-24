@@ -1,19 +1,143 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { formatDate, money, todayISO } from "@/lib/format";
-import { getPartyLedger, deleteLedgerRow, type PartyLedgerEntry, type PartyLedgerResult } from "@/lib/actions/ledger";
+import Link from "next/link";
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
+import { formatDate, formatTimestamp, money, todayISO } from "@/lib/format";
+import {
+  getPartyLedger,
+  deleteLedgerRow,
+  getPartyOpeningBalance,
+  setPartyOpeningBalance,
+  previewLedgerRowDelete,
+  previewPartyOpeningBalance,
+  getPartyAuditTrail,
+  type LedgerImpactPreview,
+  type PartyLedgerEntry,
+  type PartyLedgerResult,
+} from "@/lib/actions/ledger";
+import type { AuditRow } from "@/lib/actions/audit";
+import { LEDGER_TYPE_LABELS, type SettlementState } from "@/lib/ledger-constants";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHover } from "@/components/ui/DetailHover";
+import { DateField } from "@/components/ui/DateField";
+import { fieldClass, labelClass, labelTextClass, errorTextClass, confirmNoticeClass, primaryActionClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { INVOICE_COMPANY_NAME } from "@/lib/invoice-pdf";
+import { ledgerGridSelectionProps, computeCellStats, onSelectionChange } from "@/components/ui/ledger-grid";
 
-const TYPE_LABELS: Record<PartyLedgerEntry["type"], string> = {
-  item_sold: "Item Sold",
-  item_bought: "Item Bought",
-  payment_received: "Payment Received",
-  payment_made: "Payment Made",
-  journal_entry: "Journal Entry",
+// The statement's own labels come from the shared map — the same one the ledger
+// list and the `?` sheet read, so a kind cannot be renamed in one place only.
+const TYPE_LABELS = LEDGER_TYPE_LABELS;
+
+const SETTLEMENT_LABELS: Record<SettlementState, string> = {
+  outstanding: "Outstanding",
+  partial: "Part paid",
+  settled: "Settled",
 };
+
+const SETTLEMENT_CLASS: Record<SettlementState, string> = {
+  outstanding: "border-sand bg-ivory text-steel",
+  partial: "border-warning/40 bg-warning-tint text-warning",
+  settled: "border-success/40 bg-success-tint text-success",
+};
+
+// The FIFO allocations an edit or a delete is about to move, named at both ends.
+// Rendered wherever a confirmation has to say what else changes — which is the
+// whole point of asking rather than refusing.
+function ImpactList({ preview }: { preview: LedgerImpactPreview }) {
+  if (preview.impacts.length === 0) {
+    return <p className="text-xs text-steel">Nothing else on this account is settled against it — only the running balance moves.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-steel">
+        {preview.impacts.length} settlement{preview.impacts.length === 1 ? "" : "s"} affected
+      </p>
+      <div className="scroll-thin max-h-48 overflow-auto rounded border border-sand">
+        <table className="w-full text-xs">
+          <tbody>
+            {preview.impacts.map((impact, i) => (
+              <tr key={i} className="border-b border-sand/50 last:border-0">
+                <td className="px-2 py-1.5 text-steel">
+                  {impact.payment ? `${TYPE_LABELS[impact.payment.type]} ${impact.payment.number}` : "Payment"}
+                </td>
+                <td className="px-2 py-1.5 text-ink">
+                  {impact.item ? `${TYPE_LABELS[impact.item.type]} ${impact.item.number}` : "—"}
+                </td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-steel">
+                  {money(impact.before)} → <span className="font-medium text-ink">{money(impact.after)}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {preview.released > 0 && (
+        <p className="text-xs text-steel">
+          <span className="font-medium text-ink">{money(preview.released)}</span> stops being settled and is held on the party&apos;s account, to be
+          absorbed by the next outstanding item in the same queue.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Ref number cell: clicking opens the source document for editing. */
+function RefCell({ entry }: { entry: PartyLedgerEntry & { balance: number } }) {
+  const label = entry.reference ?? "—";
+
+  // Sales invoices have an edit route at /sales/[id]
+  if (entry.code === "SALES_INVOICE") {
+    return (
+      <Link
+        href={`/sales/${entry.documentId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
+        onClick={(e: MouseEvent) => e.stopPropagation()}
+      >
+        {label}
+      </Link>
+    );
+  }
+
+  // For other document types, show a read-only detail hover with the context
+  if (!entry.code || entry.code === "JOURNAL_ENTRY") {
+    return <span className="text-steel">{label}</span>;
+  }
+
+  // Purchases, payments, opening balances — read-only detail panel
+  return (
+    <DetailHover
+      trigger={<span className="cursor-help underline decoration-dotted decoration-zinc-400 underline-offset-4">{label}</span>}
+      width={320}
+      placement="right"
+      heading="Reference"
+    >
+      <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+        <span className="text-steel">Date</span>
+        <span className="text-right tabular-nums text-ink">{formatDate(entry.date)}</span>
+        <span className="text-steel">Type</span>
+        <span className="text-right text-ink">{TYPE_LABELS[entry.type]}</span>
+        {entry.debit > 0 && (
+          <>
+            <span className="text-steel">Debit</span>
+            <span className="text-right tabular-nums text-ink">{money(entry.debit)}</span>
+          </>
+        )}
+        {entry.credit > 0 && (
+          <>
+            <span className="text-steel">Credit</span>
+            <span className="text-right tabular-nums text-success">{money(entry.credit)}</span>
+          </>
+        )}
+        <span className="text-steel">Balance</span>
+        <span className={`text-right font-medium tabular-nums ${entry.balance > 0 ? "text-error" : entry.balance < 0 ? "text-success" : "text-ink"}`}>
+          {money(entry.balance)}
+        </span>
+      </div>
+    </DetailHover>
+  );
+}
 
 /** Plain text description with dotted underline. Hover shows detail. */
 function DescriptionCell({ entry }: { entry: PartyLedgerEntry }) {
@@ -70,11 +194,68 @@ function DescriptionCell({ entry }: { entry: PartyLedgerEntry }) {
   return <span>{label}</span>;
 }
 
+/** §2's second invariant, one row at a time: how much of this document FIFO has
+ *  settled, and against what. A journal entry never settles anything, so it shows
+ *  a dash rather than a misleading "Outstanding". */
+function SettlementCell({ entry }: { entry: PartyLedgerEntry & { balance: number } }) {
+  if (!entry.settlement) return <span className="text-xs text-steel">—</span>;
+
+  const total = entry.debit > 0 ? entry.debit : entry.credit;
+  const settled = entry.settledAmount ?? 0;
+  const pill = (
+    <span className={`inline-block cursor-help rounded-full border px-2 py-0.5 text-[10px] font-medium ${SETTLEMENT_CLASS[entry.settlement]}`}>
+      {SETTLEMENT_LABELS[entry.settlement]}
+    </span>
+  );
+
+  const links = entry.settledAgainst ?? [];
+  if (links.length === 0) {
+    // Nothing to list, so nothing to hover. An outstanding invoice is the common
+    // case here and it has no story behind it yet.
+    return (
+      <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${SETTLEMENT_CLASS[entry.settlement]}`}>
+        {SETTLEMENT_LABELS[entry.settlement]}
+      </span>
+    );
+  }
+
+  const isPayment = entry.type === "payment_received" || entry.type === "payment_made";
+  return (
+    <DetailHover trigger={pill} width={380}>
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-steel">
+        {isPayment ? "Applied to" : "Settled by"}
+      </p>
+      <table className="w-full text-sm">
+        <tbody>
+          {links.map((link, i) => (
+            <tr key={`${link.documentId}-${i}`} className="border-b border-sand/50 last:border-0">
+              <td className="py-1.5 pr-4 whitespace-nowrap tabular-nums text-steel">{formatDate(link.date)}</td>
+              <td className="py-1.5 pr-4 text-ink">
+                {TYPE_LABELS[link.type]}
+                {link.reference ? ` ${link.reference}` : ""}
+              </td>
+              <td className="py-1.5 text-right tabular-nums font-medium text-ink">{money(link.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 border-t border-sand pt-1.5 text-xs text-steel">
+        {money(settled)} of {money(total)}
+        {settled < total ? ` · ${money(total - settled)} still open` : ""}
+      </p>
+    </DetailHover>
+  );
+}
+
 export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, onExport }: { contactId: string; companyId: string; contactName: string; onClose: () => void; onExport: (fmt: "pdf" | "png", data: PartyLedgerResult, entries: (PartyLedgerEntry & { balance: number })[], summary: { opening: number; totalDebit: number; totalCredit: number; closing: number }) => void }) {
   const [data, setData] = useState<PartyLedgerResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Cell selection state for Excel-like copy/paste and the status bar
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const [selectionStats, setSelectionStats] = useState<ReturnType<typeof computeCellStats> | null>(null);
 
   // Filters
   const [fromDate, setFromDate] = useState("");
@@ -87,7 +268,16 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     }
     return true;
   });
-  const [openingOverride, setOpeningOverride] = useState<string | null>(null);
+  // The party's stored opening balance, and the panel that edits it. This is a
+  // real document on the account — the oldest item in its FIFO queue — not a
+  // number typed into the statement, so it arrives with the ledger and is saved
+  // back through a server action.
+  const [editOpening, setEditOpening] = useState(false);
+
+  // §7: every edit and delete recorded against this party. Fetched on demand —
+  // the panel is closed on open, and most readings of a statement never want it.
+  const [history, setHistory] = useState<AuditRow[] | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Persist sort direction
   useEffect(() => {
@@ -95,6 +285,20 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
       localStorage.setItem("party-ledger-sort-desc", String(desc));
     }
   }, [desc]);
+
+  // Subscribe to cell selection changes for the status bar
+  useEffect(() => {
+    return onSelectionChange((stats) => setSelectionStats(stats));
+  }, []);
+
+  // One way back to the server for everything on this screen. Both invariants are
+  // derived and recomputed from scratch on any change, so after a write there is
+  // no patching a row in place — the statement is re-read whole.
+  const reload = useCallback(async () => {
+    const fresh = await getPartyLedger(contactId, companyId);
+    if (fresh) setData(fresh);
+    return fresh;
+  }, [contactId, companyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +317,25 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     })();
     return () => { cancelled = true; };
   }, [contactId, companyId]);
+
+  // Opened once, then kept. A trail is history: it doesn't change while the
+  // statement is on screen except by an edit made here, which refetches it.
+  useEffect(() => {
+    if (!historyOpen || history !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getPartyAuditTrail(contactId, companyId);
+        if (!cancelled) setHistory(rows);
+      } catch {
+        // A trail that won't load is not a reason to break the statement. The
+        // panel says there is nothing rather than throwing an error at someone
+        // who came here to read a balance.
+        if (!cancelled) setHistory([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [historyOpen, history, contactId, companyId]);
 
   const processedEntries = useMemo(() => {
     if (!data) return [];
@@ -135,16 +358,19 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     return filtered;
   }, [data, fromDate, toDate, search, desc]);
 
-  const computedOpening = useMemo(() => {
+  // What the Balance column starts from: the party's stored opening balance plus
+  // everything that happened before the period on screen.
+  //
+  // Date only — not "everything the filters hid". Narrowing to a date range is a
+  // statement for that period and its opening figure has to carry the account
+  // forward to it; typing in the search box is a way of finding a row, and it must
+  // not move the balance the statement opens with.
+  const effectiveOpening = useMemo(() => {
     if (!data) return 0;
-    const allDebit = data.entries.reduce((s, e) => s + e.debit, 0);
-    const allCredit = data.entries.reduce((s, e) => s + e.credit, 0);
-    const filteredDebit = processedEntries.reduce((s, e) => s + e.debit, 0);
-    const filteredCredit = processedEntries.reduce((s, e) => s + e.credit, 0);
-    return allDebit - allCredit - (filteredDebit - filteredCredit);
-  }, [data, processedEntries]);
-
-  const effectiveOpening = openingOverride !== null ? Number(openingOverride) || 0 : computedOpening;
+    if (!fromDate) return data.openingBalance;
+    const before = data.entries.filter((e) => e.date < fromDate);
+    return before.reduce((sum, e) => sum + e.debit - e.credit, data.openingBalance);
+  }, [data, fromDate]);
 
   const entriesWithBalance = useMemo(() => {
     let running = effectiveOpening;
@@ -169,22 +395,48 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const [confirmDelete, setConfirmDelete] = useState<{ entry: PartyLedgerEntry & { balance: number } } | null>(null);
   const [confirmDelete2, setConfirmDelete2] = useState<{ entry: PartyLedgerEntry & { balance: number } } | null>(null);
 
+  // §6: what else on the account moves if this row goes. Tagged with the document
+  // it answers for, so a preview that lands after the dialog moved to another row
+  // is ignored rather than shown against the wrong document.
+  const [impact, setImpact] = useState<{ documentId: string; preview: LedgerImpactPreview } | null>(null);
+  const [impactError, setImpactError] = useState<string | null>(null);
+
+  async function askDelete(entry: PartyLedgerEntry & { balance: number }) {
+    setConfirmDelete({ entry });
+    setImpact(null);
+    setImpactError(null);
+    try {
+      const preview = await previewLedgerRowDelete(entry.documentId);
+      if ("error" in preview) setImpactError(preview.error);
+      else setImpact({ documentId: entry.documentId, preview });
+    } catch {
+      setImpactError(TRANSPORT_ERROR_MESSAGE);
+    }
+  }
+
   async function handleDelete(docId: string) {
     setConfirmDelete(null);
     setConfirmDelete2(null);
     setDeletingId(docId);
     try {
-      const result = await deleteLedgerRow(docId);
+      // `true`: the impact list was on screen in the confirmation above, so the
+      // settlement this releases has been shown to the person asking for it.
+      const result = await deleteLedgerRow(docId, true);
       if (result?.error) {
         setError(result.error);
       } else {
-        const fresh = await getPartyLedger(contactId, companyId);
-        if (fresh) setData(fresh);
+        await reload();
+        // The trail just gained a row. Dropping it makes the panel refetch the
+        // next time it is opened rather than showing a history missing its
+        // newest entry.
+        setHistory(null);
       }
     } catch {
       setError("Failed to delete entry.");
     } finally {
       setDeletingId(null);
+      setImpact(null);
+      setImpactError(null);
     }
   }
 
@@ -224,17 +476,23 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded border border-sand bg-white p-3 text-center">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-steel">Opening Balance</p>
-              <div className="mt-1 flex items-center justify-center gap-1">
-                <input
-                  type="number"
-                  step="0.01"
-                  value={openingOverride ?? computedOpening}
-                  onChange={(e) => setOpeningOverride(e.target.value)}
-                  className="w-28 rounded border border-sand bg-ivory px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums text-ink focus:border-navy-800 focus:outline-none"
-                />
-                {openingOverride !== null && (
-                  <button type="button" onClick={() => setOpeningOverride(null)} className="rounded border border-sand px-1 py-0.5 text-[9px] font-medium text-steel hover:bg-ivory" title="Reset">Reset</button>
+              <p className={`mt-1 text-sm font-semibold tabular-nums ${effectiveOpening > 0 ? "text-error" : effectiveOpening < 0 ? "text-success" : "text-ink"}`}>
+                {money(effectiveOpening)}
+              </p>
+              <div className="mt-1 flex items-center justify-center gap-2">
+                {fromDate && (
+                  <span className="text-[9px] text-steel" title={`Stored opening ${money(data.openingBalance)} carried forward to ${formatDate(fromDate)}`}>
+                    carried fwd
+                  </span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setEditOpening(true)}
+                  className="rounded border border-sand px-1.5 py-0.5 text-[9px] font-medium text-steel hover:bg-ivory"
+                  title="Set the party's opening balance"
+                >
+                  Edit
+                </button>
               </div>
             </div>
             <div className="rounded border border-sand bg-white p-3 text-center">
@@ -253,6 +511,26 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
             </div>
           </div>
 
+          {/* §5 — money taken beyond what was outstanding. Not a correction to
+              make and not an error: it sits on the account and the next invoice
+              in the same queue absorbs it automatically. Shown only when there
+              is some, so a normal account carries no extra furniture. */}
+          {(data.advanceReceived > 0 || data.advancePaid > 0) && (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded border border-info/40 bg-info-tint px-3 py-2 text-xs">
+              {data.advanceReceived > 0 && (
+                <p className="text-ink">
+                  Advance held from this party: <span className="font-semibold tabular-nums">{money(data.advanceReceived)}</span>
+                </p>
+              )}
+              {data.advancePaid > 0 && (
+                <p className="text-ink">
+                  Advance paid to this party: <span className="font-semibold tabular-nums">{money(data.advancePaid)}</span>
+                </p>
+              )}
+              <p className="text-steel">Applied to the next invoice on that side, without anyone linking it.</p>
+            </div>
+          )}
+
           {/* Filters */}
           <div className="flex flex-wrap items-end gap-2 rounded border border-sand bg-white p-2">
             <label className="flex flex-col gap-0.5">
@@ -268,6 +546,13 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               <input type="text" placeholder="Item or ref…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 w-36 rounded border border-sand px-1.5 text-xs text-ink" />
             </label>
             <div className="ml-auto flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen((v) => !v)}
+                className={`h-8 rounded border px-2 text-[10px] font-medium ${historyOpen ? "border-navy-800 bg-navy-800 text-white" : "border-sand text-steel hover:bg-ivory"}`}
+              >
+                History
+              </button>
               <button type="button" onClick={() => handleExport("png")} className="h-8 rounded border border-sand px-2 text-[10px] font-medium text-steel hover:bg-ivory">
                 PNG
               </button>
@@ -276,6 +561,56 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               </button>
             </div>
           </div>
+
+          {/* §7 — what was changed on this account, and by whom. Field-level
+              old → new comes from `changeSummary`, so it reads the same here as
+              it does on the audit page. */}
+          {historyOpen && (
+            <div className="rounded border border-sand bg-white">
+              {history === null ? (
+                <p className="p-3 text-xs text-steel">Loading history…</p>
+              ) : history.length === 0 ? (
+                <p className="p-3 text-xs text-steel">Nothing has been edited or deleted on this account.</p>
+              ) : (
+                <div className="scroll-thin max-h-56 overflow-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-ivory/90 backdrop-blur">
+                      <tr className="border-b border-sand">
+                        <th className="w-36 px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-steel">When</th>
+                        <th className="w-28 px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-steel">Who</th>
+                        <th className="w-20 px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-steel">Action</th>
+                        <th className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-steel">What changed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((row) => (
+                        <tr key={row.id} className="border-b border-sand/50 last:border-0 align-top">
+                          <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-steel">
+                            {formatTimestamp(row.createdAt)}
+                          </td>
+                          <td className="px-2 py-1.5 text-steel">{row.userName}</td>
+                          <td className="px-2 py-1.5 text-steel">{row.action}</td>
+                          <td className="px-2 py-1.5 text-ink">
+                            <span className="font-medium">{row.entity}</span>
+                            {row.summary ? ` · ${row.summary}` : ""}
+                            {/* One field per line: a save that moved four columns
+                                is unreadable as a single run-on sentence. */}
+                            {row.detail && (
+                              <span className="mt-0.5 block text-steel">
+                                {row.detail.split("; ").map((line, i) => (
+                                  <span key={i} className="block">{line}</span>
+                                ))}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Ledger table */}
           {entriesWithBalance.length === 0 ? (
@@ -287,7 +622,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
             </div>
           ) : (
             <div className="scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
-              <table className="w-full min-w-[66rem] border-collapse text-sm">
+              <table className="w-full min-w-[76rem] border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">
                     <th className="w-40 cursor-pointer select-none py-2.5 pl-8 pr-8 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => setDesc((d) => !d)}>
@@ -298,26 +633,37 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                     <th className="w-40 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Debit</th>
                     <th className="w-40 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Credit</th>
                     <th className="w-44 py-2.5 pr-6 text-center text-xs font-semibold uppercase tracking-wide text-steel">Balance</th>
+                    <th className="w-28 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Status</th>
                     <th className="w-12 py-2.5"></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody
+                  ref={tbodyRef}
+                  {...{
+                    onMouseDown: ledgerGridSelectionProps.onMouseDown,
+                    onCopy: (e: ClipboardEvent<HTMLTableSectionElement>) => ledgerGridSelectionProps.onCopy(e),
+                    onPaste: (e: ClipboardEvent<HTMLTableSectionElement>) => ledgerGridSelectionProps.onPaste(e, reload),
+                  }}
+                >
                   {entriesWithBalance.map((e, i) => (
                     <tr key={`${e.id}-${i}`} className={`border-b border-sand/50 ${i % 2 === 1 ? "bg-ivory/30" : ""}`}>
                       <td className="whitespace-nowrap py-2.5 pl-8 pr-8 tabular-nums text-steel">{formatDate(e.date)}</td>
                       <td className="py-2"><DescriptionCell entry={e} /></td>
-                      <td className="py-2 text-center text-xs tabular-nums text-steel">{e.reference ?? "—"}</td>
-                      <td className="py-2.5 pr-4 text-right tabular-nums text-ink">{e.debit > 0 ? money(e.debit) : ""}</td>
-                      <td className="py-2.5 pr-4 text-right tabular-nums text-success">{e.credit > 0 ? money(e.credit) : ""}</td>
-                      <td className={`py-2.5 pr-6 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`}>
+                      <td className="py-2 text-center text-xs tabular-nums text-steel">
+                        <RefCell entry={e} />
+                      </td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{e.debit > 0 ? money(e.debit) : ""}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums text-success" data-cell tabIndex={-1}>{e.credit > 0 ? money(e.credit) : ""}</td>
+                      <td className={`py-2.5 pr-6 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`} data-cell tabIndex={-1}>
                         {money(e.balance)}
                       </td>
+                      <td className="py-2 text-center"><SettlementCell entry={e} /></td>
                       <td className="py-2 pr-2 text-center">
                         <button
                           type="button"
                           title="Delete this entry"
                           disabled={deletingId === e.documentId}
-                          onClick={() => setConfirmDelete({ entry: e })}
+                          onClick={() => void askDelete(e)}
                           className="rounded px-1.5 py-0.5 text-xs text-steel hover:bg-error/10 hover:text-error disabled:opacity-40"
                         >
                           {deletingId === e.documentId ? "…" : "✕"}
@@ -329,14 +675,30 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                 <tfoot>
                   <tr className="border-t-2 border-sand bg-ivory/50 font-semibold">
                     <td colSpan={3} className="py-2 pl-4 text-xs uppercase tracking-wide text-steel">Totals</td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-ink">{money(summary.totalDebit)}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-success">{money(summary.totalCredit)}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{money(summary.totalDebit)}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums text-success" data-cell tabIndex={-1}>{money(summary.totalCredit)}</td>
                     <td className={`py-2 pr-4 text-right tabular-nums ${summary.closing > 0 ? "text-error" : summary.closing < 0 ? "text-success" : "text-ink"}`}>
                       {money(summary.closing)}
                     </td>
+                    <td colSpan={2}></td>
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          )}
+
+          {/* Status bar — shows when cells are selected */}
+          {selectionStats && (
+            <div className="flex items-center justify-between rounded border border-sand bg-ivory/50 px-3 py-1.5 text-xs text-steel">
+              <span className="tabular-nums text-ink">
+                {selectionStats.count} cell{selectionStats.count === 1 ? "" : "s"} selected
+              </span>
+              <div className="flex gap-3">
+                <span>Sum: <span className="tabular-nums font-medium text-ink">{money(selectionStats.sum)}</span></span>
+                <span>Difference: <span className="tabular-nums font-medium text-ink">{money(selectionStats.max - selectionStats.min)}</span></span>
+                <span>Product: <span className="tabular-nums font-medium text-ink">{selectionStats.count > 1 ? (selectionStats.product).toLocaleString() : "—"}</span></span>
+                <span>Average: <span className="tabular-nums font-medium text-ink">{selectionStats.count > 0 ? money(selectionStats.sum / selectionStats.count) : "—"}</span></span>
+              </div>
             </div>
           )}
         </div>
@@ -346,7 +708,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
 
       {/* Delete confirmation — first click */}
       {confirmDelete && !confirmDelete2 && (
-        <Dialog title="Confirm Delete" onClose={() => setConfirmDelete(null)} size="form">
+        <Dialog title="Confirm Delete" onClose={() => { setConfirmDelete(null); setImpact(null); setImpactError(null); }} size="form">
           <div className="flex flex-col gap-3">
             <p className="text-sm text-ink">
               Are you sure you want to delete this {TYPE_LABELS[confirmDelete.entry.type].toLowerCase()} entry?
@@ -356,11 +718,26 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
             </p>
             {confirmDelete.entry.debit > 0 && <p className="text-xs text-steel">Debit: {money(confirmDelete.entry.debit)}</p>}
             {confirmDelete.entry.credit > 0 && <p className="text-xs text-steel">Credit: {money(confirmDelete.entry.credit)}</p>}
+
+            {/* §6 — what else on the account this moves, named at both ends. The
+                whole reason this is a confirmation and not a refusal: a document
+                can be removed, and the person removing it gets to see the
+                settlement it releases before deciding. */}
+            <div className="rounded border border-sand bg-ivory/50 p-2.5">
+              {impactError ? (
+                <p className="text-xs text-error">{impactError}</p>
+              ) : impact?.documentId === confirmDelete.entry.documentId ? (
+                <ImpactList preview={impact.preview} />
+              ) : (
+                <p className="text-xs text-steel">Working out what else this affects…</p>
+              )}
+            </div>
+
             <div className="flex gap-2">
               <button type="button" onClick={() => setConfirmDelete2(confirmDelete)} className="rounded bg-error px-4 py-2 text-sm font-semibold text-white hover:bg-error/80">
                 Yes, delete it
               </button>
-              <button type="button" onClick={() => setConfirmDelete(null)} className="rounded px-4 py-2 text-sm font-medium text-steel hover:bg-ivory">
+              <button type="button" onClick={() => { setConfirmDelete(null); setImpact(null); setImpactError(null); }} className="rounded px-4 py-2 text-sm font-medium text-steel hover:bg-ivory">
                 Cancel
               </button>
             </div>
@@ -378,11 +755,17 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
             <p className="text-sm text-ink">
               The {TYPE_LABELS[confirmDelete2.entry.type].toLowerCase()} entry ({confirmDelete2.entry.reference ?? "—"}) will be permanently removed from the ledger.
             </p>
+            {impact?.documentId === confirmDelete2.entry.documentId && impact.preview.impacts.length > 0 && (
+              <p className="text-xs text-steel">
+                {impact.preview.impacts.length} settlement{impact.preview.impacts.length === 1 ? "" : "s"} will be recalculated
+                {impact.preview.released > 0 ? `, and ${money(impact.preview.released)} will go back onto the party's account` : ""}.
+              </p>
+            )}
             <div className="flex gap-2">
               <button type="button" onClick={() => void handleDelete(confirmDelete2.entry.documentId)} className="rounded bg-error px-4 py-2 text-sm font-semibold text-white hover:bg-error/80">
                 Delete permanently
               </button>
-              <button type="button" onClick={() => { setConfirmDelete(null); setConfirmDelete2(null); }} className="rounded px-4 py-2 text-sm font-medium text-steel hover:bg-ivory">
+              <button type="button" onClick={() => { setConfirmDelete(null); setConfirmDelete2(null); setImpact(null); setImpactError(null); }} className="rounded px-4 py-2 text-sm font-medium text-steel hover:bg-ivory">
                 Cancel
               </button>
             </div>
@@ -390,8 +773,208 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
         </Dialog>
       )}
 
+      {/* §4 — the opening balance, edited where it is shown. */}
+      {editOpening && data && (
+        <OpeningBalanceDialog
+          companyId={companyId}
+          contactId={contactId}
+          contactName={contactName}
+          current={data.openingBalance}
+          onClose={() => setEditOpening(false)}
+          onSaved={async () => {
+            setEditOpening(false);
+            await reload();
+            setHistory(null);
+          }}
+        />
+      )}
+
       {/* Off-screen render for export — rendered outside Dialog to avoid overflow clipping */}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The party's opening balance
+// ---------------------------------------------------------------------------
+
+// §1's oldest item and §4's widest edit in one small form. Two things make it
+// worth its own component: the figure is signed by a direction rather than a
+// minus sign, because "40,000" on a statement is meaningless without which way it
+// runs; and changing it can pull receipts off invoices, so the impact list is on
+// screen before the save, and the release is confirmed rather than refused.
+function OpeningBalanceDialog({
+  companyId,
+  contactId,
+  contactName,
+  current,
+  onClose,
+  onSaved,
+}: {
+  companyId: string;
+  contactId: string;
+  contactName: string;
+  // The stored figure as the statement reads it: positive means the party owes us.
+  current: number;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [direction, setDirection] = useState<"owes_us" | "we_owe">(current < 0 ? "we_owe" : "owes_us");
+  const [amount, setAmount] = useState(() => (current === 0 ? "" : Math.abs(current).toFixed(2)));
+  const [documentDate, setDocumentDate] = useState("");
+  const [note, setNote] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  // The date and the note aren't on the statement — only the figure is — so the
+  // rest of the document is read here.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stored = await getPartyOpeningBalance(companyId, contactId);
+        if (cancelled) return;
+        setDocumentDate(stored.date ?? todayISO());
+        setNote(stored.note ?? "");
+      } catch {
+        if (!cancelled) setDocumentDate(todayISO());
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, contactId]);
+
+  const signedAmount = useMemo(() => {
+    const magnitude = Number(amount);
+    if (!Number.isFinite(magnitude)) return 0;
+    return direction === "owes_us" ? Math.abs(magnitude) : -Math.abs(magnitude);
+  }, [amount, direction]);
+
+  // What this figure would do to the settlement, shown while it is being typed.
+  //
+  // Two values, and the split is deliberate. `fetched` is what the server last
+  // answered, which only an await can change. Whether there is anything to show
+  // is a fact about *this* render — the figure either differs from the stored one
+  // or it doesn't — so it is derived rather than stored. Writing it down from the
+  // effect body instead made the same claim one render later, and is the cascading
+  // render react-hooks/set-state-in-effect exists to catch.
+  const [fetched, setFetched] = useState<LedgerImpactPreview | null>(null);
+  const impact = signedAmount === current ? null : fetched;
+  useEffect(() => {
+    if (!loaded) return;
+    // Nothing to preview for a figure that isn't a change. `impact` above is
+    // already null on this render, so there is nothing left to clear here.
+    if (signedAmount === current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const preview = await previewPartyOpeningBalance(companyId, contactId, signedAmount);
+        if (!cancelled) setFetched("error" in preview ? null : preview);
+      } catch {
+        if (!cancelled) setFetched(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loaded, signedAmount, current, companyId, contactId]);
+
+  // The server decides whether a release needs confirming — it holds the
+  // allocations and the rule. Its refusal is the prompt: the sentence it returns
+  // says what would be released, and the button below resends the same form with
+  // the acknowledgement attached. Nothing about that rule is repeated here.
+  const [state, action, pending] = useActionState(
+    async (prev: { error?: string; success?: boolean; needsConfirmation?: boolean } | undefined, formData: FormData) => {
+      try {
+        return await setPartyOpeningBalance(companyId, contactId, prev, formData);
+      } catch {
+        return { error: TRANSPORT_ERROR_MESSAGE };
+      }
+    },
+    undefined,
+  );
+
+  // A typed flag, not the wording of the sentence: the refusal that asks to be
+  // confirmed turns the Save into a Confirm. Derived from the latest answer rather
+  // than copied into state — a copy could only ever hold the same value one render
+  // later, and writing it from the effect body is the cascading render
+  // react-hooks/set-state-in-effect flags. The acknowledgement still covers exactly
+  // one submit: any other answer replaces `state`, so changing the figure has the
+  // release it now implies asked about again rather than waved through.
+  const confirming = !!state?.needsConfirmation;
+
+  useEffect(() => {
+    if (state?.success) void onSaved();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  return (
+    <Dialog title={`Opening Balance — ${contactName}`} onClose={onClose} size="form">
+      <form action={action} className="flex flex-col gap-3">
+        <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
+
+        <p className="text-xs text-steel">
+          What this party owed, or was owed, before the first document on this statement. It settles like any other item — the next
+          receipt pays it off before it touches an invoice.
+        </p>
+
+        <label className={labelClass}>
+          <span className={labelTextClass}>Direction</span>
+          <select
+            name="direction"
+            value={direction}
+            onChange={(e) => setDirection(e.target.value === "we_owe" ? "we_owe" : "owes_us")}
+            className={fieldClass}
+          >
+            <option value="owes_us">Party owes us</option>
+            <option value="we_owe">We owe the party</option>
+          </select>
+        </label>
+
+        <label className={labelClass}>
+          <span className={labelTextClass}>Amount</span>
+          <input
+            name="amount"
+            type="number"
+            step="0.01"
+            min="0"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className={`${fieldClass} tabular-nums`}
+          />
+          <span className="text-xs text-steel">Zero clears the opening balance.</span>
+        </label>
+
+        <label className={labelClass}>
+          <span className={labelTextClass}>As at</span>
+          <DateField name="documentDate" value={documentDate} onChange={setDocumentDate} required aria-label="Opening balance date" />
+        </label>
+
+        <label className={labelClass}>
+          <span className={labelTextClass}>Note</span>
+          <input name="note" type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Carried over from previous books" className={fieldClass} />
+        </label>
+
+        {impact && (impact.impacts.length > 0 || impact.released > 0) && (
+          <div className="rounded border border-warning/40 bg-warning-tint p-2.5">
+            <ImpactList preview={impact} />
+          </div>
+        )}
+
+        {state?.error && (
+          <p className={state.needsConfirmation ? confirmNoticeClass : errorTextClass}>{state.error}</p>
+        )}
+
+        <div className="flex items-center gap-2">
+          <button type="submit" disabled={pending || !loaded} className={primaryActionClass}>
+            {pending ? "Saving…" : confirming ? "Confirm and save" : "Save"}
+          </button>
+          <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm font-medium text-steel hover:bg-ivory">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

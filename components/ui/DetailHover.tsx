@@ -40,6 +40,7 @@ export function DetailHover({
   children,
   width = 272,
   extraHeight = 0,
+  placement = "bottom",
   // A long list is truncated rather than scrolled: the panel is
   // pointer-events-none (a wheel goes to the page behind it), so anything past
   // the fold would be unreachable. The record itself is one click away.
@@ -56,6 +57,7 @@ export function DetailHover({
   children?: ReactNode;
   width?: number;
   extraHeight?: number;
+  placement?: "bottom" | "right";
   max?: number;
 }) {
   const shownLines = lines?.slice(0, max) ?? [];
@@ -72,6 +74,7 @@ export function DetailHover({
       panelClassName="w-max"
       panelWidth={width}
       estimatedHeight={estimatedHeight}
+      placement={placement}
       trigger={trigger}
     >
       {heading && <span className="mb-2 block font-semibold text-navy-800">{heading}</span>}

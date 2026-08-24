@@ -1,19 +1,46 @@
 "use server";
 
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister } from "@/lib/db/schema";
+import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister, contactOpeningBalances, paymentAllocations, auditLogs } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermission, PermissionError } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId } from "@/lib/actions/resolve-refs";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
-import { recordAudit } from "@/lib/actions/audit";
+import { recordAudit, type AuditRow } from "@/lib/actions/audit";
+import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment-allocation";
+import { changeSummary } from "@/lib/audit-constants";
 import { cachedPageRead } from "@/lib/read-cache";
+import {
+  codeToLedgerType,
+  describeImpacts,
+  impactOfChange,
+  settlementState,
+  type DescribedImpact,
+  type ImpactRef,
+  type LedgerChange,
+  type LedgerEntryType,
+  type SettlementState,
+} from "@/lib/ledger-constants";
+import { readPartySettlement, settleableAfterEdit } from "@/lib/queries/party-ledger";
+
+// This file edits documents and ledger entries on both sides of the book and
+// re-settles what they were paid with, so a write here can change every list that
+// shows an invoice, a payment or a balance. `accounts` is in the set because
+// adjustSettlementBalance moves an account balance in raw SQL.
+const READS = [
+  READ_DOMAIN.sales,
+  READ_DOMAIN.purchases,
+  READ_DOMAIN.payments,
+  READ_DOMAIN.ledger,
+  READ_DOMAIN.products,
+  READ_DOMAIN.accounts,
+] as const;
 
 export interface ContactPayment {
   date: string;
@@ -81,7 +108,7 @@ async function loadLedgerBalances(
 ): Promise<ContactLedgerBalance[]> {
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(`${session.userId}:ledger:${permissionModule}:${cacheScope}`, async () => {
+  return cachedPageRead(READ_DOMAIN.ledger, `${session.userId}:ledger:${permissionModule}:${cacheScope}`, async () => {
 
   // Neither query depends on the other's rows, so they share one round trip.
   const docScope = await companyInPermissionScope(documents.companyId, session, permissionModule);
@@ -429,6 +456,7 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
 
       // A typed-in contact is a new contact.
       invalidateLookups(CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
+      invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({ action: "create", entity: "ledger entry", summary: contactName || contactId, companyId, detail: `${direction} ${amount}${note ? ` — ${note}` : ""}` });
       return { success: true };
@@ -497,6 +525,7 @@ export async function setContactBalance(
       );
 
       invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+      invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({
         action: "update",
@@ -528,13 +557,33 @@ export type PartyLedgerEntry = {
   id: string; // ledger entry id
   documentId: string; // document id (for deletion)
   date: string;
-  type: "item_sold" | "item_bought" | "payment_received" | "payment_made" | "journal_entry";
+  type: LedgerEntryType;
+  code: string | null; // document type code (e.g. SALES_INVOICE) for routing
   reference: string | null;
   debit: number;
   credit: number;
   // Nested detail: line items for sales/purchases, payment method for payments.
   lineItems?: PartyLedgerLineItem[];
   paymentMethod?: string | null;
+  // How much of this entry FIFO has settled, and what that reads as. Present
+  // only for the entries that carry a settleable balance — a sales invoice, a
+  // purchase invoice, or a payment. A journal entry never settles anything, so
+  // it has none of this rather than a misleading "outstanding".
+  settledAmount?: number;
+  settlement?: SettlementState;
+  // Which invoices a payment went to, or which payments settled an invoice.
+  // This is the second invariant made visible: the settlement state sits
+  // underneath the running balance, not instead of it.
+  settledAgainst?: PartyLedgerSettlementLink[];
+};
+
+// One side of a FIFO allocation, named the way a person reads it.
+export type PartyLedgerSettlementLink = {
+  documentId: string;
+  reference: string | null;
+  date: string;
+  type: LedgerEntryType;
+  amount: number;
 };
 
 export type PartyLedgerResult = {
@@ -546,19 +595,20 @@ export type PartyLedgerResult = {
   address: string | null;
   city: string | null;
   entries: PartyLedgerEntry[];
+  // The party's stored opening balance, signed the way the statement reads:
+  // positive means the party owes us. It is not one of `entries` — it is the
+  // figure the running balance starts from, and the statement already has a card
+  // for it.
+  openingBalance: number;
+  // The document behind that figure, when there is one. Null when the opening
+  // balance has never been set, or was set back to zero.
+  openingBalanceDocumentId: string | null;
+  // Money received (or paid out) beyond everything currently outstanding on that
+  // side. Held on the party's account, and absorbed automatically by the next
+  // invoice that lands in the same queue.
+  advanceReceived: number;
+  advancePaid: number;
 };
-
-// Map from document_type_code to the ledger entry's semantic type.
-function codeToLedgerType(code: string): PartyLedgerEntry["type"] {
-  switch (code) {
-    case "SALES_INVOICE": return "item_sold";
-    case "PURCHASE_INVOICE":
-    case "MARKET_PURCHASE": return "item_bought";
-    case "PAYMENT_RECEIVED": return "payment_received";
-    case "PAYMENT_MADE": return "payment_made";
-    default: return "journal_entry";
-  }
-}
 
 export async function getPartyLedger(
   contactId: string,
@@ -702,10 +752,25 @@ export async function getPartyLedger(
 
   // Build entries — one per ledger row, with nested detail.
   const entries: PartyLedgerEntry[] = [];
+  // Lifted out of the rows as they go past: the opening balance is the figure
+  // the running balance starts from, not a movement in it, and the statement
+  // already has a card for it.
+  let openingBalance = 0;
+  const openingDocumentIds: string[] = [];
   for (const r of filteredRows) {
     const type = codeToLedgerType(r.code);
     const debit = Number(r.debit ?? 0);
     const credit = Number(r.credit ?? 0);
+
+    if (type === "opening_balance") {
+      // Debit means the party owes us, which is the direction the statement
+      // reads as positive. Summed rather than assigned because a statement not
+      // narrowed to one company spans a party's opening balance in each.
+      openingBalance += debit - credit;
+      openingDocumentIds.push(r.documentId);
+      continue;
+    }
+
     const lines = linesByDoc.get(r.documentId);
 
     const entry: PartyLedgerEntry = {
@@ -713,6 +778,7 @@ export async function getPartyLedger(
       documentId: r.documentId,
       date: r.date,
       type,
+      code: r.code,
       reference: r.number,
       debit,
       credit,
@@ -741,6 +807,59 @@ export async function getPartyLedger(
   // entries are already in desc order from the query, so reverse.
   entries.reverse();
 
+  // Settlement — the ledger's second invariant, made visible. It is read off the
+  // allocations rather than stored on the rows, so it cannot disagree with the
+  // FIFO engine that wrote them.
+  //
+  // Only inside one company: payment_allocations is company-keyed, and there is
+  // no such thing as a receipt in one company settling an invoice in another. A
+  // statement not narrowed to a company still gets its running balance and its
+  // opening figure — it just carries no paid/partial marks.
+  let advanceReceived = 0;
+  let advancePaid = 0;
+  if (companyId) {
+    const settlement = await readPartySettlement(db, companyId, contactId);
+    const docById = new Map(settlement.documents.map((d) => [d.id, d]));
+    const linksByDocument = new Map<string, PartyLedgerSettlementLink[]>();
+    const push = (from: string, toId: string, amount: number) => {
+      const to = docById.get(toId);
+      if (!to) return;
+      const list = linksByDocument.get(from) ?? [];
+      list.push({ documentId: to.id, reference: to.number, date: to.date, type: to.type, amount });
+      linksByDocument.set(from, list);
+    };
+    for (const a of settlement.allocations) {
+      // Both directions from the one row: an invoice shows which payments closed
+      // it, a payment shows where it went.
+      push(a.itemId, a.paymentId, a.amount);
+      push(a.paymentId, a.itemId, a.amount);
+    }
+
+    for (const entry of entries) {
+      const doc = docById.get(entry.documentId);
+      if (!doc) continue; // journal entries, credit/debit notes, market purchases
+      // An invoice settled at the counter is settled; a payment is "settled" once
+      // all of it has found an invoice to sit against.
+      const settled = entry.type === "payment_received" || entry.type === "payment_made"
+        ? doc.allocated
+        : doc.tillPaid + doc.allocated;
+      entry.settledAmount = settled;
+      entry.settlement = settlementState(doc.grandTotal, settled);
+      const links = linksByDocument.get(entry.documentId);
+      if (links && links.length > 0) entry.settledAgainst = links;
+    }
+
+    // What a payment could not place is an advance on the party's account — not
+    // an error, and not handed back. The next invoice on that side absorbs it.
+    for (const payment of settlement.payments) {
+      const doc = docById.get(payment.id);
+      if (!doc) continue;
+      const unplaced = Math.max(0, doc.grandTotal - doc.allocated);
+      if (payment.side === "receivable") advanceReceived += unplaced;
+      else advancePaid += unplaced;
+    }
+  }
+
   return {
     contactId: contact.id,
     displayName: contact.displayName,
@@ -750,13 +869,25 @@ export async function getPartyLedger(
     address: contact.address,
     city: contact.city,
     entries,
+    openingBalance,
+    // Only when there is exactly one to point at — an all-companies statement can
+    // be summing several, and editing "the" opening balance then has no meaning.
+    openingBalanceDocumentId: openingDocumentIds.length === 1 ? openingDocumentIds[0] : null,
+    advanceReceived,
+    advancePaid,
   };
 }
 
 // Cancel a document behind a ledger row. Delegates to the owning module's
 // delete logic so inventory, settlements, cheques and allocations are all
 // reversed correctly. Journal entries are handled directly here.
-export async function deleteLedgerRow(documentId: string): Promise<ActionResult> {
+//
+// `confirmed` carries the answer to the settlement confirmation. Each delegate
+// refuses a delete that would move other documents' settlement until it is set,
+// and returns a sentence saying what would move; the caller reads the full list
+// from previewLedgerRowDelete first. Defaulted to false so an existing caller
+// keeps the safe behaviour.
+export async function deleteLedgerRow(documentId: string, confirmed = false): Promise<ActionResult> {
   return guard(
     "Couldn't delete this entry.",
     async () => {
@@ -769,6 +900,7 @@ export async function deleteLedgerRow(documentId: string): Promise<ActionResult>
           number: documents.number,
           status: documents.status,
           companyId: documents.companyId,
+          contactId: documents.contactId,
           code: documentTypes.code,
         })
         .from(documents)
@@ -782,6 +914,7 @@ export async function deleteLedgerRow(documentId: string): Promise<ActionResult>
       // Build a FormData the way the module-specific delete functions expect it.
       const fd = new FormData();
       fd.set("documentId", documentId);
+      if (confirmed) fd.set("confirmAllocations", "1");
 
       switch (doc.code) {
         case "JOURNAL_ENTRY": {
@@ -796,6 +929,11 @@ export async function deleteLedgerRow(documentId: string): Promise<ActionResult>
           });
           break;
         }
+        // The opening balance is not deleted from the sheet — it is a standing
+        // figure, and the way to remove it is to set it to zero, which keeps the
+        // one document per party the settlement queues sort against.
+        case "OPENING_BALANCE":
+          return { error: "Set the opening balance to zero instead of deleting it." };
         case "SALES_INVOICE": {
           const { deleteSale } = await import("@/lib/actions/sales");
           const result = await deleteSale(undefined, fd);
@@ -822,8 +960,412 @@ export async function deleteLedgerRow(documentId: string): Promise<ActionResult>
       }
 
       revalidatePath("/ledger");
-      await recordAudit({ action: "cancel", entity: "ledger row", entityId: documentId, summary: doc.number, companyId: doc.companyId });
+      await recordAudit({
+        action: "cancel",
+        entity: "ledger row",
+        entityId: documentId,
+        summary: doc.number,
+        companyId: doc.companyId,
+        detail: `${doc.code}${confirmed ? " — settlement confirmed" : ""}`,
+      });
       return { success: true };
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Opening balance
+// ---------------------------------------------------------------------------
+
+// What the party's account started at, before anything in this system happened.
+//
+// It is one editable figure per party, and it settles: a party who owed us 40,000
+// when the books were carried over has a 40,000 receivable, and the next receipt
+// pays it off before it touches any invoice. That is why it is a real document
+// rather than a column on `contacts` — payment_allocations.invoice_document_id is
+// a NOT NULL foreign key to documents, so a figure that can be settled has to be
+// one.
+export type PartyOpeningBalance = {
+  // Null before it has ever been set. Non-null afterwards, including when it has
+  // been set back to zero: the document is kept as the anchor the FIFO queues sort
+  // against, and it is the *ledger row* that comes and goes.
+  documentId: string | null;
+  // Positive means the party owes us — the statement's own convention (debit less
+  // credit), which is the opposite sign to `writeJournalEntry`.
+  signedAmount: number;
+  date: string | null;
+  note: string | null;
+};
+
+const OPENING_BALANCE_TYPE = {
+  code: "OPENING_BALANCE",
+  name: "Opening Balance",
+  series: "OB",
+} as const;
+
+export async function getPartyOpeningBalance(companyId: string, contactId: string): Promise<PartyOpeningBalance> {
+  const session = await getSession();
+  requirePermission(session, "accounts", "view");
+  const empty: PartyOpeningBalance = { documentId: null, signedAmount: 0, date: null, note: null };
+  if (!companyId || !contactId) return empty;
+
+  const [row] = await db
+    .select({
+      documentId: documents.id,
+      date: documents.documentDate,
+      note: documents.reason,
+      debit: ledgerEntries.debit,
+      credit: ledgerEntries.credit,
+    })
+    .from(contactOpeningBalances)
+    .innerJoin(documents, eq(documents.id, contactOpeningBalances.documentId))
+    // Left, not inner: a balance set back to zero has no ledger row, and the row
+    // it does have is the one holding the sign.
+    .leftJoin(ledgerEntries, eq(ledgerEntries.documentId, documents.id))
+    .where(
+      and(
+        eq(contactOpeningBalances.companyId, companyId),
+        eq(contactOpeningBalances.contactId, contactId),
+        await companyInPermissionScope(documents.companyId, session, "accounts"),
+      ),
+    )
+    .limit(1);
+
+  if (!row) return empty;
+  return {
+    documentId: row.documentId,
+    signedAmount: Number(row.debit ?? 0) - Number(row.credit ?? 0),
+    date: row.date,
+    note: row.note,
+  };
+}
+
+// Reads the opening-balance form. Zero is valid here, unlike readEntryForm:
+// clearing the figure is how a party's opening balance is removed, and refusing
+// zero would leave no way to do it.
+function readOpeningForm(formData: FormData) {
+  const documentDate = String(formData.get("documentDate") ?? "");
+  const direction = String(formData.get("direction") ?? "");
+  const amount = Number(String(formData.get("amount") ?? "").trim());
+  const note = String(formData.get("note") ?? "").trim();
+
+  const error = !documentDate
+    ? "Date is required."
+    : direction !== "owes_us" && direction !== "we_owe"
+      ? "Pick which way the balance runs."
+      : !Number.isFinite(amount) || amount < 0
+        ? "Enter an amount of zero or more."
+        : null;
+
+  // Statement convention: owes_us is a debit, which is positive.
+  const signedAmount = direction === "owes_us" ? amount : -amount;
+  return { documentDate, direction, amount, note, signedAmount, error };
+}
+
+// Sets (or clears) the party's opening balance, then rebuilds their settlement.
+//
+// Editing this figure is the widest change on the statement: every balance after
+// it shifts, and the sign decides which queue it settles in, so raising it can
+// pull receipts off invoices and flipping it can move the whole thing from the
+// receivable queue to the payable one. All of which is why the recompute at the
+// end is a full re-run rather than a patch.
+export async function setPartyOpeningBalance(
+  companyId: string,
+  contactId: string,
+  _prevState: ActionResult | undefined,
+  formData: FormData,
+): Promise<ActionResult> {
+  return guard(
+    "Couldn't save the opening balance.",
+    async () => {
+      const session = await getLiveSession();
+      if (!companyId || !contactId) return { error: "Company and contact are required." };
+      // Same permission as every other ledger write — see createLedgerEntry for
+      // why accounts.create is the one that applies.
+      requirePermission(session, "accounts", "create", { companyId });
+
+      const { documentDate, note, signedAmount, error } = readOpeningForm(formData);
+      if (error) return { error };
+
+      const existing = await getPartyOpeningBalance(companyId, contactId);
+      if (existing.signedAmount === signedAmount && existing.date === documentDate && (existing.note ?? "") === note) {
+        return { success: true };
+      }
+
+      // Reducing the figure, or flipping its sign, takes settled money off the
+      // items it was covering. Confirmed the same way an invoice edit is, with the
+      // list coming from previewPartyOpeningBalance.
+      const [allocated] = existing.documentId
+        ? await db
+            .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
+            .from(paymentAllocations)
+            .where(eq(paymentAllocations.invoiceDocumentId, existing.documentId))
+        : [undefined];
+      const allocatedAmount = Number(allocated?.amount ?? 0);
+      // Room left for those allocations after the change: none at all if the sign
+      // flipped, since the figure leaves that queue entirely.
+      const roomAfter = Math.sign(signedAmount) === Math.sign(existing.signedAmount) ? Math.abs(signedAmount) : 0;
+      const releasedByEdit = Number((allocatedAmount - roomAfter).toFixed(2));
+      if (releasedByEdit > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
+        return {
+          needsConfirmation: true,
+          error: `${allocatedAmount.toFixed(2)} is already settled against this opening balance, and the new figure leaves room for less. Confirm to release ${releasedByEdit.toFixed(2)} to the party's next outstanding item.`,
+        };
+      }
+
+      const documentType = await ensureDocumentType({
+        companyId,
+        ...OPENING_BALANCE_TYPE,
+        affectsAccounting: true,
+        active: true,
+      });
+      const magnitude = Math.abs(signedAmount).toFixed(2);
+
+      await db.transaction(async (tx) => {
+        let documentId = existing.documentId;
+        if (documentId) {
+          // Hand back what was settled against the old figure before the new one
+          // is written, for the reason releaseInvoiceAllocations documents: the
+          // payments holding those allocations are separate posted documents.
+          await releaseInvoiceAllocations(tx, [documentId]);
+          await tx
+            .update(documents)
+            .set({
+              documentDate,
+              subtotal: magnitude,
+              grandTotal: magnitude,
+              // paid_amount goes back to zero along with the released
+              // allocations: an opening balance has no counter payment of its
+              // own, so everything settled against it came through FIFO.
+              paidAmount: "0",
+              isPaid: signedAmount === 0,
+              reason: note || null,
+              updatedAt: new Date(),
+            })
+            .where(eq(documents.id, documentId));
+        } else {
+          const number = await nextDocumentNumber(documentType.series, tx);
+          const [doc] = await tx
+            .insert(documents)
+            .values({
+              companyId,
+              documentTypeId: documentType.id,
+              number,
+              status: "posted",
+              documentDate,
+              contactId,
+              subtotal: magnitude,
+              grandTotal: magnitude,
+              paidAmount: "0",
+              isPaid: signedAmount === 0,
+              reason: note || null,
+              createdBy: session.userId,
+            })
+            .returning({ id: documents.id });
+          documentId = doc.id;
+          await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId });
+          // The pointer that makes "one opening balance per party" an invariant
+          // the database holds rather than a rule this function remembers.
+          await tx.insert(contactOpeningBalances).values({ companyId, contactId, documentId });
+        }
+
+        // Drop and re-add rather than update: the sign lives in which column is
+        // filled, and a cleared balance has no row at all — ledger_entries' CHECK
+        // requires one side to be greater than zero.
+        await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
+        if (signedAmount !== 0) {
+          await tx.insert(ledgerEntries).values(
+            signedAmount > 0
+              ? { companyId, documentId, debit: magnitude }
+              : { companyId, documentId, credit: magnitude },
+          );
+        }
+
+        await recomputeParty(tx, companyId, contactId);
+      });
+
+      invalidateLookups(CACHE.documentTypes, CACHE.contacts);
+      invalidateReads(...READS);
+      revalidatePath("/ledger");
+      await recordAudit({
+        action: existing.documentId ? "update" : "create",
+        entity: "opening balance",
+        entityId: contactId,
+        summary: `Opening balance ${signedAmount.toFixed(2)}`,
+        companyId,
+        detail: changeSummary([
+          ["Amount", existing.documentId ? existing.signedAmount.toFixed(2) : null, signedAmount.toFixed(2)],
+          ["Date", existing.date, documentDate],
+          ["Note", existing.note, note],
+        ]) || `Opening balance ${signedAmount.toFixed(2)}`,
+      });
+      return { success: true };
+    },
+    { [DUPLICATE]: "Can't save — an opening balance number is already in use for this company." },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// What a change would disturb, before it is made
+// ---------------------------------------------------------------------------
+
+// The confirmation dialogs' data: which payments and which invoices a pending
+// edit or delete would move, named the way a person reads them.
+//
+// Every one of these re-runs the same FIFO engine the write runs, on a projection
+// of the queues, and diffs the result against what is recorded. Nothing here
+// guesses at what "might" be affected, and nothing here writes.
+export type LedgerImpactPreview = {
+  impacts: DescribedImpact[];
+  // The amount that stops being settled and becomes an advance on the party's
+  // account. Zero when the change only moves allocations between items.
+  released: number;
+};
+
+// Shared tail: resolve the scope, read the party's settlement, project, diff.
+async function previewImpact(companyId: string, contactId: string, change: LedgerChange): Promise<LedgerImpactPreview> {
+  const settlement = await readPartySettlement(db, companyId, contactId);
+  const impacts = impactOfChange(settlement, change);
+  const refs = new Map<string, ImpactRef>(
+    settlement.documents.map((d) => [d.id, { documentId: d.id, number: d.number, date: d.date, type: d.type }]),
+  );
+  const released = impacts.reduce((sum, i) => sum + Math.max(0, i.before - i.after), 0);
+  return { impacts: describeImpacts(impacts, refs), released: Number(released.toFixed(2)) };
+}
+
+// Scope check for the preview actions: they read one party's whole account, so
+// the document being previewed has to be one this session can act on.
+async function previewScope(documentId: string): Promise<{ companyId: string; contactId: string } | { error: string }> {
+  const session = await getSession();
+  requirePermission(session, "accounts", "view");
+  const [doc] = await db
+    .select({ companyId: documents.companyId, contactId: documents.contactId })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.id, documentId),
+        eq(documents.status, "posted"),
+        await companyInPermissionScope(documents.companyId, session, "accounts"),
+      ),
+    )
+    .limit(1);
+  if (!doc) return { error: "Entry not found." };
+  if (!doc.contactId) return { error: "This entry is not on a party's account." };
+  return { companyId: doc.companyId, contactId: doc.contactId };
+}
+
+// §6: what cancelling this row would do to the settlement. An empty `impacts` is
+// the case that needs no confirmation — the row settles nothing and is settled by
+// nothing, so only the running balance moves.
+export async function previewLedgerRowDelete(documentId: string): Promise<LedgerImpactPreview | { error: string }> {
+  const scope = await previewScope(documentId);
+  if ("error" in scope) return scope;
+  return previewImpact(scope.companyId, scope.contactId, { kind: "remove", documentId });
+}
+
+// §4: what changing this document's amount would do. `newGrandTotal` is the
+// figure being typed, gross — the part already taken at the counter is subtracted
+// here, because only the remainder was ever in the queue.
+export async function previewLedgerRowAmount(
+  documentId: string,
+  newGrandTotal: number,
+): Promise<LedgerImpactPreview | { error: string }> {
+  const scope = await previewScope(documentId);
+  if ("error" in scope) return scope;
+  const settlement = await readPartySettlement(db, scope.companyId, scope.contactId);
+  const doc = settlement.documents.find((d) => d.id === documentId);
+  if (!doc) return { error: "Entry not found on this party's account." };
+  // A payment offers its whole value to the queue; an invoice offers what is left
+  // after the till.
+  const amount = doc.type === "payment_received" || doc.type === "payment_made"
+    ? Math.max(0, newGrandTotal)
+    : settleableAfterEdit(doc, newGrandTotal);
+  return previewImpact(scope.companyId, scope.contactId, { kind: "amount", documentId, amount });
+}
+
+// §4: what moving this document's date would do. A date change reorders the
+// queue, so it can hand an older invoice a payment that a newer one was holding
+// without any amount changing at all.
+export async function previewLedgerRowDate(
+  documentId: string,
+  newDate: string,
+): Promise<LedgerImpactPreview | { error: string }> {
+  const scope = await previewScope(documentId);
+  if ("error" in scope) return scope;
+  return previewImpact(scope.companyId, scope.contactId, { kind: "date", documentId, date: newDate });
+}
+
+// §4: what setting the opening balance to this figure would do. Signed the
+// statement's way — positive means the party owes us.
+export async function previewPartyOpeningBalance(
+  companyId: string,
+  contactId: string,
+  signedAmount: number,
+): Promise<LedgerImpactPreview | { error: string }> {
+  const session = await getSession();
+  requirePermission(session, "accounts", "view");
+  if (!companyId || !contactId) return { error: "Company and contact are required." };
+  const existing = await getPartyOpeningBalance(companyId, contactId);
+  return previewImpact(companyId, contactId, { kind: "opening", documentId: existing.documentId, signedAmount });
+}
+
+// ---------------------------------------------------------------------------
+// §7 — the trail for one party
+// ---------------------------------------------------------------------------
+
+// Every edit and delete recorded against this party's opening balance, invoices,
+// payments and journal entries, oldest last.
+//
+// The audit log keys on the document id, so the party's documents are collected
+// first and matched in one `IN` — two statements, not one per row. The contact id
+// is matched as well, because the opening balance and the balance correction are
+// logged against the party rather than against a document.
+export async function getPartyAuditTrail(contactId: string, companyId?: string): Promise<AuditRow[]> {
+  const session = await getSession();
+  requirePermission(session, "accounts", "view");
+  if (!contactId) return [];
+  // The audit log has its own permission, and it gates a wider view than the
+  // statement does. A user who can read the statement but not the audit log gets
+  // an empty history rather than an error, so the panel simply has nothing in it.
+  try {
+    requirePermission(session, "audit", "view");
+  } catch (e) {
+    if (e instanceof PermissionError) return [];
+    throw e;
+  }
+
+  const docs = await db
+    .select({ id: documents.id })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.contactId, contactId),
+        companyId ? eq(documents.companyId, companyId) : undefined,
+        await companyInPermissionScope(documents.companyId, session, "accounts"),
+      ),
+    );
+
+  const ids = docs.map((d) => d.id);
+  return db
+    .select({
+      id: auditLogs.id,
+      createdAt: auditLogs.createdAt,
+      userName: auditLogs.userName,
+      action: auditLogs.action,
+      entity: auditLogs.entity,
+      entityId: auditLogs.entityId,
+      summary: auditLogs.summary,
+      detail: auditLogs.detail,
+    })
+    .from(auditLogs)
+    .where(
+      and(
+        await companyInPermissionScope(auditLogs.companyId, session, "audit"),
+        ids.length > 0
+          ? or(inArray(auditLogs.entityId, ids), eq(auditLogs.entityId, contactId))
+          : eq(auditLogs.entityId, contactId),
+      ),
+    )
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(200);
 }
