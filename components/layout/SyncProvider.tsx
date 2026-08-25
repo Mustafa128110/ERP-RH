@@ -19,7 +19,7 @@
 // status flips can't be saved sets a warning — the user is never told work is
 // stored safely when the browser couldn't write it.
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useOffline } from "next/offline";
 import { useClientUserId } from "@/lib/client-user";
@@ -205,6 +205,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const browserOnline = useSyncExternalStore(subscribeOnline, getOnlineSnapshot, getOnlineServerSnapshot);
   const detectedOffline = useOffline();
   const online = browserOnline && !detectedOffline;
+  const [_, startTransition] = useTransition();
   const [entries, setEntries] = useState<OutboxEntry[]>([]);
   const [cancelled, setCancelled] = useState<CancelledEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -312,7 +313,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         // counter wakes OfflineReadiness to run again), so the pill never
         // claims "ready" on a cache that was just emptied.
         noteOfflineCacheInvalidated();
-        router.refresh();
+        // Non-blocking: queued work confirmed on the server, the local list
+        // reloads behind the scenes without freezing the UI.
+        startTransition(() => router.refresh());
       }
       // Transient pause: retry with backoff, but stop once the entry has been
       // retried the automatic limit — after that it surfaces as FAILED and only

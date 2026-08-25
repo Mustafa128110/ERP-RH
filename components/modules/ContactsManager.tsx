@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/ContactForm";
 import { MergeContactsDialog } from "@/components/modules/MergeContactsDialog";
@@ -61,6 +61,29 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
   // exists — tick the half-filled ones and finish them in one grid instead of
   // opening each in turn. Same tick column and Ctrl+Enter as the products list.
   const [selected, setSelected] = useState<string[]>([]);
+  // A row's full record, prefetched on hover/touch so opening it is instant.
+  // Kept on a ref so warming never renders.
+  const warmed = useRef(new Map<string, ContactDetail>());
+  const warming = useRef(new Set<string>());
+
+  async function warm(id: string) {
+    if (warmed.current.has(id) || warming.current.has(id)) return;
+    warming.current.add(id);
+    try {
+      const d = await getContact(id);
+      if (d) warmed.current.set(id, d);
+    } catch {
+      // A failed warm is not a failure — the click below will ask again.
+    } finally {
+      warming.current.delete(id);
+    }
+  }
+
+  // A warm copy was taken before this write, so handing it to the next open would
+  // show the contact as it used to be.
+  function forgetWarm(id: string) {
+    warmed.current.delete(id);
+  }
 
   function close() {
     setModal(null);
@@ -77,10 +100,16 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
   async function openEdit(row: Row) {
     const id = String(row.id);
     setModal({ kind: "edit", id });
+    const ready = warmed.current.get(id);
+    if (ready) {
+      setDetail(ready);
+      return;
+    }
     setDetail(await getContact(id));
   }
 
   const router = useRouter();
+  const [, startTransition] = useTransition();
   useNewEntry(() => setModal({ kind: "batch" }));
 
   return (
@@ -129,6 +158,7 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
         rows={rows}
         idKey="id"
         onRowClick={openEdit}
+        onRowIntent={(row) => void warm(String(row.id))}
         selected={selected}
         onSelectedChange={setSelected}
         onBatchEdit={() => setModal({ kind: "batchEdit" })}
@@ -149,7 +179,15 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
       {modal?.kind === "edit" && (
         <Dialog title={detail?.displayName ?? "Edit Contact"} onClose={close}>
           {detail ? (
-            <ContactEditForm companyOptions={companyOptions} contactId={modal.id} defaults={detail} onDone={close} />
+            <ContactEditForm
+              companyOptions={companyOptions}
+              contactId={modal.id}
+              defaults={detail}
+              onDone={() => {
+                forgetWarm(modal.id);
+                close();
+              }}
+            />
           ) : (
             <p className="text-sm text-steel">Loading…</p>
           )}
@@ -157,7 +195,7 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
       )}
 
       {modal?.kind === "merge" && (
-        <MergeContactsDialog onClose={() => setModal(null)} onDone={() => { setModal(null); router.refresh(); }} />
+        <MergeContactsDialog onClose={() => setModal(null)} onDone={() => { setModal(null); startTransition(() => router.refresh()); }} />
       )}
     </div>
   );

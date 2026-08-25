@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cancelMarketPurchase, confirmMarketPurchases } from "@/lib/actions/market-purchases";
 import { DateField } from "@/components/ui/DateField";
@@ -40,6 +40,7 @@ export function MarketPurchaseManager({
   chequeOptions: AccountOption[];
 }) {
   const router = useRouter();
+  const [_, startTransition] = useTransition();
   const pendingRows = requests.filter((request) => request.status === "pending");
   const [selected, setSelected] = useState<string[]>([]);
   const [costs, setCosts] = useState<Record<string, string>>({});
@@ -57,7 +58,10 @@ export function MarketPurchaseManager({
       setSelected([]);
       setCosts({});
       setOperationId(crypto.randomUUID());
-      router.refresh();
+      // The action already invalidated the stock/products reads, so the refresh
+      // serves the fresh copy from the server cache — non-blocking so the UI
+      // doesn't jank behind it.
+      startTransition(() => router.refresh());
     }
     return result;
   }, undefined);

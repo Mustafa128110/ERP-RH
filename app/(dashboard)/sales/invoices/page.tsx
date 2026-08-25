@@ -56,19 +56,26 @@ export default async function Page({
     ]),
   );
 
-  const rows: Row[] = invoices.map((s) => ({
-    id: s.id,
-    number: s.number,
-    customer: s.customer ?? "—",
-    company: s.company ?? "—",
-    saleType: saleTypeLabel(s.saleType),
-    date: formatDate(s.documentDate),
-    age: s.balance > 0 ? `${s.age}d` : "—",
-    total: money(s.grandTotal),
-    paid: money(s.paidAmount),
-    balance: s.balance > 0 ? money(s.balance) : "—",
-    status: s.status === "cancelled" ? "Cancelled" : s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
-  }));
+  const rows: Row[] = invoices.map((s) => {
+    const lineItems = itemsBySaleId.get(s.id) ?? [];
+    return {
+      id: s.id,
+      number: s.number,
+      customer: s.customer ?? "—",
+      company: s.company ?? "—",
+      saleType: saleTypeLabel(s.saleType),
+      date: formatDate(s.documentDate),
+      age: s.balance > 0 ? `${s.age}d` : "—",
+      total: money(s.grandTotal),
+      paid: money(s.paidAmount),
+      balance: s.balance > 0 ? money(s.balance) : "—",
+      status: s.status === "cancelled" ? "Cancelled" : s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
+      // Not rendered as a column, but DataTable's search haystack scans every
+      // value on the row — so without this, an invoice whose customer/company
+      // columns don't mention it would be missed by a search for an item name.
+      itemNames: lineItems.map((it) => it.name).join(" "),
+    };
+  });
 
   return (
     <InvoiceManager

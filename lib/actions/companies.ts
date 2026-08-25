@@ -6,8 +6,9 @@ import { db } from "@/lib/db";
 import { companies, userCompanyAccess } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
-import { companyInPermissionScope } from "@/lib/auth/scope";
+import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
+import { cachedPageRead } from "@/lib/read-cache";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 
@@ -21,12 +22,20 @@ const READS = [
   READ_DOMAIN.expenses,
   READ_DOMAIN.stock,
   READ_DOMAIN.products,
+  READ_DOMAIN.companies,
 ] as const;
 
 export async function listCompanies() {
   const session = await getSession();
   requirePermission(session, "companies", "view");
-  return db.select().from(companies).where(await companyInPermissionScope(companies.id, session, "companies"));
+  // The list is scoped to the Topbar company selection, so the cache key bakes
+  // in both the user and the current scope — a Royal-Hardware view and an M52 view
+  // can never share a page-read entry. invalidateReads drops this on every write
+  // that can touch it (the READS constant above).
+  const [scope, where] = await Promise.all([getScopeCompanyIds(), companyInPermissionScope(companies.id, session, "companies")]);
+  return cachedPageRead(READ_DOMAIN.companies, `companies:${session.userId}:${scope.sort().join(",")}`, () =>
+    db.select().from(companies).where(where),
+  );
 }
 
 export async function getCompany(companyId: string) {

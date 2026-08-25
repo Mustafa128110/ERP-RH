@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
+import { DetailHover } from "@/components/ui/DetailHover";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
@@ -43,6 +44,7 @@ interface PaymentRow {
 }
 
 const buildColumns = (): ColumnDef[] => [
+  { key: "date", label: "Date" },
   {
     key: "type",
     label: "Type",
@@ -54,7 +56,37 @@ const buildColumns = (): ColumnDef[] => [
   },
   { key: "contact", label: "Contact" },
   { key: "amount", label: "Amount", align: "right" },
-  { key: "method", label: "Method" },
+  {
+    key: "method",
+    label: "Method",
+    // A grouped row folded several payments together; when they paid by different
+    // means the cell says "Mixed" and hovering lists which — naming one would
+    // claim the others went the same way. The raw methods ride on the row as
+    // `_methods` so the panel doesn't have to recompute the group.
+    render: (row) => {
+      if (String(row.method) !== "Mixed") return <span>{String(row.method)}</span>;
+      const methods = (row._methods as { method: string; number: string; amount: string }[]) ?? [];
+      return (
+        <DetailHover
+          trigger={<span className="cursor-help underline decoration-dotted decoration-zinc-400 underline-offset-4">Mixed</span>}
+          width={300}
+          heading="Methods"
+        >
+          <table className="w-full text-sm">
+            <tbody>
+              {methods.map((m, i) => (
+                <tr key={i} className="border-b border-sand/50 last:border-0">
+                  <td className="py-1.5 pr-4 text-ink">{m.method}</td>
+                  <td className="whitespace-nowrap py-1.5 pr-4 text-steel">{m.number}</td>
+                  <td className="py-1.5 text-right tabular-nums text-ink">{m.amount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DetailHover>
+      );
+    },
+  },
   { key: "company", label: "Company" },
 ];
 
@@ -221,6 +253,16 @@ export function PaymentManager({
       method: methods.size === 1 ? [...methods][0] : "Mixed",
       amount: `${first.code === "PAYMENT_RECEIVED" ? "+" : "-"}${money(total)}`,
       company: first.company,
+      // Per-payment methods for the "Mixed" hover panel — only meaningful when the
+      // cell above collapsed to "Mixed", so it is omitted for single-method rows.
+      _methods:
+        methods.size > 1
+          ? members.map((m) => ({
+              method: m.paymentMethod ?? "—",
+              number: m.number,
+              amount: money(Number(m.grandTotal)),
+            }))
+          : undefined,
       // Not rendered, but DataTable searches every value on a row: without this
       // the numbers folded into a group would stop being findable.
       _numbers: members.map((m) => m.number).join(" "),

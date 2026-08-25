@@ -7,7 +7,7 @@ import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission, PermissionError } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
+import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN, getPurchaseFormOptions, getCompanies, getContactOptions, getBankAccountOptions, getCashAccountOptions, getAvailableCheques } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId } from "@/lib/actions/resolve-refs";
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
@@ -261,12 +261,13 @@ async function loadLedgerBalances(
     byContact.set(key, entry);
   }
 
-  // Balance convention: positive = we owe (payable), negative = they owe (receivable).
-  // Matches Party Ledger: running balance = sum(debit - credit).
-  // A sale (item_sold) creates a credit entry -> negative balance -> "Owes Us".
-  // A purchase (item_bought) creates a debit entry -> positive balance -> "We Owe".
+  // Balance convention (locked by lib/payment-constants.check.ts): balance =
+  // credit - debit, so positive is a payable ("We Owe") and negative is a
+  // receivable ("Owes Us"). A sale posts to debit (party owes us -> credit - debit
+  // goes negative), a purchase to credit (we owe them -> positive), and a payment
+  // reverses the side of the invoice it settles.
   const balances = Array.from(byContact.values())
-    .map((e) => ({ ...e, balance: e.debit - e.credit }))
+    .map((e) => ({ ...e, balance: e.credit - e.debit }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
 
   // Group invoice headers by contact, top 6 per contact.
@@ -366,9 +367,10 @@ function readEntryForm(formData: FormData) {
 }
 
 // Writes one journal entry: the document, its single ledger row, and the number.
-// `signedAmount` follows the balance convention — positive is a credit (we owe
-// the contact), negative a debit (they owe us) — so a caller that computed a
-// difference can hand it straight over without re-deciding which column it is.
+// `signedAmount` follows the ledger balance convention (lib/payment-constants.ts):
+// balance = credit - debit, so positive = we owe (credit) and negative = they owe
+// us (debit). A caller that computed a difference can hand it straight over without
+// re-deciding which column it is.
 //
 // Shared by "+ Add Entry" and by saving a contact's balance.
 async function writeJournalEntry(
@@ -575,6 +577,10 @@ export type PartyLedgerEntry = {
   // This is the second invariant made visible: the settlement state sits
   // underneath the running balance, not instead of it.
   settledAgainst?: PartyLedgerSettlementLink[];
+  // True for the opening-balance row, which is rendered as the first line of the
+  // statement rather than folded into a summary card. The running balance starts
+  // from zero here (not from the opening figure) so the row reads as itself.
+  isOpeningBalance?: boolean;
 };
 
 // One side of a FIFO allocation, named the way a person reads it.
@@ -618,25 +624,27 @@ export async function getPartyLedger(
   requirePermission(session, "accounts", "view");
   if (!contactId) return null;
 
-  const [contact] = await db
-    .select({
-      id: contacts.id,
-      displayName: contacts.displayName,
-      companyName: contacts.companyName,
-      phone: contacts.phone,
-      email: contacts.email,
-      address: contacts.address,
-      city: contacts.city,
-    })
-    .from(contacts)
-    .where(eq(contacts.id, contactId))
-    .limit(1);
+  const [contactRows, docScope] = await Promise.all([
+    db
+      .select({
+        id: contacts.id,
+        displayName: contacts.displayName,
+        companyName: contacts.companyName,
+        phone: contacts.phone,
+        email: contacts.email,
+        address: contacts.address,
+        city: contacts.city,
+      })
+      .from(contacts)
+      .where(eq(contacts.id, contactId))
+      .limit(1),
+    // Fetch all ledger entries for this contact, newest-first for slicing,
+    // then we reverse to chronological for the running balance.
+    companyInPermissionScope(documents.companyId, session, "accounts"),
+  ]);
 
+  const [contact] = contactRows;
   if (!contact) return null;
-
-  // Fetch all ledger entries for this contact, newest-first for slicing,
-  // then we reverse to chronological for the running balance.
-  const docScope = await companyInPermissionScope(documents.companyId, session, "accounts");
 
   const rows = await db
     .select({
@@ -693,8 +701,11 @@ export async function getPartyLedger(
       .select({ documentId: chequeRegister.documentId, companyId: chequeRegister.companyId })
       .from(chequeRegister)
       .where(inArray(chequeRegister.documentId, chequeDocIds));
+    // Index the payment rows by document id once, so validating each cheque is
+    // O(1) instead of the nested find that made this loop O(rows x cheques).
+    const byDocId = new Map(validRows.map((r) => [r.documentId, r]));
     for (const c of chequeRows) {
-      const matchingRow = validRows.find((r) => r.documentId === c.documentId);
+      const matchingRow = c.documentId ? byDocId.get(c.documentId) : null;
       if (matchingRow && c.companyId === matchingRow.companyId && c.documentId) {
         validChequeDocIds.add(c.documentId);
       }
@@ -764,10 +775,24 @@ export async function getPartyLedger(
 
     if (type === "opening_balance") {
       // Debit means the party owes us, which is the direction the statement
-      // reads as positive. Summed rather than assigned because a statement not
-      // narrowed to one company spans a party's opening balance in each.
+      // reads as positive. Summed across companies for a multi-company view.
       openingBalance += debit - credit;
       openingDocumentIds.push(r.documentId);
+      // Render as the first chronological line of the statement rather than
+      // only as a summary card: it is a real posting on the account, and hiding
+      // it makes the running balance jump without a visible cause.
+      const entry: PartyLedgerEntry = {
+        id: r.ledgerId,
+        documentId: r.documentId,
+        date: r.date,
+        type,
+        code: r.code,
+        reference: r.number,
+        debit,
+        credit,
+        isOpeningBalance: true,
+      };
+      entries.push(entry);
       continue;
     }
 
@@ -1057,8 +1082,10 @@ function readOpeningForm(formData: FormData) {
         ? "Enter an amount of zero or more."
         : null;
 
-  // Statement convention: owes_us is a debit, which is positive.
-  const signedAmount = direction === "owes_us" ? amount : -amount;
+  // Ledger balance convention (lib/payment-constants.ts): balance = credit - debit,
+  // so positive = we owe (credit) and negative = they owe us (debit). owes_us posts
+  // as a debit (negative), we_owe as a credit (positive) — matching createLedgerEntry.
+  const signedAmount = direction === "we_owe" ? amount : -amount;
   return { documentDate, direction, amount, note, signedAmount, error };
 }
 
@@ -1368,4 +1395,43 @@ export async function getPartyAuditTrail(contactId: string, companyId?: string):
     )
     .orderBy(desc(auditLogs.createdAt))
     .limit(200);
+}
+
+// The inline edit popups on the statement (PartyLedgerDialog) open the same forms
+// the Payments and Stock Purchase pages do, so they need the same option sets.
+// This bundles both in one call — the payment set is fetched inline below because
+// it isn't exposed as a single getter — so a ref click costs one round trip rather
+// than six. Reuses the existing cached lookups, so nothing is re-read.
+export async function getLedgerInlineOptions(): Promise<{
+  paymentOptions: {
+    companyOptions: { id: string; name: string }[];
+    contactOptions: { id: string; name: string; companyId: string }[];
+    bankAccountOptions: { id: string; name: string; companyId: string | null }[];
+    cashAccountOptions: { id: string; name: string; companyId: string | null; isDefault: boolean }[];
+    chequeOptions: { id: string; name: string; companyId: string | null }[];
+  };
+  purchaseOptions: Awaited<ReturnType<typeof getPurchaseFormOptions>>;
+}> {
+  const session = await getSession();
+  requirePermission(session, "accounts", "view");
+
+  const [companyRows, contactRows, bank, cash, cheques, purchase] = await Promise.all([
+    getCompanies(),
+    getContactOptions(),
+    getBankAccountOptions(),
+    getCashAccountOptions(),
+    getAvailableCheques(),
+    getPurchaseFormOptions(),
+  ]);
+
+  return {
+    paymentOptions: {
+      companyOptions: companyRows.map((c) => ({ id: c.id, name: c.name })),
+      contactOptions: contactRows.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" })),
+      bankAccountOptions: bank,
+      cashAccountOptions: cash,
+      chequeOptions: cheques,
+    },
+    purchaseOptions: purchase,
+  };
 }

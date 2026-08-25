@@ -35,12 +35,12 @@ const buildColumns: ColumnDef[] = [
   { key: "company", label: "Company" },
   {
     key: "creditBalance",
-    label: "We Owe",
+    label: "Payable", // We Owe
     align: "right",
   },
   {
     key: "debtBalance",
-    label: "Owes Us",
+    label: "Receivable", // Owes Us
     align: "right",
   },
 ];
@@ -376,8 +376,8 @@ function LedgerEntryForm({
             defaultValue={balance ? (balance.balance > 0 ? "we_owe" : "owes_us") : "owes_us"}
             className={fieldClass}
           >
-            <option value="owes_us">Owes Us</option>
-            <option value="we_owe">We Owe</option>
+            <option value="owes_us">Receivable (Owes Us)</option>
+            <option value="we_owe">Payable (We Owe)</option>
           </select>
         </label>
         <label className={`${labelClass} w-40`}>

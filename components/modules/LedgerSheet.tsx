@@ -106,8 +106,8 @@ export function BalanceSheetDocument({ company, books, rows }: { company: Letter
     <div className="force-light w-full bg-white p-10 text-ink">
       <Header company={company} title="Balance Sheet" subtitle={books} />
 
-      <Side title="Receivable — Owes Us" rows={receivable} amountOf={(r) => -r.balance} />
-      <Side title="Payable — We Owe" rows={payable} amountOf={(r) => r.balance} />
+      <Side title="Receivable (Owes Us)" rows={receivable} amountOf={(r) => -r.balance} />
+      <Side title="Payable (We Owe)" rows={payable} amountOf={(r) => r.balance} />
 
       {/* The one line the sheet exists for: in the black or in the red, on the
           ledger alone. Stock, cash and the bank are not in this figure. */}

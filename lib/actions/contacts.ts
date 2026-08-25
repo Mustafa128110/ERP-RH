@@ -8,6 +8,7 @@ import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
+import { cachedPageRead } from "@/lib/read-cache";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import type { AuthSession } from "@/lib/auth/session";
@@ -23,6 +24,7 @@ const READS = [
   READ_DOMAIN.products,
   READ_DOMAIN.expenses,
   READ_DOMAIN.accounts,
+  READ_DOMAIN.contacts,
 ] as const;
 
 // Contacts are unified — no supplier/customer split. A write is allowed if the
@@ -57,68 +59,75 @@ const contactColumns = {
 export async function listContacts() {
   const session = await getSession();
   requireContactPermission(session, "view");
-  const scopeIds = await getScopeCompanyIds();
-  const permittedIds = scopeIds.filter((companyId) =>
-    ["customers.view", "suppliers.view"].some(
-      (key) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
-    ),
-  );
-  const documentScope = permittedIds.length > 0
-    ? sql`d.company_id IN (${sql.join(permittedIds.map((id) => sql`${id}::uuid`), sql`, `)})`
-    : sql`false`;
-
-  // Two queries, run together rather than one after the other. The activity
-  // summary is a grouped pass over documents keyed by contact — joining it into
-  // the contact list directly would either multiply the contact rows or need a
-  // correlated subquery per contact, which is the shape that gets slower with
-  // every invoice ever raised.
-  const [rows, activity] = await Promise.all([
-    db
-      .select(contactColumns)
-      .from(contacts)
-      .leftJoin(companies, eq(contacts.companyId, companies.id))
-      .where(
-        or(
-          await companyInPermissionScope(contacts.companyId, session, "customers"),
-          await companyInPermissionScope(contacts.companyId, session, "suppliers"),
-        ),
-      ),
-    // The two balances come off ledger_entries, the same rows the Ledger screen
-    // reads, so a contact's figure here and there is one number arrived at once.
-    // Summing (grand_total - paid_amount) over the invoices instead — which is
-    // what this did — misses every payment taken on the Payments screen, because
-    // a standalone payment is its own document and never writes back to the
-    // invoice's paid_amount. A customer who had settled in full still showed the
-    // whole original balance under "Owes Us".
-    //
-    // A contact has one running account, so the net is split by sign rather than
-    // by document type: they owe us, or we owe them, never both at once.
-    // last_document and the count still speak for the invoices only — that's the
-    // trading history, and a payment is not a document anyone means by it.
-    db.execute<{ contact_id: string; owes_us: string; we_owe: string; last_document: string | null; documents: number }>(sql`
-      SELECT d.contact_id,
-             greatest(coalesce(sum(l.debit - l.credit), 0), 0) AS owes_us,
-             greatest(coalesce(sum(l.credit - l.debit), 0), 0) AS we_owe,
-             (max(d.document_date) FILTER (WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')))::text AS last_document,
-             count(DISTINCT d.id) FILTER (WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE'))::int AS documents
-        FROM documents d
-        JOIN document_types dt ON dt.id = d.document_type_id
-        LEFT JOIN ledger_entries l ON l.document_id = d.id
-       WHERE d.contact_id IS NOT NULL
-         AND ${documentScope}
-       GROUP BY d.contact_id`),
+  // The list is scoped to the Topbar company selection plus the user's permission
+  // to view customers/suppliers, so the cache key bakes in both the user and the
+  // current scope — switching company or losing a permission must miss.
+  // invalidateReads drops this on every write that can touch it (the READS
+  // constant above).
+  const [scope, customersScope, suppliersScope] = await Promise.all([
+    getScopeCompanyIds(),
+    companyInPermissionScope(contacts.companyId, session, "customers"),
+    companyInPermissionScope(contacts.companyId, session, "suppliers"),
   ]);
 
-  const byContact = new Map(activity.map((a) => [a.contact_id, a]));
-  return rows.map((r) => {
-    const a = byContact.get(r.id);
-    return {
-      ...r,
-      owesUs: a?.owes_us ?? "0",
-      weOwe: a?.we_owe ?? "0",
-      lastDocument: a?.last_document ?? null,
-      documentCount: Number(a?.documents ?? 0),
-    };
+  return cachedPageRead(READ_DOMAIN.contacts, `contacts:${session.userId}:${scope.sort().join(",")}`, async () => {
+    const permittedIds = scope.filter((companyId) =>
+      ["customers.view", "suppliers.view"].some(
+        (key) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
+      ),
+    );
+    const documentScope = permittedIds.length > 0
+      ? sql`d.company_id IN (${sql.join(permittedIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+      : sql`false`;
+
+    // Two queries, run together rather than one after the other. The activity
+    // summary is a grouped pass over documents keyed by contact — joining it into
+    // the contact list directly would either multiply the contact rows or need a
+    // correlated subquery per contact, which is the shape that gets slower with
+    // every invoice ever raised.
+    const [rows, activity] = await Promise.all([
+      db
+        .select(contactColumns)
+        .from(contacts)
+        .leftJoin(companies, eq(contacts.companyId, companies.id))
+        .where(or(customersScope, suppliersScope)),
+      // The two balances come off ledger_entries, the same rows the Ledger screen
+      // reads, so a contact's figure here and there is one number arrived at once.
+      // Summing (grand_total - paid_amount) over the invoices instead — which is
+      // what this did — misses every payment taken on the Payments screen, because
+      // a standalone payment is its own document and never writes back to the
+      // invoice's paid_amount. A customer who had settled in full still showed the
+      // whole original balance under "Owes Us".
+      //
+      // A contact has one running account, so the net is split by sign rather than
+      // by document type: they owe us, or we owe them, never both at once.
+      // last_document and the count still speak for the invoices only — that's the
+      // trading history, and a payment is not a document anyone means by it.
+      db.execute<{ contact_id: string; owes_us: string; we_owe: string; last_document: string | null; documents: number }>(sql`
+        SELECT d.contact_id,
+               greatest(coalesce(sum(l.debit - l.credit), 0), 0) AS owes_us,
+               greatest(coalesce(sum(l.credit - l.debit), 0), 0) AS we_owe,
+               (max(d.document_date) FILTER (WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')))::text AS last_document,
+               count(DISTINCT d.id) FILTER (WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE'))::int AS documents
+          FROM documents d
+          JOIN document_types dt ON dt.id = d.document_type_id
+          LEFT JOIN ledger_entries l ON l.document_id = d.id
+         WHERE d.contact_id IS NOT NULL
+           AND ${documentScope}
+         GROUP BY d.contact_id`),
+    ]);
+
+    const byContact = new Map(activity.map((a) => [a.contact_id, a]));
+    return rows.map((r) => {
+      const a = byContact.get(r.id);
+      return {
+        ...r,
+        owesUs: a?.owes_us ?? "0",
+        weOwe: a?.we_owe ?? "0",
+        lastDocument: a?.last_document ?? null,
+        documentCount: Number(a?.documents ?? 0),
+      };
+    });
   });
 }
 

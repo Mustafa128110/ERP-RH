@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
@@ -347,9 +347,13 @@ export function DeleteStockAdjustmentButton({ adjustmentId }: { adjustmentId: st
 
 export function ApproveStockAdjustmentButton({ adjustmentId }: { adjustmentId: string }) {
   const router = useRouter();
+  const [_, startTransition] = useTransition();
   const [state, action, pending] = useActionState(approveStockAdjustment, undefined);
   useEffect(() => {
-    if (state?.success) router.refresh();
+    // The action already invalidated the stock/products reads, so the refresh
+    // serves the fresh copy from the server cache. Non-blocking keeps the UI
+    // responsive while it happens.
+    if (state?.success) startTransition(() => router.refresh());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.success]);
   return (

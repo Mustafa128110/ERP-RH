@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
 import { formatDate, formatTimestamp, money, todayISO } from "@/lib/format";
 import {
   getPartyLedger,
@@ -11,15 +11,21 @@ import {
   previewLedgerRowDelete,
   previewPartyOpeningBalance,
   getPartyAuditTrail,
+  getLedgerInlineOptions,
   type LedgerImpactPreview,
   type PartyLedgerEntry,
   type PartyLedgerResult,
 } from "@/lib/actions/ledger";
+import { getPayment } from "@/lib/actions/payments";
+import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
 import type { AuditRow } from "@/lib/actions/audit";
+import type { PaymentDirection } from "@/lib/actions/payments";
 import { LEDGER_TYPE_LABELS, type SettlementState } from "@/lib/ledger-constants";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { DateField } from "@/components/ui/DateField";
+import { PaymentEditForm } from "@/components/modules/PaymentForm";
+import { StockPurchaseCreateForm } from "@/components/modules/StockPurchaseForm";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, confirmNoticeClass, primaryActionClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { INVOICE_COMPANY_NAME } from "@/lib/invoice-pdf";
 import { ledgerGridSelectionProps, computeCellStats, onSelectionChange } from "@/components/ui/ledger-grid";
@@ -81,9 +87,46 @@ function ImpactList({ preview }: { preview: LedgerImpactPreview }) {
   );
 }
 
+// The context RefCell needs to open its inline edit popups: the option sets sit on
+// the parent (fetched once, on demand) and the warm-fetch maps are owned there so
+// a ref clicked twice in quick succession doesn't start the same fetch twice.
+interface RefCellContext {
+  onOpenPayment: (documentId: string) => void;
+  onOpenPurchase: (documentId: string) => void;
+  onOpenOpeningBalance: () => void;
+}
+
 /** Ref number cell: clicking opens the source document for editing. */
-function RefCell({ entry }: { entry: PartyLedgerEntry & { balance: number } }) {
+function RefCell({ entry, ctx }: { entry: PartyLedgerEntry & { balance: number }; ctx: RefCellContext }) {
   const label = entry.reference ?? "—";
+
+  // Payments: open the payment edit form inline, same popup the payments page uses.
+  if (entry.code === "PAYMENT_RECEIVED" || entry.code === "PAYMENT_MADE") {
+    return (
+      <button
+        type="button"
+        onClick={() => ctx.onOpenPayment(entry.documentId)}
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
+        onClickCapture={(e: MouseEvent) => e.stopPropagation()}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  // Purchases/MARKET_PURCHASE: open the stock purchase edit form inline.
+  if (entry.code === "PURCHASE_INVOICE" || entry.code === "MARKET_PURCHASE") {
+    return (
+      <button
+        type="button"
+        onClick={() => ctx.onOpenPurchase(entry.documentId)}
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
+        onClickCapture={(e: MouseEvent) => e.stopPropagation()}
+      >
+        {label}
+      </button>
+    );
+  }
 
   // Sales invoices have an edit route at /sales/[id]
   if (entry.code === "SALES_INVOICE") {
@@ -100,12 +143,28 @@ function RefCell({ entry }: { entry: PartyLedgerEntry & { balance: number } }) {
     );
   }
 
-  // For other document types, show a read-only detail hover with the context
+  // Opening balance rows open the balance editor — same panel as the "Edit" button
+  // on the opening-balance card, so the ref is editable the same way the button is.
+  if (entry.isOpeningBalance) {
+    return (
+      <button
+        type="button"
+        onClick={() => ctx.onOpenOpeningBalance()}
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
+        onClickCapture={(e: MouseEvent) => e.stopPropagation()}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  // Journal entries and anything else: read-only detail hover with the context.
   if (!entry.code || entry.code === "JOURNAL_ENTRY") {
     return <span className="text-steel">{label}</span>;
   }
 
-  // Purchases, payments, opening balances — read-only detail panel
+  // No other code path is expected to reach here, but fall back to the detail
+  // panel so a ref no one routed is still inspectable rather than inert.
   return (
     <DetailHover
       trigger={<span className="cursor-help underline decoration-dotted decoration-zinc-400 underline-offset-4">{label}</span>}
@@ -279,6 +338,72 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const [history, setHistory] = useState<AuditRow[] | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // Inline edit popups for payment refs and item-bought refs — the same forms the
+  // Payments and Stock Purchase pages use, opened straight from the statement. The
+  // option sets arrive once (lazily, on first open) and are reused; the warm maps
+  // cache a document's detail so a ref clicked twice in quick succession doesn't
+  // re-fetch. Mirrors PaymentManager/StockPurchaseManager.
+  const [formOptions, setFormOptions] = useState<{
+    payment: { companyOptions: { id: string; name: string }[]; contactOptions: { id: string; name: string; companyId: string }[]; bankAccountOptions: { id: string; name: string; companyId: string | null }[]; cashAccountOptions: { id: string; name: string; companyId: string | null; isDefault: boolean }[]; chequeOptions: { id: string; name: string; companyId: string | null }[] };
+    purchase: Awaited<ReturnType<typeof getLedgerInlineOptions>>["purchaseOptions"];
+  } | null>(null);
+  const [editingPayment, setEditingPayment] = useState<{ id: string; detail: NonNullable<Awaited<ReturnType<typeof getPayment>>>; cheques: { id: string; name: string; companyId: string | null }[] } | null>(null);
+  const [editingPurchase, setEditingPurchase] = useState<{ id: string; detail: NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>; cheques: { id: string; name: string; companyId: string | null }[] } | null>(null);
+  const warmPayment = useRef(new Map<string, NonNullable<Awaited<ReturnType<typeof getPayment>>>>());
+  const warmPurchase = useRef(new Map<string, NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>>());
+
+  // Load the option sets once, on demand, and stash them so every open form
+  // reuses them rather than each fetching its own copy.
+  async function loadFormOptions() {
+    if (formOptions) return;
+    const bundle = await getLedgerInlineOptions();
+    setFormOptions({ payment: bundle.paymentOptions, purchase: bundle.purchaseOptions });
+  }
+
+  async function openPaymentEdit(documentId: string) {
+    if (!formOptions) await loadFormOptions();
+    // The warm map is a ref, so it is fresh regardless of which render closure
+    // produced it — a ref clicked twice in quick succession reuses the first fetch.
+    const cached = warmPayment.current.get(documentId);
+    if (cached) {
+      setEditingPayment({ id: documentId, detail: cached, cheques: [] });
+      return;
+    }
+    const [detail, cheques] = await Promise.all([getPayment(documentId), listChequesForPurchases(documentId)]);
+    if (!detail) return;
+    warmPayment.current.set(documentId, detail);
+    setEditingPayment({ id: documentId, detail, cheques });
+  }
+
+  async function openPurchaseEdit(documentId: string) {
+    if (!formOptions) await loadFormOptions();
+    const cached = warmPurchase.current.get(documentId);
+    if (cached) {
+      setEditingPurchase({ id: documentId, detail: cached, cheques: [] });
+      return;
+    }
+    const [detail, cheques] = await Promise.all([getStockPurchase(documentId), listChequesForPurchases(documentId)]);
+    if (!detail) return;
+    warmPurchase.current.set(documentId, detail);
+    setEditingPurchase({ id: documentId, detail, cheques });
+  }
+
+  // Context for the Ref cells: they only need the openers, not the whole
+  // component body. Rebuilt per render — the rows only ever read the current
+  // set of callbacks, there's nothing to stabilize across renders.
+  const refCellContext: RefCellContext = {
+    onOpenPayment: openPaymentEdit,
+    onOpenPurchase: openPurchaseEdit,
+    onOpenOpeningBalance: () => setEditOpening(true),
+  };
+
+  function closePaymentEdit() {
+    setEditingPayment(null);
+  }
+  function closePurchaseEdit() {
+    setEditingPurchase(null);
+  }
+
   // Persist sort direction
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -358,8 +483,10 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     return filtered;
   }, [data, fromDate, toDate, search, desc]);
 
-  // What the Balance column starts from: the party's stored opening balance plus
-  // everything that happened before the period on screen.
+  // What the Balance column starts from. The opening-balance row is now rendered
+  // as the first line of the statement (see lib/actions/ledger.ts), so it is part
+  // of `entries` and walks the running balance forward itself — the seed is only
+  // what happened *before* the rows on screen, dated strictly before the window.
   //
   // Date only — not "everything the filters hid". Narrowing to a date range is a
   // statement for that period and its opening figure has to carry the account
@@ -367,9 +494,9 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   // not move the balance the statement opens with.
   const effectiveOpening = useMemo(() => {
     if (!data) return 0;
-    if (!fromDate) return data.openingBalance;
+    if (!fromDate) return 0;
     const before = data.entries.filter((e) => e.date < fromDate);
-    return before.reduce((sum, e) => sum + e.debit - e.credit, data.openingBalance);
+    return before.reduce((sum, e) => sum + e.debit - e.credit, 0);
   }, [data, fromDate]);
 
   const entriesWithBalance = useMemo(() => {
@@ -476,8 +603,8 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded border border-sand bg-white p-3 text-center">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-steel">Opening Balance</p>
-              <p className={`mt-1 text-sm font-semibold tabular-nums ${effectiveOpening > 0 ? "text-error" : effectiveOpening < 0 ? "text-success" : "text-ink"}`}>
-                {money(effectiveOpening)}
+              <p className={`mt-1 text-sm font-semibold tabular-nums ${(!fromDate ? data.openingBalance : effectiveOpening) > 0 ? "text-error" : (!fromDate ? data.openingBalance : effectiveOpening) < 0 ? "text-success" : "text-ink"}`}>
+                {money(!fromDate ? data.openingBalance : effectiveOpening)}
               </p>
               <div className="mt-1 flex items-center justify-center gap-2">
                 {fromDate && (
@@ -617,7 +744,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
             <div className="rounded border border-sand bg-white p-8 text-center">
               <p className="text-sm text-steel">No transactions in this period.</p>
               <p className="mt-1 text-sm text-steel">
-                Opening balance: <span className="tabular-nums font-semibold text-ink">{money(summary.opening)}</span>
+                Opening balance: <span className="tabular-nums font-semibold text-ink">{money(data.openingBalance)}</span>
               </p>
             </div>
           ) : (
@@ -650,7 +777,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                       <td className="whitespace-nowrap py-2.5 pl-8 pr-8 tabular-nums text-steel">{formatDate(e.date)}</td>
                       <td className="py-2"><DescriptionCell entry={e} /></td>
                       <td className="py-2 text-center text-xs tabular-nums text-steel">
-                        <RefCell entry={e} />
+                        <RefCell entry={e} ctx={refCellContext} />
                       </td>
                       <td className="py-2.5 pr-4 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{e.debit > 0 ? money(e.debit) : ""}</td>
                       <td className="py-2.5 pr-4 text-right tabular-nums text-success" data-cell tabIndex={-1}>{e.credit > 0 ? money(e.credit) : ""}</td>
@@ -773,6 +900,60 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
         </Dialog>
       )}
 
+      {/* §8 — inline edit popups opened from a ref number on the statement. These
+          are the same forms the Payments and Stock Purchase pages mount, fetched
+          on demand and reused via a warm cache so a ref opened twice doesn't
+          re-fetch. After a save the statement is reloaded whole. */}
+      {editingPayment && (
+        <Dialog title={editingPayment.detail.direction === "made" ? "Edit Payment Made" : "Edit Payment Received"} onClose={closePaymentEdit} size="wide">
+          <div className="flex flex-col gap-4">
+            <PaymentEditForm
+              paymentId={editingPayment.id}
+              direction={editingPayment.detail.direction as PaymentDirection}
+              defaults={editingPayment.detail}
+              companyOptions={formOptions ? formOptions.payment.companyOptions : []}
+              contactOptions={formOptions ? formOptions.payment.contactOptions : []}
+              bankAccountOptions={formOptions ? formOptions.payment.bankAccountOptions : []}
+              cashAccountOptions={formOptions ? formOptions.payment.cashAccountOptions : []}
+              chequeOptions={editingPayment.cheques}
+              onDone={() => {
+                closePaymentEdit();
+                void reload();
+                setHistory(null);
+              }}
+            />
+          </div>
+        </Dialog>
+      )}
+
+      {editingPurchase && (
+        <Dialog title="Edit Stock Purchase" onClose={closePurchaseEdit} size="xwide">
+          <div className="flex flex-col gap-4">
+            <StockPurchaseCreateForm
+              purchaseId={editingPurchase.id}
+              defaults={editingPurchase.detail}
+              companyOptions={formOptions ? formOptions.purchase.companyOptions : []}
+              supplierOptions={formOptions ? formOptions.purchase.supplierOptions : []}
+              itemOptions={formOptions ? formOptions.purchase.itemOptions : []}
+              documentTypeOptions={formOptions ? formOptions.purchase.documentTypeOptions : []}
+              locationOptions={formOptions ? formOptions.purchase.locationOptions : []}
+              unitOptions={formOptions ? formOptions.purchase.unitOptions : []}
+              bankAccountOptions={formOptions ? formOptions.purchase.bankAccountOptions : []}
+              cashAccountOptions={formOptions ? formOptions.purchase.cashAccountOptions : []}
+              chequeOptions={editingPurchase.cheques}
+              taxOptions={formOptions ? formOptions.purchase.taxOptions : []}
+              conversionOptions={formOptions ? formOptions.purchase.conversionOptions : []}
+              taxSettings={formOptions ? formOptions.purchase.taxSettings : {}}
+              onDone={() => {
+                closePurchaseEdit();
+                void reload();
+                setHistory(null);
+              }}
+            />
+          </div>
+        </Dialog>
+      )}
+
       {/* §4 — the opening balance, edited where it is shown. */}
       {editOpening && data && (
         <OpeningBalanceDialog
@@ -814,7 +995,9 @@ function OpeningBalanceDialog({
   companyId: string;
   contactId: string;
   contactName: string;
-  // The stored figure as the statement reads it: positive means the party owes us.
+  // The stored figure as the statement reads it: positive means the party owes us
+  // (debit - credit). The write path uses the list convention (credit - debit,
+  // positive = we owe), so this dialog negates before sending.
   current: number;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
@@ -847,7 +1030,11 @@ function OpeningBalanceDialog({
   const signedAmount = useMemo(() => {
     const magnitude = Number(amount);
     if (!Number.isFinite(magnitude)) return 0;
-    return direction === "owes_us" ? Math.abs(magnitude) : -Math.abs(magnitude);
+    // Emit in the write/list convention (positive = we owe = credit). `current`
+    // arrives in the debit-credit statement convention (positive = owes us = debit),
+    // so owes_us maps to a negative magnitude which writeJournalEntry books as a
+    // debit, and we_owe to a positive one booked as a credit.
+    return direction === "we_owe" ? Math.abs(magnitude) : -Math.abs(magnitude);
   }, [amount, direction]);
 
   // What this figure would do to the settlement, shown while it is being typed.

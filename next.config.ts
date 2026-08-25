@@ -19,6 +19,21 @@ const nextConfig: NextConfig = {
     // with no other code change: useOffline() then returns false everywhere,
     // which the callers already read as "online".
     useOffline: true,
+    // The client router cache keeps a rendered route segment so navigating back
+    // to it needs no round trip. Every dashboard page is force-dynamic, so these
+    // segments fall under `dynamic` — which Next 16 defaults to 0 seconds, i.e.
+    // never cached, so a switch back to a page re-renders it from the server
+    // every time (~170ms round trip). A positive value means a page that has been
+    // opened stays instant on return; the server-side cachedPageRead (and a
+    // revalidatePath on the next write) still refreshes it behind the scenes.
+    //
+    // 60s: long enough that the five screens someone lives in all day are always
+    // warm, short enough that a row edited on another screen is stale for at most
+    // a minute before the next visit pulls the fresh server copy.
+    staleTimes: {
+      dynamic: 60,
+      static: 180,
+    },
   },
   // No value in advertising the framework to every response.
   poweredByHeader: false,

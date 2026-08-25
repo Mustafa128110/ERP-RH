@@ -42,6 +42,8 @@ export const READ_DOMAIN = {
   // the accounts screen reads all three on every open — splitting them would
   // save nothing and give three chances to miss one.
   accounts: "accounts",
+  contacts: "contacts",
+  companies: "companies",
 } as const;
 
 export type ReadDomain = (typeof READ_DOMAIN)[keyof typeof READ_DOMAIN];
@@ -86,6 +88,11 @@ export const READ_DEPENDS_ON: Record<ReadDomain, readonly string[]> = {
   products: ["items", "categories", "brands", "companies", "documents", "documentLines", "inventoryTransactions"],
   // Three plain selects, no joins.
   accounts: ["bankAccounts", "cashAccounts", "chequeRegister"],
+  // The contacts and companies list pages — companies writes already touch every
+  // other domain through their READS constant, but these two lists themselves were
+  // not cached, so a contacts-tab switch still round-tripped every time.
+  contacts: ["contacts"],
+  companies: ["companies"],
 };
 
 // Which document types each list can actually show. `documents` and
@@ -114,6 +121,10 @@ export const READ_DOCUMENT_TYPES: Record<ReadDomain, readonly string[]> = {
   // Last sales price is a SALES_INVOICE lateral; the three purchase rates come
   // from the rate_list view over purchase lines.
   products: ["SALES_INVOICE", "PURCHASE_INVOICE"],
+  // Contacts and companies list pages show no document rows directly — they
+  // read the contact/company tables alone, so no document types reach them.
+  companies: [],
+  contacts: [],
   stock: [],
   expenses: [],
   accounts: [],

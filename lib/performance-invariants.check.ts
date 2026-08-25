@@ -63,7 +63,7 @@ requires("components/ui/Dialog.tsx", ["hidden?: boolean"]);
 
 // A warm copy taken before a save is stale, so every screen that pre-fetches a
 // row's detail must also drop that copy when the row is written.
-for (const manager of ["InvoiceManager.tsx", "PaymentManager.tsx", "StockPurchaseManager.tsx", "ExpenseManager.tsx"]) {
+for (const manager of ["InvoiceManager.tsx", "PaymentManager.tsx", "StockPurchaseManager.tsx", "ExpenseManager.tsx", "ContactsManager.tsx"]) {
   requires(`components/modules/${manager}`, ["forgetWarm"]);
 }
 
