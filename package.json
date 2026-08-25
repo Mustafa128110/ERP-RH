@@ -45,6 +45,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "^16.3.1",
+    "supabase": "^2.115.0",
     "tailwindcss": "^4",
     "ttsc": "^0.18.1",
     "typescript": "^6.0.3"
