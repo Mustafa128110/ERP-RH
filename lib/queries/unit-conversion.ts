@@ -1,13 +1,15 @@
 import "server-only";
 
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { documentLines, itemUnitConversionRules, items, unitConversions } from "@/lib/db/schema";
+import { multiplierToBase, type UnitConversionOption } from "@/lib/unit-conversion";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export class MissingUnitConversionError extends Error {
   constructor() {
-    super("One of the selected units has no conversion to the product's base unit.");
+    super("One of the selected units has no rule connecting it to the product's base stock unit.");
     this.name = "MissingUnitConversionError";
   }
 }
@@ -18,22 +20,16 @@ export type QuantityToConvert = {
   quantity: number;
 };
 
-// What a line whose unit has no conversion to the item's base unit does to the
-// document it is on.
-//
-// "throw" is the strict rule every stock-moving document started with: no
-// multiplier, no save. "assume-base" lets the document through and counts the
-// entered quantity as base units — which is what the statement below *already*
-// does for the two other cases where the multiplier is unknown (the item has no
-// base unit, or the line has no unit at all). A missing conversion is a setup gap
-// on the products page, and it is not a reason to turn a customer away at the
-// counter; the stock figure it leaves behind is put right by entering the
-// conversion and re-saving the document.
+// A missing conversion is a setup gap, not a reason to stop a customer at the
+// counter. Sales opt into "assume-base" and retain the entered quantity until a
+// base unit/rule is configured and the product's stock is rebuilt. Other stock
+// documents keep the stricter policy where a known base unit is disconnected.
 export type MissingConversionPolicy = "throw" | "assume-base";
 
-// Establish missing base units and convert an entire document in one database
-// statement. `multiplier` means one from-unit equals N base units. The caller
-// receives results in the same order as the submitted lines.
+// Resolves a whole document from one snapshot of product bases and that
+// product's rule graph. No unit is assigned as a side effect: base_unit_id is a
+// deliberate product setting, never an accidental consequence of the first
+// sale or purchase that happened to mention a unit.
 export async function resolveBaseQuantities(
   tx: Tx,
   lines: QuantityToConvert[],
@@ -41,61 +37,70 @@ export async function resolveBaseQuantities(
 ): Promise<number[]> {
   if (lines.length === 0) return [];
 
-  const values = sql.join(
-    lines.map((line, index) => sql`(${index}::int, ${line.itemId}::uuid, ${line.unitId}::uuid, ${String(Math.abs(line.quantity))}::numeric)`),
-    sql`, `,
-  );
+  const itemIds = [...new Set(lines.map((line) => line.itemId).filter((id): id is string => Boolean(id)))];
+  if (itemIds.length === 0) return lines.map((line) => Math.abs(line.quantity));
 
-  const rows = await tx.execute<{ line_index: number; base_quantity: string | null; missing: boolean }>(sql`
-    WITH input(line_index, item_id, unit_id, quantity) AS (
-      VALUES ${values}
-    ), chosen_base AS (
-      SELECT DISTINCT ON (item_id) item_id, unit_id
-      FROM input
-      WHERE item_id IS NOT NULL AND unit_id IS NOT NULL
-      ORDER BY item_id, line_index
-    ), assigned AS (
-      UPDATE items i
-      SET base_unit_id = chosen_base.unit_id
-      FROM chosen_base
-      WHERE i.id = chosen_base.item_id AND i.base_unit_id IS NULL
-      RETURNING i.id, i.base_unit_id
-    ), resolved AS (
-      SELECT input.line_index, input.quantity,
-             coalesce(i.base_unit_id, assigned.base_unit_id, chosen_base.unit_id) AS base_unit_id,
-             input.unit_id,
-             uc.multiplier
-      FROM input
-      LEFT JOIN items i ON i.id = input.item_id
-      LEFT JOIN chosen_base ON chosen_base.item_id = input.item_id
-      LEFT JOIN assigned ON assigned.id = input.item_id
-      LEFT JOIN unit_conversions uc
-        ON uc.item_id = input.item_id
-       AND uc.from_unit_id = input.unit_id
-       AND uc.to_unit_id = coalesce(i.base_unit_id, assigned.base_unit_id, chosen_base.unit_id)
-    )
-    SELECT line_index,
-           CASE
-             WHEN unit_id IS NULL OR base_unit_id IS NULL OR unit_id = base_unit_id THEN quantity
-             WHEN multiplier IS NOT NULL THEN quantity * multiplier
-             ELSE NULL
-           END AS base_quantity,
-           unit_id IS NOT NULL AND base_unit_id IS NOT NULL
-             AND unit_id <> base_unit_id AND multiplier IS NULL AS missing
-    FROM resolved
-    ORDER BY line_index
-  `);
+  const [itemRows, rules] = await Promise.all([
+    tx.select({ id: items.id, baseUnitId: items.baseUnitId }).from(items).where(inArray(items.id, itemIds)),
+    tx
+      .select({ itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
+      .from(itemUnitConversionRules)
+      .innerJoin(unitConversions, sql`${unitConversions.id} = ${itemUnitConversionRules.ruleId}`)
+      .where(inArray(itemUnitConversionRules.itemId, itemIds)),
+  ]);
+  const baseByItem = new Map(itemRows.map((item) => [item.id, item.baseUnitId]));
+  const conversions: UnitConversionOption[] = rules.map((rule) => ({
+    itemId: rule.itemId,
+    fromUnitId: rule.fromUnitId,
+    toUnitId: rule.toUnitId,
+    multiplier: rule.multiplier,
+  }));
 
-  // A short row set means the statement didn't answer for every line. That is a
-  // fault, not a missing setting, and no policy makes it safe to guess past.
-  if (rows.length !== lines.length) throw new MissingUnitConversionError();
-  if (onMissing === "throw" && rows.some((row) => row.missing || row.base_quantity === null)) {
+  const quantities = lines.map((line) => {
+    if (!line.itemId || !line.unitId) return Math.abs(line.quantity);
+    const multiplier = multiplierToBase(line.itemId, line.unitId, baseByItem.get(line.itemId), conversions);
+    return multiplier === null ? null : Math.abs(line.quantity) * multiplier;
+  });
+  if (onMissing === "throw" && quantities.some((quantity) => quantity === null)) {
     throw new MissingUnitConversionError();
   }
-  // `Math.abs`, matching the quantity handed to the statement above: the sign of a
-  // movement is the caller's `stockMovement`, never the base quantity's.
-  return rows.map((row, index) =>
-    row.base_quantity === null ? Math.abs(lines[index].quantity) : Number(row.base_quantity),
-  );
+  return quantities.map((quantity, index) => quantity ?? Math.abs(lines[index].quantity));
 }
 
+// Rebuilds persisted stock quantities after a product's base unit or one of its
+// rules changes. The original entered quantity/unit stays on document_lines;
+// only its derived base_quantity changes, and transaction unit cost is kept
+// consistent with the already-recorded total cost. Both updates are set-based.
+export async function rebuildItemBaseQuantities(tx: Tx, itemIds: string[]): Promise<void> {
+  const distinctIds = [...new Set(itemIds.filter(Boolean))];
+  if (distinctIds.length === 0) return;
+  const lines = await tx
+    .select({ id: documentLines.id, itemId: documentLines.itemId, unitId: documentLines.unitId, quantity: documentLines.quantity })
+    .from(documentLines)
+    .where(inArray(documentLines.itemId, distinctIds));
+  if (lines.length === 0) return;
+
+  const quantities = await resolveBaseQuantities(
+    tx,
+    lines.map((line) => ({ itemId: line.itemId, unitId: line.unitId, quantity: Number(line.quantity) })),
+    "assume-base",
+  );
+  const values = sql.join(lines.map((line, index) => sql`(${line.id}::uuid, ${String(quantities[index])}::numeric)`), sql`, `);
+  await tx.execute(sql`
+    UPDATE document_lines dl
+    SET base_quantity = v.base_quantity
+    FROM (VALUES ${values}) AS v(id, base_quantity)
+    WHERE dl.id = v.id
+  `);
+  await tx.execute(sql`
+    UPDATE inventory_transactions it
+    SET base_quantity = dl.base_quantity,
+        unit_cost = CASE
+          WHEN dl.base_quantity <> 0 THEN it.total_cost / dl.base_quantity
+          ELSE it.unit_cost
+        END
+    FROM document_lines dl
+    WHERE it.document_line_id = dl.id
+      AND dl.item_id IN (${sql.join(distinctIds.map((id) => sql`${id}::uuid`), sql`, `)})
+  `);
+}

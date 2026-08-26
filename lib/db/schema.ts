@@ -345,6 +345,7 @@ export const expenses = pgTable(
   },
   (table) => [
     check("expenses_amount_check", sql`${table.amount} > 0`),
+    unique().on(table.companyId, table.id),
     unique().on(table.chequeId),
     // The expenses list scopes by company; the stock-purchase edit reads an
     // expense back by the document it was created from.
@@ -386,22 +387,37 @@ export const items = pgTable(
     index("idx_items_brand").on(table.brandId),
   ],  );
 
-// item_id FK added via ALTER TABLE in the source SQL (items didn't exist yet
-// when unit_conversions was first declared) — expressed directly here since
-// Drizzle table order doesn't need the split.
+// A conversion is a named, reusable rule.  Its assignments live in
+// item_unit_conversion_rules below, so the same "Dozen to pieces" rule can be
+// used by any number of products and a product can use several rules.
 export const unitConversions = pgTable(
   "unit_conversions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     companyId: uuid("company_id").references(() => companies.id),
-    itemId: uuid("item_id").notNull().references(() => items.id),
+    name: varchar("name", { length: 150 }).notNull(),
     fromUnitId: uuid("from_unit_id").notNull().references(() => units.id),
     toUnitId: uuid("to_unit_id").notNull().references(() => units.id),
     multiplier: numeric("multiplier", { precision: 18, scale: 6 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique().on(table.itemId, table.fromUnitId, table.toUnitId),
     check("unit_conversions_multiplier_check", sql`${table.multiplier} > 0`),
+    check("unit_conversions_different_units_check", sql`${table.fromUnitId} <> ${table.toUnitId}`),
+  ],
+);
+
+export const itemUnitConversionRules = pgTable(
+  "item_unit_conversion_rules",
+  {
+    itemId: uuid("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id").notNull().references(() => unitConversions.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.itemId, table.ruleId] }),
+    index("idx_item_unit_conversion_rules_rule").on(table.ruleId),
   ],
 );
 
@@ -517,6 +533,7 @@ export const documents = pgTable(
       foreignColumns: [documentTypes.companyId, documentTypes.id],
       name: "documents_company_document_type_fk",
     }),
+    unique().on(table.companyId, table.id),
     unique().on(table.companyId, table.documentTypeId, table.number),
     // Commerce lists resolve a document type, narrow to a company scope, then
     // show newest documents first. One composite index serves that shared path
@@ -733,6 +750,78 @@ export const ledgerEntries = pgTable(
     ),
   ],  );
 
+// The party ledger above remains the customer/supplier statement. The tables
+// below are the separate, balanced general ledger introduced at cutover. They
+// intentionally have distinct names from the chart_of_accounts experiment that
+// was removed in migration 0011, so applying this migration never revives or
+// mutates historic accounting rows.
+export const generalAccountTypeEnum = pgEnum("general_account_type", ["asset", "liability", "equity", "income", "expense"]);
+
+export const generalLedgerAccounts = pgTable(
+  "general_ledger_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id),
+    code: varchar("code", { length: 40 }).notNull(),
+    name: varchar("name", { length: 150 }).notNull(),
+    accountType: generalAccountTypeEnum("account_type").notNull(),
+    isSystem: boolean("is_system").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique().on(table.companyId, table.code),
+    unique().on(table.companyId, table.id),
+    index("idx_gl_accounts_company_active").on(table.companyId, table.isActive),
+  ],
+);
+
+export const generalLedgerEntries = pgTable(
+  "general_ledger_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id),
+    // Exactly one source is present: normal commerce posts come from a document;
+    // standalone expenses have no document header and carry expenseId instead.
+    documentId: uuid("document_id").references(() => documents.id, { onDelete: "restrict" }),
+    expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "restrict" }),
+    accountId: uuid("account_id").notNull().references(() => generalLedgerAccounts.id, { onDelete: "restrict" }),
+    debit: numeric("debit", { precision: 18, scale: 2 }).notNull().default("0"),
+    credit: numeric("credit", { precision: 18, scale: 2 }).notNull().default("0"),
+    memo: varchar("memo", { length: 250 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.companyId, table.accountId],
+      foreignColumns: [generalLedgerAccounts.companyId, generalLedgerAccounts.id],
+      name: "general_ledger_entries_company_account_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.documentId],
+      foreignColumns: [documents.companyId, documents.id],
+      name: "general_ledger_entries_company_document_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.expenseId],
+      foreignColumns: [expenses.companyId, expenses.id],
+      name: "general_ledger_entries_company_expense_fk",
+    }),
+    index("idx_gl_entries_company_account").on(table.companyId, table.accountId),
+    index("idx_gl_entries_document").on(table.documentId),
+    index("idx_gl_entries_expense").on(table.expenseId),
+    check(
+      "general_ledger_entries_debit_credit_check",
+      sql`(${table.debit} = 0 AND ${table.credit} > 0) OR (${table.credit} = 0 AND ${table.debit} > 0)`,
+    ),
+    check(
+      "general_ledger_entries_one_source_check",
+      sql`(${table.documentId} IS NULL) <> (${table.expenseId} IS NULL)`,
+    ),
+  ],
+);
+
 // --- Settings ---
 
 export const settings = pgTable(
@@ -866,6 +955,9 @@ export const bankAccounts = pgTable(
     currentBalance: numeric("current_balance", { precision: 18, scale: 2 }).default("0"),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    // Optional during the cutover: historical/legacy accounts safely use the
+    // Cash and Bank control account until an administrator maps them.
+    generalLedgerAccountId: uuid("general_ledger_account_id").references(() => generalLedgerAccounts.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -883,6 +975,7 @@ export const cashAccounts = pgTable(
     currentBalance: numeric("current_balance", { precision: 18, scale: 2 }).default("0"),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    generalLedgerAccountId: uuid("general_ledger_account_id").references(() => generalLedgerAccounts.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

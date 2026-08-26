@@ -28,6 +28,8 @@ import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { companySettingValue } from "@/lib/queries/settings";
+import { postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
+import { stockAdjustmentLedgerLines } from "@/lib/general-ledger-constants";
 
 // An adjustment is the one document that writes stock without a counterparty: no
 // customer, no supplier, no second location. One line per item at the adjusted
@@ -41,6 +43,42 @@ export interface AdjustmentItemRow {
   // Signed: what the user entered, movement folded back in.
   quantity: string;
   unitSymbol: string | null;
+}
+
+// The three latest *distinct* purchase rates, normalized to the product's base
+// quantity. A duplicate rate is one choice, not three indistinguishable ones;
+// the first result is the most recent and is the form's default.
+export async function getRecentStockAdjustmentRates(itemId: string): Promise<string[]> {
+  const session = await getSession();
+  requirePermission(session, "stock_adjustments", "view");
+  if (!itemId) return [];
+  const rows = await db
+    .select({
+      rate: sql<string>`coalesce(${documentLines.unitCost}, ${documentLines.unitPrice}) * ${documentLines.quantity} / nullif(${documentLines.baseQuantity}, 0)`,
+      documentDate: documents.documentDate,
+      createdAt: documents.createdAt,
+    })
+    .from(documentLines)
+    .innerJoin(documents, eq(documents.id, documentLines.documentId))
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .innerJoin(items, eq(items.id, documentLines.itemId))
+    .where(
+      and(
+        eq(documentLines.itemId, itemId),
+        eq(documents.status, "posted"),
+        eq(documentTypes.code, "PURCHASE_INVOICE"),
+        await companyInPermissionScope(items.companyId, session, "stock_adjustments"),
+      ),
+    )
+    .orderBy(desc(documents.documentDate), desc(documents.createdAt), desc(documentLines.lineNo));
+  const rates: string[] = [];
+  for (const row of rows) {
+    const rate = Number(row.rate);
+    if (!Number.isFinite(rate) || rates.some((existing) => Number(existing) === rate)) continue;
+    rates.push(String(rate));
+    if (rates.length === 3) break;
+  }
+  return rates;
 }
 
 export async function listStockAdjustments(companyId?: string) {
@@ -156,6 +194,8 @@ interface AdjustmentLineInput {
   unitId: string;
   unitName: string;
   quantity: string;
+  // Rate per base stock unit, selected from the product's recent purchases.
+  unitCost?: string;
 }
 
 function readLines(formData: FormData): AdjustmentLineInput[] {
@@ -229,7 +269,11 @@ export async function createStockAdjustment(
         tx,
         validLines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Math.abs(Number(line.quantity)) })),
       );
-      const costs = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId })));
+      const fallbackCosts = await averageCosts(tx, itemIds.map((itemId) => ({ itemId, locationId })));
+      const costs = validLines.map((line, index) => {
+        const selected = Number(line.unitCost);
+        return line.unitCost?.trim() !== "" && Number.isFinite(selected) && selected >= 0 ? selected : (fallbackCosts[index] ?? 0);
+      });
       const adjustmentValue = baseQuantities.reduce((sum, quantity, index) => sum + quantity * (costs[index] ?? 0), 0);
       pendingApproval = approvalThreshold > 0 && adjustmentValue > approvalThreshold;
       const [doc] = await tx
@@ -294,6 +338,13 @@ export async function createStockAdjustment(
 
       await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
 
+      if (!pendingApproval) {
+        const glLines = stockAdjustmentLedgerLines(rows.map((row) => ({ movement: row.movement, cost: row.unitCost * Number(row.line.baseQuantity) })));
+        if (glLines.length > 0) {
+          await postGeneralLedgerIfCutover(tx, { companyId, documentId: doc.id, documentDate, lines: glLines });
+        }
+      }
+
       return doc.id;
     });
   } catch (e) {
@@ -301,9 +352,9 @@ export async function createStockAdjustment(
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
-  invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.cheques);
+  await invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.cheques);
   // An adjustment is a stock movement, and the product list carries on-hand.
-  invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
+  await invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products, READ_DOMAIN.ledger, READ_DOMAIN.payments, READ_DOMAIN.purchases);
   revalidatePath("/inventory/stock-adjustments");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -318,7 +369,7 @@ export async function approveStockAdjustment(_prevState: ActionResult | undefine
     const documentId = String(formData.get("documentId") ?? "");
     requirePermission(session, "stock_adjustments", "approve");
     const [pending] = await db
-      .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason })
+      .select({ number: documents.number, companyId: documents.companyId, reason: documents.reason, documentDate: documents.documentDate })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documents.status, "pending"), eq(documentTypes.code, "STOCK_ADJUSTMENT"), await companyInScope(documents.companyId)))
@@ -342,10 +393,22 @@ export async function approveStockAdjustment(_prevState: ActionResult | undefine
         WHERE dl.document_id = ${documentId}::uuid
           AND dl.item_id IS NOT NULL AND dl.stock_movement IS NOT NULL
       `);
+      const adjustmentLines = await tx
+        .select({ movement: documentLines.stockMovement, lineTotal: documentLines.lineTotal })
+        .from(documentLines)
+        .where(eq(documentLines.documentId, documentId));
+      const glLines = stockAdjustmentLedgerLines(
+        adjustmentLines
+          .filter((line): line is { movement: 1 | -1; lineTotal: string } => line.movement === 1 || line.movement === -1)
+          .map((line) => ({ movement: line.movement, cost: Number(line.lineTotal) })),
+      );
+      if (glLines.length > 0) {
+        await postGeneralLedgerIfCutover(tx, { companyId: pending.companyId, documentId, documentDate: pending.documentDate, lines: glLines });
+      }
     });
 
-    invalidateLookups(CACHE.items);
-    invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
+    await invalidateLookups(CACHE.items);
+    await invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products, READ_DOMAIN.ledger, READ_DOMAIN.payments, READ_DOMAIN.purchases);
     revalidatePath("/inventory/stock-adjustments");
     revalidatePath(`/inventory/stock-adjustments/${documentId}`);
     revalidatePath("/inventory/stock");
@@ -372,9 +435,20 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
   if (!doomed) return { error: "Adjustment not found." };
   requirePermission(session, "stock_adjustments", "delete", { companyId: doomed.companyId });
 
+  let vanishedDuringDelete = false;
   try {
     await db.transaction(async (tx) => {
-      if (doomed.status === "posted") {
+      const [locked] = await tx
+        .select({ status: documents.status })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, doomed.companyId), inArray(documents.status, ["pending", "posted"])))
+        .limit(1)
+        .for("update");
+      if (!locked) {
+        vanishedDuringDelete = true;
+        return;
+      }
+      if (locked.status === "posted") {
         await tx.execute(sql`
           INSERT INTO inventory_transactions
             (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
@@ -384,15 +458,17 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
           JOIN document_lines dl ON dl.id = it.document_line_id
           WHERE dl.document_id = ${documentId}::uuid
         `);
+        await reverseGeneralLedger(tx, doomed.companyId, documentId, "Stock adjustment cancelled");
       }
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, documentId), inArray(documents.status, ["pending", "posted"])));
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't cancel this adjustment.") };
   }
+  if (vanishedDuringDelete) return { error: "Adjustment not found — it may already have been cancelled." };
 
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques);
-  invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+  await invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products, READ_DOMAIN.ledger, READ_DOMAIN.payments, READ_DOMAIN.purchases);
   revalidatePath("/inventory/stock-adjustments");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");

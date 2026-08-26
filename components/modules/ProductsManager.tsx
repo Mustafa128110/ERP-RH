@@ -21,9 +21,8 @@ const columns: ColumnDef[] = [
   {
     key: "name",
     label: "Item Name",
-    // The list is four rate columns wide and says nothing about whether there is
-    // any of the thing, what it is, or whose catalogue it belongs to. That is
-    // the first question anyone asks about a product, so it hangs off the name.
+    // Product names remain plain database values.  Setup state is intentionally
+    // kept in its own column so a red marker never becomes part of the name.
     render: (row) => (
       <DetailHover
         trigger={String(row.name)}
@@ -38,6 +37,17 @@ const columns: ColumnDef[] = [
         footer={row._incomplete === true ? "Created from a sale or purchase line — no category yet." : undefined}
         extraHeight={row._incomplete === true ? 16 : 0}
       />
+    ),
+  },
+  {
+    key: "setup",
+    label: "Setup",
+    render: (row) => (
+      <span className="inline-flex items-center gap-1" aria-label="Product setup status">
+        {row._incomplete === true && <span title="Missing category" className="h-2.5 w-2.5 rounded-full bg-red-500" />}
+        {row._hasUnitRule !== true && <span title="No unit rule" className="h-2.5 w-2.5 rounded-full bg-blue-500" />}
+        {row._hasBaseUnit !== true && <span title="No base stock unit" className="h-2.5 w-2.5 rounded-full bg-green-500" />}
+      </span>
     ),
   },
   { key: "rate1", label: "Purchase Rate 1", align: "right" },

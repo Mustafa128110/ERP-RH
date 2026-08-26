@@ -31,6 +31,7 @@ import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { linkCheque } from "@/lib/actions/cheque-link";
 import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { round1 } from "@/lib/format";
+import { postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 
 const REVALIDATION_PATHS = ["/purchases/market", "/inventory/stock", "/inventory/products", "/expenses", "/dashboard"];
 // The same five screens, as cached reads. A market purchase is a MARKET_PURCHASE
@@ -230,6 +231,16 @@ export async function confirmMarketPurchases(
           .returning({ id: expenses.id });
         if (input.chequeId) await linkCheque(tx, input.chequeId, doc.id, "out", companyId);
         await adjustSettlementBalance(tx, "out", String(total), input.bankAccountId, input.cashAccountId, input.chequeId, 1, companyId);
+        const glSettlementAccount = await settlementGeneralLedgerAccount(tx, companyId, input.bankAccountId, input.cashAccountId, input.chequeId);
+        await postGeneralLedgerIfCutover(tx, {
+          companyId,
+          documentId: doc.id,
+          documentDate: input.documentDate,
+          lines: [
+            { accountCode: "1200", debit: total, memo: "Market inventory purchased" },
+            { ...glSettlementAccount, credit: total, memo: "Market purchase settled" },
+          ],
+        });
 
         const values = sql.join(input.selected.map((row) => sql`(${row.id}::uuid, ${row.unitCost}::numeric)`), sql`, `);
         await tx.execute(sql`
@@ -248,8 +259,8 @@ export async function confirmMarketPurchases(
       return { error: describeDbError(error, "Couldn't post this market purchase.") };
     }
 
-    invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.expenseCategories, CACHE.cheques);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.expenseCategories, CACHE.cheques);
+    await invalidateReads(...READS);
     for (const path of REVALIDATION_PATHS) revalidatePath(path);
     await recordAudit({ action: "create", entity: "market purchase", entityId: createdId, summary: number, companyId, detail: `${input.selected.length} item(s)` });
     return { success: true, id: createdId };
@@ -278,6 +289,7 @@ export async function cancelMarketPurchase(_prevState: ActionResult | undefined,
         .limit(1)
         .for("update");
       if (!expense) throw new Error("The linked Item Purchase expense is missing or already cancelled.");
+      await reverseGeneralLedger(tx, existing.companyId, documentId, "Market purchase cancelled");
       await adjustSettlementBalance(tx, "out", expense.amount, expense.bankAccountId, expense.cashAccountId, expense.chequeId, -1, existing.companyId);
       if (expense.chequeId) await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(and(eq(chequeRegister.id, expense.chequeId), eq(chequeRegister.documentId, documentId)));
       await tx.update(expenses).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date() }).where(eq(expenses.id, expense.id));
@@ -296,8 +308,8 @@ export async function cancelMarketPurchase(_prevState: ActionResult | undefined,
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
     });
 
-    invalidateLookups(CACHE.items, CACHE.expenseCategories, CACHE.cheques);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.items, CACHE.expenseCategories, CACHE.cheques);
+    await invalidateReads(...READS);
     for (const path of REVALIDATION_PATHS) revalidatePath(path);
     await recordAudit({ action: "cancel", entity: "market purchase", entityId: documentId, summary: existing.number, companyId: existing.companyId });
     return { success: true };

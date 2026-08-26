@@ -16,6 +16,7 @@ import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { linkCheque } from "@/lib/actions/cheque-link";
 import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
+import { postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 
 // Moving money between the company's own accounts — cash drawer to bank, bank to
 // cash, one drawer to another. No contact, nothing owed either way, so it writes
@@ -194,6 +195,19 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
             companyId,
           })),
         );
+        const outgoing = sides[0]!;
+        const incoming = sides[1]!;
+        const fromGlAccount = await settlementGeneralLedgerAccount(tx, companyId, outgoing.account.bankAccountId, outgoing.account.cashAccountId, outgoing.account.chequeId);
+        const toGlAccount = await settlementGeneralLedgerAccount(tx, companyId, incoming.account.bankAccountId, incoming.account.cashAccountId, incoming.account.chequeId);
+        await postGeneralLedgerIfCutover(tx, {
+          companyId,
+          documentId: outgoing.documentId,
+          documentDate,
+          lines: [
+            { ...toGlAccount, debit: amount, memo: "Cash transfer received" },
+            { ...fromGlAccount, credit: amount, memo: "Cash transfer sent" },
+          ],
+        });
 
         // Only the outgoing side can be a cheque. The guarded link consumes it
         // after both documents and balance movements have been prepared.
@@ -203,10 +217,10 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
         }
       });
 
-      invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
+      await invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
       // Both balances moved, and a cheque may have been consumed. The transfer
       // documents themselves are JOURNAL_ENTRY, which no cached list shows.
-      invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses);
+      await invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses);
       revalidatePath("/accounts");
       revalidatePath("/dashboard");
       await recordAudit({ action: "create", entity: "cash transfer", summary: `${fromValue} to ${toValue}`, companyId, detail: `Amount ${total}` });
@@ -250,14 +264,15 @@ export async function deleteCashTransfer(_prevState: ActionResult | undefined, f
         { direction: "out", amount: outDoc.grandTotal, bankAccountId: outDoc.bankAccountId, cashAccountId: outDoc.cashAccountId, chequeId: linkedCheque?.id ?? null, sign: -1, companyId: outDoc.companyId },
         { direction: "in", amount: inDoc.grandTotal, bankAccountId: inDoc.bankAccountId, cashAccountId: inDoc.cashAccountId, chequeId: null, sign: -1, companyId: inDoc.companyId },
       ]);
+      await reverseGeneralLedger(tx, outDoc.companyId, outDoc.id, "Cash transfer cancelled");
       if (linkedCheque) await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, linkedCheque.id));
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(inArray(documents.id, ids));
       changed = true;
     });
     if (!changed) return { error: "Transfer not found — it may already be cancelled." };
 
-    invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
-    invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses);
+    await invalidateLookups(CACHE.documentTypes, CACHE.bankAccounts, CACHE.cashAccounts, CACHE.cheques);
+    await invalidateReads(READ_DOMAIN.accounts, READ_DOMAIN.payments, READ_DOMAIN.expenses);
     revalidatePath("/accounts");
     revalidatePath("/dashboard");
     await recordAudit({ action: "cancel", entity: "cash transfer", entityId: outDoc.id, summary: outDoc.number, companyId: outDoc.companyId });

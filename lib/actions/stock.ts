@@ -10,6 +10,7 @@ import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION } from "@/lib/location-constants"
 import { READ_DOMAIN } from "@/lib/cache-keys";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { settingsForCompanies } from "@/lib/queries/settings";
+import { fifoValuations } from "@/lib/queries/stock-cost";
 
 export interface StockUnitTotal {
   unit: string;
@@ -74,8 +75,6 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       locationName: sql<string>`coalesce(${locations.code}, ${locations.name})`,
       unit: sql<string>`coalesce(${units.symbol}, ${units.name}, '—')`,
       onHand: sql<string>`sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity})`,
-      costSum: sql<string>`sum(case when ${inventoryTransactions.movement} = 1 then ${inventoryTransactions.totalCost} else 0 end)`,
-      costQty: sql<string>`sum(case when ${inventoryTransactions.movement} = 1 then ${inventoryTransactions.baseQuantity} else 0 end)`,
     })
     .from(inventoryTransactions)
     .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
@@ -98,7 +97,10 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
     )
     .groupBy(items.id, items.name, items.sku, items.companyId, companies.shortName, companies.name, documentLines.locationId, locations.code, locations.name, units.symbol, units.name);
 
-  const companySettings = await settingsForCompanies([...new Set(rows.map((row) => row.companyId))], ["low_stock_qty"]);
+  const [valuations, companySettings] = await Promise.all([
+    fifoValuations(rows.map((row) => ({ itemId: row.itemId, locationId: row.locationId }))),
+    settingsForCompanies([...new Set(rows.map((row) => row.companyId))], ["low_stock_qty"]),
+  ]);
 
   // All rows share one location when locationId is set — grab its name once.
   const filteredLocationName = locationId ? (rows[0]?.locationName ?? UNASSIGNED_LABEL) : null;
@@ -113,11 +115,10 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
     unit: string;
     locationName: string;
     onHand: number;
-    costSum: number;
-    costQty: number;
+    valuation: number;
   };
   const byItemUnitLocation = new Map<string, LocAgg>();
-  for (const r of rows) {
+  for (const [index, r] of rows.entries()) {
     const key = `${r.itemId}::${r.unit}::${r.locationId ?? UNASSIGNED_LOCATION}`;
     byItemUnitLocation.set(key, {
       itemId: r.itemId,
@@ -128,8 +129,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       unit: r.unit,
       locationName: r.locationName ?? UNASSIGNED_LABEL,
       onHand: Number(r.onHand),
-      costSum: Number(r.costSum),
-      costQty: Number(r.costQty),
+      valuation: valuations[index] ?? 0,
     });
   }
 
@@ -141,7 +141,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
     sku: string;
     companyName: string;
     companyId: string;
-    unitAgg: Map<string, { onHand: number; costSum: number; costQty: number }>;
+    unitAgg: Map<string, { onHand: number; valuation: number }>;
     breakdown: StockLocationBreakdown[];
   };
   const byItem = new Map<string, ItemAgg>();
@@ -155,15 +155,13 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
       unitAgg: new Map(),
       breakdown: [],
     };
-    const u = entry.unitAgg.get(loc.unit) ?? { onHand: 0, costSum: 0, costQty: 0 };
+    const u = entry.unitAgg.get(loc.unit) ?? { onHand: 0, valuation: 0 };
     u.onHand += loc.onHand;
-    u.costSum += loc.costSum;
-    u.costQty += loc.costQty;
+    u.valuation += loc.valuation;
     entry.unitAgg.set(loc.unit, u);
 
     if (!locationId && loc.onHand !== 0) {
-      const locAvgCost = loc.costQty > 0 ? loc.costSum / loc.costQty : 0;
-      entry.breakdown.push({ location: loc.locationName, unit: loc.unit, onHand: loc.onHand, valuation: loc.onHand * locAvgCost });
+      entry.breakdown.push({ location: loc.locationName, unit: loc.unit, onHand: loc.onHand, valuation: loc.valuation });
     }
     byItem.set(loc.itemId, entry);
   }
@@ -174,7 +172,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
         .map(([unit, u]) => ({
           unit,
           onHand: u.onHand,
-          valuation: u.onHand * (u.costQty > 0 ? u.costSum / u.costQty : 0),
+          valuation: u.valuation,
         }))
         .sort((a, b) => a.unit.localeCompare(b.unit));
 

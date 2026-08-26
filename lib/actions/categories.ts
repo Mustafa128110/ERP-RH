@@ -95,9 +95,9 @@ export async function saveCategoryTree(
       WHERE c.id = v.id
     `);
 
-    invalidateLookups(CACHE.categories);
+    await invalidateLookups(CACHE.categories);
     // The product list groups by category, so a rename or a move changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/categories");
     await recordAudit({ action: "update", entity: "category tree", summary: `${items.length} categories reordered` });
     return { success: true };
@@ -139,9 +139,9 @@ export async function createCategoriesBatch(rows: CategoryBatchRow[]): Promise<C
       .values(valid.map((r) => ({ name: r.name.trim(), slug: slugify(r.name) || null, parentId: r.parentId })))
       .returning({ id: categories.id, name: categories.name });
 
-    invalidateLookups(CACHE.categories);
+    await invalidateLookups(CACHE.categories);
     // The product list groups by category, so a rename or a move changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/categories");
     await recordAudit({ action: "create", entity: "category", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -158,9 +158,9 @@ export async function updateCategory(categoryId: string, _prevState: ActionResul
     if (values.parentId === categoryId) return { error: "A category can't be its own parent." };
 
     await db.update(categories).set(values).where(eq(categories.id, categoryId));
-    invalidateLookups(CACHE.categories);
+    await invalidateLookups(CACHE.categories);
     // The product list groups by category, so a rename or a move changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/categories");
     await recordAudit({ action: "update", entity: "category", entityId: categoryId, summary: values.name });
     return { success: true };
@@ -175,9 +175,9 @@ export async function deleteCategory(_prevState: ActionResult | undefined, formD
     const categoryId = String(formData.get("categoryId") ?? "");
     await db.delete(categories).where(eq(categories.id, categoryId));
 
-    invalidateLookups(CACHE.categories);
+    await invalidateLookups(CACHE.categories);
     // The product list groups by category, so a rename or a move changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/categories");
     await recordAudit({ action: "delete", entity: "category", entityId: categoryId, summary: categoryId });
     return { success: true };

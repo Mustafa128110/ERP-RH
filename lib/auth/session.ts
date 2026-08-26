@@ -44,8 +44,8 @@ export interface AuthSession {
 const SESSION_TTL = MINUTE;
 const SESSION_KEY = "session";
 
-export function invalidateSessions() {
-  invalidate(SESSION_KEY);
+export async function invalidateSessions() {
+  await invalidate(SESSION_KEY);
 }
 
 // The row → session shape, shared by the cached read and the live write read.
@@ -107,7 +107,7 @@ const getCookieSession = cache(async (): Promise<AuthSession | null> => {
   // Deliberately no negative caching: a user who was just created or
   // reactivated must be able to sign in immediately, not in up to a minute.
   // Concurrent callers still share the in-flight lookup, they just don't keep it.
-  if (!session) invalidate(key);
+  if (!session) await invalidate(key);
   return session;
 });
 

@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
+import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment, getRecentStockAdjustmentRates } from "@/lib/actions/stock-adjustments";
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
@@ -22,14 +22,14 @@ const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string };
+type Line = { itemId: string; itemText: string; unitId: string; unitText: string; quantity: string; unitCost: string };
 
 // One draft per form: only one adjustment is ever being typed. The user id is
 // appended at the call site (adjustment:<uid>) so a shared browser never offers
 // one user's half-typed adjustment to another.
 const ADJUSTMENT_DRAFT_KEY = "adjustment";
 
-const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "" });
+const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", unitCost: "" });
 
 // Same grid as sales and transfers. The one difference: quantity is signed —
 // negative writes stock off, positive adds it back — so the input has no min="0".
@@ -62,6 +62,7 @@ export function StockAdjustmentFormPage({
   const [documentDate, setDocumentDate] = useState(todayISO());
   const [locationId, setLocationId] = useState("");
   const [reason, setReason] = useState("");
+  const [recentRates, setRecentRates] = useState<Record<string, string[]>>({});
   // The draft key is composed per render from the logged-in user — SessionSeed
   // (in the layout) sets the id before children render, so the first render
   // already carries the scoped key.
@@ -149,6 +150,16 @@ export function StockAdjustmentFormPage({
     setLines((prev) => prev.map((l) => (l.itemId && !itemOptions.some((it) => it.id === l.itemId && it.companyId === next) ? { ...l, itemId: "" } : l)));
   }
 
+  function pickItem(row: number, name: string) {
+    const item = visibleItems.find((option) => option.name === name);
+    updateLine(row, { itemText: name, itemId: item?.id ?? "", unitCost: "" });
+    if (!item) return;
+    void getRecentStockAdjustmentRates(item.id).then((rates) => {
+      setRecentRates((previous) => ({ ...previous, [item.id]: rates }));
+      setLines((previous) => previous.map((line, index) => index === row && line.itemId === item.id ? { ...line, unitCost: rates[0] ?? "" } : line));
+    });
+  }
+
   return (
     <form ref={formRef} action={action} className="flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
@@ -223,6 +234,9 @@ export function StockAdjustmentFormPage({
                 <th className={`${thClass} w-10 text-right`}>#</th>
                 <th className={thClass}>Item</th>
                 <th className={`${thClass} w-32`}>Unit</th>
+                <th className={`${thClass} w-44`} title="Latest three distinct purchase rates, per base stock unit">
+                  Purchase Rate
+                </th>
                 <th className={`${thClass} w-28`} title="Negative writes stock off, positive adds it">
                   Adjust By
                 </th>
@@ -244,7 +258,7 @@ export function StockAdjustmentFormPage({
                       // adjustment has no discount/tax/shipping, so only this
                       // one jump exists here.
                       inputProps={{ "data-cell": `${r}-0`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
-                      onChange={(name) => updateLine(r, { itemText: name, itemId: visibleItems.find((it) => it.name === name)?.id ?? "" })}
+                      onChange={(name) => pickItem(r, name)}
                     />
                   </td>
                   <td className={tdClass}>
@@ -256,6 +270,21 @@ export function StockAdjustmentFormPage({
                       inputProps={{ "data-cell": `${r}-1` }}
                       onChange={(name) => updateLine(r, { unitText: name, unitId: unitOptions.find((u) => u.name === name)?.id ?? "" })}
                     />
+                  </td>
+                  <td className={tdClass}>
+                    <select
+                      value={line.unitCost}
+                      onChange={(e) => updateLine(r, { unitCost: e.target.value })}
+                      className={cellInput}
+                      disabled={!line.itemId}
+                    >
+                      <option value="">Current valuation</option>
+                      {(recentRates[line.itemId] ?? []).map((rate) => (
+                        <option key={rate} value={rate}>
+                          Rs {rate}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className={tdClass}>
                     <input

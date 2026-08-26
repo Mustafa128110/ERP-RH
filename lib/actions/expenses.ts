@@ -23,6 +23,7 @@ import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
+import { assertGeneralLedgerDateStaysPostCutover, postExpenseGeneralLedgerBatch, reverseExpenseGeneralLedger } from "@/lib/actions/general-ledger";
 
 export interface ExpenseFilters {
   company?: string;
@@ -173,7 +174,7 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
         })),
       );
 
-      await tx.insert(expenses).values(
+      const inserted = await tx.insert(expenses).values(
         valid.map((r, index) => ({
           companyId: r.companyId,
           expenseCategoryId: categoryIds[index]!,
@@ -185,7 +186,7 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
           notes: r.notes,
           createdBy: session.userId,
         })),
-      );
+      ).returning({ id: expenses.id });
 
       await adjustSettlementBalancesBatch(
         tx,
@@ -199,12 +200,25 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
           companyId: r.companyId,
         })),
       );
+      await postExpenseGeneralLedgerBatch(
+        tx,
+        valid.map((row, index) => ({
+          expenseId: inserted[index]!.id,
+          companyId: row.companyId,
+          expenseDate: row.expenseDate,
+          amount: row.amount,
+          memo: row.notes,
+          bankAccountId: row.bankAccountId,
+          cashAccountId: row.cashAccountId,
+          chequeId: row.chequeId,
+        })),
+      );
     });
 
-    invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    await invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     // The accounts screen shows the balance this expense moved, and the cheque
     // that paid it stops being available.
-    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
+    await invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({
@@ -256,14 +270,15 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
       // First statement: claim the operation id, or abort as a duplicate.
       if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
-      await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId });
+      const [expense] = await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId }).returning({ id: expenses.id });
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
+      await postExpenseGeneralLedgerBatch(tx, [{ expenseId: expense.id, companyId: values.companyId, expenseDate: values.expenseDate, amount: values.amount, memo: values.notes, bankAccountId: values.bankAccountId, cashAccountId: values.cashAccountId, chequeId: values.chequeId }]);
     });
 
-    invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    await invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     // The accounts screen shows the balance this expense moved, and the cheque
     // that paid it stops being available.
-    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
+    await invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({ action: "create", entity: "expense", summary: expenseCategoryName || "Expense", companyId: values.companyId, detail: `Amount ${values.amount}` });
@@ -295,7 +310,7 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
       // expense. `FOR UPDATE` makes the second wait for the first to commit and
       // then read what it actually wrote.
       const [existing] = await tx
-        .select({ companyId: expenses.companyId, amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
+        .select({ id: expenses.id, companyId: expenses.companyId, amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
         .from(expenses)
         // Scoped to the session's current companies: an edit form opened
         // before access was revoked must not be able to write into a company
@@ -314,20 +329,23 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
         return;
       }
 
+      await assertGeneralLedgerDateStaysPostCutover(tx, { companyId: existing.companyId, expenseId: existing.id, documentDate: values.expenseDate });
       // Reverse the old settlement before applying the new one, same as Payments.
       await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
+      await reverseExpenseGeneralLedger(tx, existing.companyId, existing.id, "Reversed before expense correction");
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.update(expenses).set({ ...values, expenseCategoryId: categoryId }).where(eq(expenses.id, expenseId));
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
+      await postExpenseGeneralLedgerBatch(tx, [{ expenseId: existing.id, companyId: values.companyId, expenseDate: values.expenseDate, amount: values.amount, memo: values.notes, bankAccountId: values.bankAccountId, cashAccountId: values.cashAccountId, chequeId: values.chequeId }]);
     });
 
     if (missing) return { error: "Expense not found — it may already be cancelled." };
     if (companyChanged) return { error: "An expense can't be moved to another company. Delete it and enter it in the correct company." };
 
-    invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    await invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     // The accounts screen shows the balance this expense moved, and the cheque
     // that paid it stops being available.
-    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
+    await invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({ action: "update", entity: "expense", entityId: expenseId, summary: expenseCategoryName || "Expense", companyId: values.companyId, detail: `Amount ${values.amount}` });
@@ -345,7 +363,7 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
 
     await db.transaction(async (tx) => {
       const [existing] = await tx
-        .select({ companyId: expenses.companyId, amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
+        .select({ id: expenses.id, companyId: expenses.companyId, amount: expenses.amount, bankAccountId: expenses.bankAccountId, cashAccountId: expenses.cashAccountId, chequeId: expenses.chequeId })
         .from(expenses)
         // Same scope rule as updateExpense: a delete is a write, and a write
         // into a company the user no longer has access to is refused.
@@ -361,15 +379,16 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
       // when they hold the permission somewhere else.
       requirePermission(session, "expenses", "delete", { companyId: existing.companyId });
       await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
+      await reverseExpenseGeneralLedger(tx, existing.companyId, existing.id, "Expense cancelled");
       await tx.update(expenses).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date() }).where(eq(expenses.id, expenseId));
     });
 
     if (missing) return { error: "Expense not found — it may already be cancelled." };
 
-    invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
+    await invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
     // The accounts screen shows the balance this expense moved, and the cheque
     // that paid it stops being available.
-    invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
+    await invalidateReads(READ_DOMAIN.expenses, READ_DOMAIN.accounts);
     revalidatePath("/expenses");
     revalidatePath("/dashboard");
     await recordAudit({ action: "cancel", entity: "expense", entityId: expenseId, summary: expenseId });

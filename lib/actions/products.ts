@@ -10,9 +10,9 @@ import {
   documentLines,
   inventoryTransactions,
   itemImages,
+  itemUnitConversionRules,
   items,
   locations,
-  unitConversions,
   units,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
@@ -29,6 +29,7 @@ import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-cons
 import { locationIdOrNull } from "@/lib/location-constants";
 import { purchaseRowError, recordsQty, writesDocument } from "@/lib/product-edit-rules";
 import { queryProductRates, type ProductRateRow } from "@/lib/queries/products";
+import { rebuildItemBaseQuantities } from "@/lib/queries/unit-conversion";
 import { guard, describeDbError, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { cachedPageRead } from "@/lib/read-cache";
@@ -137,8 +138,8 @@ export async function createProductsBatch(
         return tx.insert(items).values(withSkus).returning({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId });
       });
 
-      invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands);
-      invalidateReads(...READS);
+      await invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands);
+      await invalidateReads(...READS);
       revalidatePath("/inventory/products");
       await recordAudit({
         action: "create",
@@ -169,6 +170,9 @@ export interface ProductEditRow {
   brandName: string | null;
   taxable: boolean;
   isActive: boolean;
+  // The one unit in which this product's stock is calculated. It is a product
+  // setting, separate from the unit used on the last purchase.
+  baseUnitId: string | null;
   // Everything the last purchase of this item already answered, so the edit grid
   // opens with those cells filled in rather than blank: who it came from, the
   // unit it was bought in, and what it cost. Editing them writes to the same
@@ -219,6 +223,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       categoryName: categories.name,
       brandId: items.brandId,
       brandName: brands.name,
+      baseUnitId: items.baseUnitId,
       taxable: items.taxable,
       isActive: items.isActive,
     })
@@ -329,6 +334,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       ...r,
       taxable: r.taxable ?? false,
       isActive: r.isActive ?? true,
+      baseUnitId: r.baseUnitId,
       lastSupplierId: lastPurchaseById.get(r.id)?.contact_id ?? null,
       lastUnitId: lastPurchaseById.get(r.id)?.unit_id ?? null,
       // A `date` column comes back as YYYY-MM-DD, which is what the form wants.
@@ -481,6 +487,7 @@ export async function updateProductsBatch(
           if ("error" in result) throw new RowError(`Row ${i + 1} (${row.name.trim()}): ${result.error}`);
           saved.push({ ...result, row, index: i });
         }
+        await rebuildItemBaseQuantities(tx, saved.map((row) => row.itemId));
         return null;
       })
       .catch((e) => {
@@ -498,8 +505,8 @@ export async function updateProductsBatch(
       shared.mode === "purchase" ? await recordPurchases(shared, saved) : shared.mode === "adjust" ? await recordAdjustments(shared, saved) : null;
     if (documentError) return { error: documentError };
 
-    invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands, CACHE.units);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.items, CACHE.categories, CACHE.brands, CACHE.units);
+    await invalidateReads(...READS);
     revalidatePath("/inventory/products");
     revalidatePath("/inventory/stock");
     await recordAudit({
@@ -555,6 +562,7 @@ async function saveProductRow(
     brandId: refs.brandId,
     taxable: row.taxable,
     isActive: row.isActive,
+    baseUnitId: refs.unitId,
   };
 
   const result = row.id
@@ -835,23 +843,17 @@ export async function mergeProducts(
       // out the same, just under one product.
       await tx.update(documentLines).set({ itemId: survivorId }).where(inArray(documentLines.itemId, loserIds));
 
-      // unit_conversions is UNIQUE(item, from, to): a duplicate that carries the
-      // same conversion as the survivor can't be repointed onto it, and doesn't
-      // need to be — it says the same thing.
-      const survivorPairs = await tx
-        .select({ fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId })
-        .from(unitConversions)
-        .where(eq(unitConversions.itemId, survivorId));
-      const held = new Set(survivorPairs.map((p) => `${p.fromUnitId}:${p.toUnitId}`));
-
-      const loserConversions = await tx
-        .select({ id: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId })
-        .from(unitConversions)
-        .where(inArray(unitConversions.itemId, loserIds));
-      const duplicated = loserConversions.filter((c) => held.has(`${c.fromUnitId}:${c.toUnitId}`)).map((c) => c.id);
-      if (duplicated.length > 0) await tx.delete(unitConversions).where(inArray(unitConversions.id, duplicated));
-      // Whatever is left is a conversion the survivor doesn't have yet.
-      await tx.update(unitConversions).set({ itemId: survivorId }).where(inArray(unitConversions.itemId, loserIds));
+      // Rules are reusable. Keep every assignment represented by a loser on the
+      // survivor (once), then remove only the loser assignments — definitions
+      // remain available to every other product that uses them.
+      await tx.execute(sql`
+        INSERT INTO item_unit_conversion_rules (item_id, rule_id)
+        SELECT ${survivorId}::uuid, rule_id
+        FROM item_unit_conversion_rules
+        WHERE item_id IN (${sql.join(loserIds.map((id) => sql`${id}::uuid`), sql`, `)})
+        ON CONFLICT (item_id, rule_id) DO NOTHING
+      `);
+      await tx.delete(itemUnitConversionRules).where(inArray(itemUnitConversionRules.itemId, loserIds));
 
       // item_images.item_id is ON DELETE CASCADE, so these would be thrown away
       // with the row rather than kept. isPrimary is cleared on the way over — the
@@ -868,8 +870,8 @@ export async function mergeProducts(
     return { error: describeDbError(e, "Can't merge — that SKU is already used by another product in this company, or one of these rows is still referenced elsewhere.") };
   }
 
-  invalidateLookups(CACHE.items);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.items);
+  await invalidateReads(...READS);
   revalidatePath("/inventory/products");
   revalidatePath("/inventory/stock");
   revalidatePath("/dashboard");

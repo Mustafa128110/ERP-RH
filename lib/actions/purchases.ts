@@ -53,6 +53,7 @@ import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { financialDocumentError } from "@/lib/financial-input";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
+import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
@@ -594,6 +595,30 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
         });
       }
 
+      if (documentType.affectsPayable) {
+        const glPurchaseSettlement = isPaid
+          ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
+          : null;
+        const glShippingSettlement = shippingAmount > 0
+          ? await settlementGeneralLedgerAccount(tx, companyId, null, shippingCashId, null)
+          : null;
+        await postGeneralLedgerIfCutover(tx, {
+          companyId,
+          documentId: doc.id,
+          documentDate,
+          lines: [
+            { accountCode: "1200", debit: goodsTotal, memo: "Inventory received" },
+            isPaid
+              ? { ...glPurchaseSettlement!, credit: goodsTotal, memo: "Purchase settled at counter" }
+              : { accountCode: "2000", credit: goodsTotal, memo: "Supplier payable" },
+            ...(shippingAmount > 0 ? [
+              { accountCode: "6000", debit: shippingAmount, memo: "Purchase shipping" },
+              { ...glShippingSettlement!, credit: shippingAmount, memo: "Shipping paid" },
+            ] : []),
+          ],
+        });
+      }
+
       // A supplier we have paid ahead of has an advance standing on the account.
       // This bill is something for it to settle against, so the queue is walked
       // again now rather than leaving a new bill reading "outstanding" beside a
@@ -613,8 +638,8 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // and every page reading them are stale, not just the purchase list. Without the
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  await invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -768,19 +793,21 @@ export async function updateStockPurchase(
         cashAccountId: documents.cashAccountId,
       })
       .from(documents)
-      .where(and(eq(documents.id, documentId), eq(documents.companyId, companyId)))
+      .where(and(eq(documents.id, documentId), eq(documents.companyId, companyId), eq(documents.status, "posted")))
       .limit(1)
       .for("update");
     if (!lockedDoc) {
       vanishedDuringSave = true;
       return;
     }
+    await assertGeneralLedgerDateStaysPostCutover(tx, { companyId, documentId, documentDate });
     const [existingCheque] = await tx
       .select({ id: chequeRegister.id })
       .from(chequeRegister)
       .where(eq(chequeRegister.documentId, documentId))
       .limit(1)
       .for("update");
+    await reverseGeneralLedger(tx, companyId, documentId, "Reversed before purchase correction");
     // Hand back the allocated payments before paid_amount is rewritten below.
     // Unlike the sales side this update *sets* paid_amount rather than adding to
     // it, so leaving the allocations in place would leave payment_allocations rows
@@ -929,6 +956,30 @@ export async function updateStockPurchase(
       });
     }
 
+    if (documentType?.affectsPayable) {
+      const glPurchaseSettlement = isPaid
+        ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
+        : null;
+      const glShippingSettlement = shippingAmount > 0
+        ? await settlementGeneralLedgerAccount(tx, companyId, null, shippingCashId, null)
+        : null;
+      await postGeneralLedgerIfCutover(tx, {
+        companyId,
+        documentId,
+        documentDate,
+        lines: [
+          { accountCode: "1200", debit: goodsTotal, memo: "Inventory received" },
+          isPaid
+            ? { ...glPurchaseSettlement!, credit: goodsTotal, memo: "Purchase settled at counter" }
+            : { accountCode: "2000", credit: goodsTotal, memo: "Supplier payable" },
+          ...(shippingAmount > 0 ? [
+            { accountCode: "6000", debit: shippingAmount, memo: "Purchase shipping" },
+            { ...glShippingSettlement!, credit: shippingAmount, memo: "Shipping paid" },
+          ] : []),
+        ],
+      });
+    }
+
     // Rebuild the payables queue for this supplier from the oldest bill forward.
     // The edit may have changed this bill's amount or its date, either of which
     // moves its position, so the payments are walked again rather than patched.
@@ -946,8 +997,8 @@ export async function updateStockPurchase(
   // and every page reading them are stale, not just the purchase list. Without the
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  await invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -1019,7 +1070,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
           cashAccountId: documents.cashAccountId,
         })
         .from(documents)
-        .where(and(eq(documents.id, documentId), eq(documents.companyId, existingDoc.companyId)))
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, existingDoc.companyId), eq(documents.status, "posted")))
         .limit(1)
         .for("update");
       if (!lockedDoc) {
@@ -1095,10 +1146,11 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
         FROM ledger_entries
         WHERE document_id = ${documentId}::uuid
       `);
+      await reverseGeneralLedger(tx, existingDoc.companyId, documentId, "Purchase cancelled");
       await tx
         .update(documents)
         .set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() })
-        .where(eq(documents.id, documentId));
+        .where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
       // The bill has left the payables queue, so every payment made to this
       // supplier is walked again: what was sitting on this bill moves onto the
       // next outstanding one, and any surplus stands as an advance.
@@ -1114,8 +1166,8 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
   // and every page reading them are stale, not just the purchase list. Without the
   // stock/products lines, deleting a purchase reversed the movement in the
   // database while the Stock page kept showing the old quantity.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  await invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -1356,8 +1408,8 @@ export async function mergeStockPurchases(
 
   // Same set of views a create or delete invalidates: the merge moves stock
   // between documents, rewrites a payable and re-points freight expenses.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
+  await invalidateReads(...READS);
   revalidatePath("/purchases/stock");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");

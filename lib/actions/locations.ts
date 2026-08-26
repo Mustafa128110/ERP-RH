@@ -41,9 +41,9 @@ export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<Cr
     if (valid.length === 0) return { error: "Add at least one location with a name and type." };
 
     const created = await db.insert(locations).values(valid).returning({ id: locations.id, name: locations.name });
-    invalidateLookups(CACHE.locations);
+    await invalidateLookups(CACHE.locations);
     // Stock on hand is reported per location, by name.
-    invalidateReads(READ_DOMAIN.stock);
+    await invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/inventory/warehouses");
     await recordAudit({ action: "create", entity: "location", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -60,9 +60,9 @@ export async function updateLocation(locationId: string, _prevState: ActionResul
     if (!locationTypes.includes(values.locationType)) return { error: "Location type is required." };
 
     await db.update(locations).set(values).where(eq(locations.id, locationId));
-    invalidateLookups(CACHE.locations);
+    await invalidateLookups(CACHE.locations);
     // Stock on hand is reported per location, by name.
-    invalidateReads(READ_DOMAIN.stock);
+    await invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/inventory/warehouses");
     await recordAudit({ action: "update", entity: "location", entityId: locationId, summary: values.name });
     return { success: true };
@@ -77,9 +77,9 @@ export async function deleteLocation(_prevState: ActionResult | undefined, formD
     const locationId = String(formData.get("locationId") ?? "");
     await db.delete(locations).where(eq(locations.id, locationId));
 
-    invalidateLookups(CACHE.locations);
+    await invalidateLookups(CACHE.locations);
     // Stock on hand is reported per location, by name.
-    invalidateReads(READ_DOMAIN.stock);
+    await invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/inventory/warehouses");
     await recordAudit({ action: "delete", entity: "location", entityId: locationId, summary: locationId });
     return { success: true };

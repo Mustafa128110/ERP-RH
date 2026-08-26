@@ -27,7 +27,11 @@ import {
   type LedgerEntryType,
   type SettlementState,
 } from "@/lib/ledger-constants";
+import { isOpeningBalanceDirection, openingLedgerSide, openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { readPartySettlement, settleableAfterEdit } from "@/lib/queries/party-ledger";
+import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
+import { openingBalanceLedgerLines, partyJournalLedgerLines } from "@/lib/general-ledger-constants";
+import { isManualJournalCounterpart } from "@/lib/manual-journal-constants";
 
 // This file edits documents and ledger entries on both sides of the book and
 // re-settles what they were paid with, so a write here can change every list that
@@ -350,6 +354,7 @@ function readEntryForm(formData: FormData) {
   const contactId = String(formData.get("contactId") ?? "").trim();
   const contactName = String(formData.get("contactName") ?? "").trim();
   const direction = String(formData.get("direction") ?? "");
+  const counterpartAccountCode = String(formData.get("counterpartAccountCode") ?? "");
   const amount = Number(String(formData.get("amount") ?? "").trim());
   const note = String(formData.get("note") ?? "").trim();
 
@@ -357,13 +362,15 @@ function readEntryForm(formData: FormData) {
     ? "Date is required."
     : direction !== "owes_us" && direction !== "we_owe"
       ? "Pick which way the balance runs."
+      : !isManualJournalCounterpart(counterpartAccountCode)
+        ? "Pick the counterpart account for this journal entry."
       : // The table's own CHECK rejects a zero row (one side must be > 0), so
         // this catches it here with a sentence rather than a failed insert.
         !Number.isFinite(amount) || amount <= 0
         ? "Enter an amount greater than zero."
         : null;
 
-  return { companyId, documentDate, contactId, contactName, direction, amount, note, error };
+  return { companyId, documentDate, contactId, contactName, direction, counterpartAccountCode, amount, note, error };
 }
 
 // Writes one journal entry: the document, its single ledger row, and the number.
@@ -380,6 +387,7 @@ async function writeJournalEntry(
     contactId: string | null;
     contactName: string | null;
     signedAmount: number;
+    counterpartAccountCode: string;
     note: string;
     userId: string;
   },
@@ -423,6 +431,12 @@ async function writeJournalEntry(
     );
 
     await tx.insert(documentNumberLedger).values({ companyId: input.companyId, documentTypeId: documentType.id, number, documentId: doc.id });
+    await postGeneralLedgerIfCutover(tx, {
+      companyId: input.companyId,
+      documentId: doc.id,
+      documentDate: input.documentDate,
+      lines: partyJournalLedgerLines(input.signedAmount, input.counterpartAccountCode),
+    });
   });
 }
 
@@ -432,7 +446,7 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
     async () => {
       const session = await getLiveSession();
 
-      const { companyId, documentDate, contactId, contactName, direction, amount, note, error } = readEntryForm(formData);
+      const { companyId, documentDate, contactId, contactName, direction, counterpartAccountCode, amount, note, error } = readEntryForm(formData);
       if (!companyId) return { error: "Company is required." };
       if (!contactId && !contactName) return { error: "Pick a contact or type a new name." };
       if (error) return { error };
@@ -450,6 +464,7 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
           contactId: contactId || null,
           contactName: contactName || null,
           signedAmount: direction === "we_owe" ? amount : -amount,
+          counterpartAccountCode,
           note,
           userId: session.userId,
         },
@@ -457,8 +472,8 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
       );
 
       // A typed-in contact is a new contact.
-      invalidateLookups(CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
-      invalidateReads(...READS);
+      await invalidateLookups(CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
+      await invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({ action: "create", entity: "ledger entry", summary: contactName || contactId, companyId, detail: `${direction} ${amount}${note ? ` — ${note}` : ""}` });
       return { success: true };
@@ -491,7 +506,7 @@ export async function setContactBalance(
       // into another set of books.
       requirePermission(session, "accounts", "create", { companyId });
 
-      const { documentDate, direction, amount, note, error } = readEntryForm(formData);
+      const { documentDate, direction, counterpartAccountCode, amount, note, error } = readEntryForm(formData);
       if (error) return { error };
 
       // Summed in the database rather than by pulling every entry back and
@@ -520,14 +535,15 @@ export async function setContactBalance(
           contactId,
           contactName: null,
           signedAmount: delta,
+          counterpartAccountCode,
           note: note || "Balance correction",
           userId: session.userId,
         },
         readOperationId(formData),
       );
 
-      invalidateLookups(CACHE.documentTypes, CACHE.cheques);
-      invalidateReads(...READS);
+      await invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+      await invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({
         action: "update",
@@ -561,6 +577,7 @@ export type PartyLedgerEntry = {
   date: string;
   type: LedgerEntryType;
   code: string | null; // document type code (e.g. SALES_INVOICE) for routing
+  documentStatus: string;
   reference: string | null;
   debit: number;
   credit: number;
@@ -652,6 +669,7 @@ export async function getPartyLedger(
       documentId: documents.id,
       date: documents.documentDate,
       code: documentTypes.code,
+      documentStatus: documents.status,
       number: documents.number,
       debit: ledgerEntries.debit,
       credit: ledgerEntries.credit,
@@ -787,6 +805,7 @@ export async function getPartyLedger(
         date: r.date,
         type,
         code: r.code,
+        documentStatus: r.documentStatus,
         reference: r.number,
         debit,
         credit,
@@ -804,6 +823,7 @@ export async function getPartyLedger(
       date: r.date,
       type,
       code: r.code,
+      documentStatus: r.documentStatus,
       reference: r.number,
       debit,
       credit,
@@ -917,7 +937,10 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
     "Couldn't delete this entry.",
     async () => {
       const session = await getLiveSession();
-      requirePermission(session, "accounts", "create");
+      // The ledger screen itself is accounts.view-gated. Establish that baseline
+      // before building the company-scoped document query below; the journal
+      // branch separately requires accounts.delete for the row's company.
+      requirePermission(session, "accounts", "view");
 
       const [doc] = await db
         .select({
@@ -930,7 +953,12 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
         })
         .from(documents)
         .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-        .where(eq(documents.id, documentId))
+        .where(
+          and(
+            eq(documents.id, documentId),
+            await companyInPermissionScope(documents.companyId, session, "accounts"),
+          ),
+        )
         .limit(1);
 
       if (!doc) return { error: "Entry not found." };
@@ -943,15 +971,41 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
 
       switch (doc.code) {
         case "JOURNAL_ENTRY": {
+          // A journal entry is handled here instead of by one of the commerce
+          // modules, so it must establish its own company-scoped delete right.
+          requirePermission(session, "accounts", "delete", { companyId: doc.companyId });
+          let cancelled = false;
           await db.transaction(async (tx) => {
-            await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-            await tx.update(documents).set({
-              status: "cancelled",
-              cancelledBy: session.userId,
-              cancelledAt: new Date(),
-              updatedAt: new Date(),
-            }).where(eq(documents.id, documentId));
+            // Claim the posted journal before writing a reversal. Two requests
+            // that race here cannot both add the opposite entry.
+            const [claimed] = await tx
+              .update(documents)
+              .set({
+                status: "cancelled",
+                cancelledBy: session.userId,
+                cancelledAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(documents.id, documentId),
+                  eq(documents.companyId, doc.companyId),
+                  eq(documents.status, "posted"),
+                ),
+              )
+              .returning({ id: documents.id });
+            if (!claimed) return;
+            cancelled = true;
+            // Financial history is immutable: retain the source rows and add
+            // one linked-by-document opposite entry rather than hard deleting.
+            await tx.execute(sql`
+              INSERT INTO ledger_entries (company_id, document_id, debit, credit)
+              SELECT company_id, document_id, credit, debit
+              FROM ledger_entries
+              WHERE document_id = ${documentId}::uuid
+            `);
           });
+          if (!cancelled) return { error: "Already cancelled." };
           break;
         }
         // The opening balance is not deleted from the sheet — it is a standing
@@ -1073,19 +1127,17 @@ function readOpeningForm(formData: FormData) {
   const direction = String(formData.get("direction") ?? "");
   const amount = Number(String(formData.get("amount") ?? "").trim());
   const note = String(formData.get("note") ?? "").trim();
+  const validDirection = isOpeningBalanceDirection(direction);
 
   const error = !documentDate
     ? "Date is required."
-    : direction !== "owes_us" && direction !== "we_owe"
+    : !validDirection
       ? "Pick which way the balance runs."
       : !Number.isFinite(amount) || amount < 0
         ? "Enter an amount of zero or more."
         : null;
 
-  // Ledger balance convention (lib/payment-constants.ts): balance = credit - debit,
-  // so positive = we owe (credit) and negative = they owe us (debit). owes_us posts
-  // as a debit (negative), we_owe as a credit (positive) — matching createLedgerEntry.
-  const signedAmount = direction === "we_owe" ? amount : -amount;
+  const signedAmount = validDirection ? openingStatementAmount(direction, amount) : 0;
   return { documentDate, direction, amount, note, signedAmount, error };
 }
 
@@ -1154,7 +1206,9 @@ export async function setPartyOpeningBalance(
           // Hand back what was settled against the old figure before the new one
           // is written, for the reason releaseInvoiceAllocations documents: the
           // payments holding those allocations are separate posted documents.
+          await assertGeneralLedgerDateStaysPostCutover(tx, { companyId, documentId, documentDate });
           await releaseInvoiceAllocations(tx, [documentId]);
+          await reverseGeneralLedger(tx, companyId, documentId, "Reversed before opening balance correction");
           await tx
             .update(documents)
             .set({
@@ -1196,23 +1250,31 @@ export async function setPartyOpeningBalance(
           await tx.insert(contactOpeningBalances).values({ companyId, contactId, documentId });
         }
 
+        if (!documentId) throw new Error("Opening-balance document could not be created.");
+
         // Drop and re-add rather than update: the sign lives in which column is
         // filled, and a cleared balance has no row at all — ledger_entries' CHECK
-        // requires one side to be greater than zero.
+        // requires one side to be greater than zero. `signedAmount` is statement
+        // signed (debit minus credit), so a positive receivable is a debit.
         await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-        if (signedAmount !== 0) {
+        const side = openingLedgerSide(signedAmount);
+        if (side) {
           await tx.insert(ledgerEntries).values(
-            signedAmount > 0
+            side === "debit"
               ? { companyId, documentId, debit: magnitude }
               : { companyId, documentId, credit: magnitude },
           );
+        }
+        const glLines = openingBalanceLedgerLines(signedAmount);
+        if (glLines.length > 0) {
+          await postGeneralLedgerIfCutover(tx, { companyId, documentId, documentDate, lines: glLines });
         }
 
         await recomputeParty(tx, companyId, contactId);
       });
 
-      invalidateLookups(CACHE.documentTypes, CACHE.contacts);
-      invalidateReads(...READS);
+      await invalidateLookups(CACHE.documentTypes, CACHE.contacts);
+      await invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({
         action: existing.documentId ? "update" : "create",

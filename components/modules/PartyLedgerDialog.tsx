@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
 import { formatDate, formatTimestamp, money, todayISO } from "@/lib/format";
 import {
   getPartyLedger,
@@ -21,6 +21,7 @@ import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchas
 import type { AuditRow } from "@/lib/actions/audit";
 import type { PaymentDirection } from "@/lib/actions/payments";
 import { LEDGER_TYPE_LABELS, type SettlementState } from "@/lib/ledger-constants";
+import { openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { DateField } from "@/components/ui/DateField";
@@ -320,6 +321,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [search, setSearch] = useState("");
+  const [showCancelled, setShowCancelled] = useState(false);
   const [desc, setDesc] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("party-ledger-sort-desc");
@@ -462,9 +464,13 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     return () => { cancelled = true; };
   }, [historyOpen, history, contactId, companyId]);
 
+  const activeEntries = useMemo(
+    () => (data?.entries ?? []).filter((entry) => showCancelled || entry.documentStatus !== "cancelled"),
+    [data, showCancelled],
+  );
+
   const processedEntries = useMemo(() => {
-    if (!data) return [];
-    let filtered = [...data.entries];
+    let filtered = [...activeEntries];
     if (fromDate) filtered = filtered.filter((e) => e.date >= fromDate);
     if (toDate) filtered = filtered.filter((e) => e.date <= toDate);
     if (search.trim()) {
@@ -481,7 +487,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
         : a.date.localeCompare(b.date) || a.id.localeCompare(b.id),
     );
     return filtered;
-  }, [data, fromDate, toDate, search, desc]);
+  }, [activeEntries, fromDate, toDate, search, desc]);
 
   // What the Balance column starts from. The opening-balance row is now rendered
   // as the first line of the statement (see lib/actions/ledger.ts), so it is part
@@ -493,11 +499,10 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   // forward to it; typing in the search box is a way of finding a row, and it must
   // not move the balance the statement opens with.
   const effectiveOpening = useMemo(() => {
-    if (!data) return 0;
     if (!fromDate) return 0;
-    const before = data.entries.filter((e) => e.date < fromDate);
+    const before = activeEntries.filter((e) => e.date < fromDate);
     return before.reduce((sum, e) => sum + e.debit - e.credit, 0);
-  }, [data, fromDate]);
+  }, [activeEntries, fromDate]);
 
   const entriesWithBalance = useMemo(() => {
     let running = effectiveOpening;
@@ -680,6 +685,13 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               >
                 History
               </button>
+              <button
+                type="button"
+                onClick={() => setShowCancelled((v) => !v)}
+                className={`h-8 rounded border px-2 text-[10px] font-medium ${showCancelled ? "border-navy-800 bg-navy-800 text-white" : "border-sand text-steel hover:bg-ivory"}`}
+              >
+                {showCancelled ? "Hide cancelled" : "Show cancelled"}
+              </button>
               <button type="button" onClick={() => handleExport("png")} className="h-8 rounded border border-sand px-2 text-[10px] font-medium text-steel hover:bg-ivory">
                 PNG
               </button>
@@ -784,7 +796,13 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                       <td className={`py-2.5 pr-6 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`} data-cell tabIndex={-1}>
                         {money(e.balance)}
                       </td>
-                      <td className="py-2 text-center"><SettlementCell entry={e} /></td>
+                      <td className="py-2 text-center">
+                        {e.documentStatus === "cancelled" ? (
+                          <span className="rounded border border-steel/30 bg-ivory px-1.5 py-0.5 text-[10px] font-medium text-steel">Cancelled</span>
+                        ) : (
+                          <SettlementCell entry={e} />
+                        )}
+                      </td>
                       <td className="py-2 pr-2 text-center">
                         <button
                           type="button"
@@ -1030,11 +1048,7 @@ function OpeningBalanceDialog({
   const signedAmount = useMemo(() => {
     const magnitude = Number(amount);
     if (!Number.isFinite(magnitude)) return 0;
-    // Emit in the write/list convention (positive = we owe = credit). `current`
-    // arrives in the debit-credit statement convention (positive = owes us = debit),
-    // so owes_us maps to a negative magnitude which writeJournalEntry books as a
-    // debit, and we_owe to a positive one booked as a credit.
-    return direction === "we_owe" ? Math.abs(magnitude) : -Math.abs(magnitude);
+    return openingStatementAmount(direction, magnitude);
   }, [amount, direction]);
 
   // What this figure would do to the settlement, shown while it is being typed.

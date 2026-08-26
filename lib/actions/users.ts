@@ -203,9 +203,9 @@ export async function updateUser(userId: string, _prevState: ActionResult | unde
     await db.update(users).set({ name, status }).where(eq(users.id, userId));
     // Status is what getSession() gates on, so a deactivation has to drop the
     // cached session rather than wait out its TTL.
-    invalidateSessions();
+    await invalidateSessions();
     // The expense list names whoever entered each row, joined from this table.
-    invalidateReads(READ_DOMAIN.expenses);
+    await invalidateReads(READ_DOMAIN.expenses);
     revalidatePath("/users");
     await recordAudit({ action: "update", entity: "user", entityId: userId, summary: name, detail: `Status ${status}` });
     return { success: true };
@@ -230,7 +230,7 @@ export async function addUserRole(userId: string, _prevState: ActionResult | und
       await tx.insert(userRoles).values({ userId, roleId, companyId }).onConflictDoNothing();
       await grantCompanyAccess(tx, userId, companyId);
     });
-    invalidateSessions();
+    await invalidateSessions();
     revalidatePath("/users");
     await recordAudit({ action: "update", entity: "user role", entityId: userId, summary: `Role granted`, companyId });
     return { success: true };
@@ -251,7 +251,7 @@ export async function removeUserRole(formData: FormData): Promise<ActionResult> 
       .limit(1);
     if (!assignment) return { error: "That role assignment no longer exists." };
     await db.delete(userRoles).where(and(eq(userRoles.id, assignmentId), eq(userRoles.userId, userId)));
-    invalidateSessions();
+    await invalidateSessions();
     revalidatePath("/users");
     await recordAudit({ action: "delete", entity: "user role", entityId: userId, summary: `Role assignment removed`, companyId: assignment.companyId });
     return { success: true };
@@ -284,8 +284,8 @@ export async function deleteUser(_prevState: ActionResult | undefined, formData:
       }
     }
 
-    invalidateSessions();
-    invalidateReads(READ_DOMAIN.expenses);
+    await invalidateSessions();
+    await invalidateReads(READ_DOMAIN.expenses);
     revalidatePath("/users");
     await recordAudit({ action: "delete", entity: "user", entityId: userId, summary: target?.name ?? userId, detail: target?.email });
     if (authCleanupFailed) {

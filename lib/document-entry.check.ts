@@ -92,12 +92,8 @@ assert.ok(
   "the policy must be what gates the throw",
 );
 assert.ok(
-  conversion.includes("if (rows.length !== lines.length) throw new MissingUnitConversionError();"),
-  "a statement that didn't answer for every line is a fault, and no policy may guess past it",
-);
-assert.ok(
-  conversion.includes("row.base_quantity === null ? Math.abs(lines[index].quantity)"),
-  "the relaxed path must fall back to the entered quantity, matching what the statement was handed",
+  conversion.includes("quantity ?? Math.abs(lines[index].quantity)"),
+  "the relaxed path must fall back to the entered quantity when no rule reaches the selected base unit",
 );
 
 const sales = read("lib/actions/sales.ts");

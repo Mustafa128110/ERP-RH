@@ -42,6 +42,8 @@ export function SettingsForm({
               </select>
             ) : def.kind === "boolean" ? (
               <input name={def.key} type="checkbox" defaultChecked={values[def.key] === "true"} className="h-5 w-5 rounded border-sand" />
+            ) : def.kind === "date" ? (
+              <input name={def.key} type="date" defaultValue={values[def.key]} className={`${inputClass} w-48`} />
             ) : (
               <input name={def.key} type="number" step="any" min="0" defaultValue={values[def.key]} className={`${inputClass} w-40`} />
             )}

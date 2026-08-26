@@ -47,6 +47,8 @@ const NOTES: Partial<Record<ReportSlug, string>> = {
   "dead-stock": "Items with stock on hand and no sale within their company's configured dead-stock threshold.",
   "receivables-payables": "Age is counted from the document date. A negative balance means it has been overpaid.",
   gst: "Read from the tax recorded on each document, not recomputed from rates — so it agrees with what the invoices actually say.",
+  "trial-balance": "Only documents posted on or after a company’s configured GL cutover date are represented. Cancelled and corrected documents net to zero through append-only reversals.",
+  "general-ledger": "Entries are append-only. A correction or cancellation appears as an explicit opposite posting, rather than changing the original evidence.",
 };
 
 const COLUMNS: Record<ReportSlug, ReportColumn[]> = {
@@ -133,6 +135,25 @@ const COLUMNS: Record<ReportSlug, ReportColumn[]> = {
     { key: "salesTax", label: "Tax on Sales", align: "right", money: true },
     { key: "purchaseTax", label: "Tax on Purchases", align: "right", money: true },
     { key: "net", label: "Net Payable", align: "right", money: true },
+  ],
+  "trial-balance": [
+    { key: "code", label: "Code" },
+    { key: "account", label: "Account" },
+    { key: "type", label: "Type" },
+    { key: "debit", label: "Debit", align: "right", money: true },
+    { key: "credit", label: "Credit", align: "right", money: true },
+    { key: "balance", label: "Net", align: "right", money: true },
+  ],
+  "general-ledger": [
+    { key: "date", label: "Document Date", date: true },
+    { key: "source", label: "Source" },
+    { key: "number", label: "Document" },
+    { key: "status", label: "Status" },
+    { key: "code", label: "Account Code" },
+    { key: "account", label: "Account" },
+    { key: "memo", label: "Memo" },
+    { key: "debit", label: "Debit", align: "right", money: true },
+    { key: "credit", label: "Credit", align: "right", money: true },
   ],
 };
 
@@ -352,6 +373,45 @@ const QUERIES: Record<ReportSlug, Query> = {
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY to_char(d.document_date, 'YYYY-MM'), c.name
        ORDER BY period DESC, c.name`),
+
+  "trial-balance": async (s) =>
+    db.execute<ReportRow>(sql`
+      SELECT a.code,
+             a.name AS account,
+             a.account_type::text AS type,
+             sum(e.debit) AS debit,
+             sum(e.credit) AS credit,
+             sum(e.debit - e.credit) AS balance
+        FROM general_ledger_entries e
+        JOIN general_ledger_accounts a ON a.id = e.account_id
+        LEFT JOIN documents d ON d.id = e.document_id
+        LEFT JOIN expenses x ON x.id = e.expense_id
+       WHERE e.company_id IN (${s.companies})
+         -- A trial balance is an accumulated balance, not a period movement:
+         -- opening journals before the selected range still belong in it.
+         AND coalesce(d.document_date, x.expense_date) <= ${s.to}
+       GROUP BY a.code, a.name, a.account_type
+      HAVING sum(e.debit) <> 0 OR sum(e.credit) <> 0
+       ORDER BY a.code`),
+
+  "general-ledger": async (s) =>
+    db.execute<ReportRow>(sql`
+      SELECT coalesce(d.document_date, x.expense_date)::text AS date,
+             CASE WHEN e.document_id IS NULL THEN 'Expense' ELSE 'Document' END AS source,
+             coalesce(d.number, 'EXP-' || left(e.expense_id::text, 8)) AS number,
+             coalesce(d.status::text, x.status::text) AS status,
+             a.code,
+             a.name AS account,
+             coalesce(e.memo, '') AS memo,
+             e.debit,
+             e.credit
+        FROM general_ledger_entries e
+        JOIN general_ledger_accounts a ON a.id = e.account_id
+        LEFT JOIN documents d ON d.id = e.document_id
+        LEFT JOIN expenses x ON x.id = e.expense_id
+       WHERE e.company_id IN (${s.companies})
+         AND coalesce(d.document_date, x.expense_date) BETWEEN ${s.from} AND ${s.to}
+       ORDER BY coalesce(d.document_date, x.expense_date) DESC, d.number DESC NULLS LAST, e.created_at DESC, a.code`),
 };
 
 

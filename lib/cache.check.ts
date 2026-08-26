@@ -31,7 +31,7 @@ import { READ_DEPENDS_ON, READ_DOCUMENT_TYPES, READ_DOMAIN, type ReadDomain } fr
 //   npx tsx --conditions=react-server lib/cache.check.ts
 
 async function checkPrimitive() {
-  invalidateAll();
+  await invalidateAll();
 
   let calls = 0;
   const load = async () => {
@@ -44,7 +44,7 @@ async function checkPrimitive() {
   assert.equal(calls, 1, "second read should hit the cache");
 
   // Concurrent misses share one in-flight load rather than stampeding.
-  invalidateAll();
+  await invalidateAll();
   calls = 0;
   const slow = async () => {
     calls++;
@@ -63,7 +63,7 @@ async function checkPrimitive() {
   assert.equal(calls, 2, "entry should reload after its TTL");
 
   // A failed load must not be cached.
-  invalidateAll();
+  await invalidateAll();
   let attempts = 0;
   const failing = async () => {
     attempts++;
@@ -74,17 +74,39 @@ async function checkPrimitive() {
   assert.equal(attempts, 2, "a rejected load must evict itself");
 
   // invalidate() clears parameterised variants too.
-  invalidateAll();
+  await invalidateAll();
   calls = 0;
   await cached("cheques", 1000, load);
   await cached("cheques:doc-1", 1000, load);
-  invalidate("cheques");
+  await invalidate("cheques");
   await cached("cheques", 1000, load);
   await cached("cheques:doc-1", 1000, load);
   assert.equal(calls, 4, "invalidate should clear the key and its variants");
 
-  invalidateAll();
-  console.log("ok  cache primitive: dedupe, expiry, failure eviction, prefix invalidation");
+  // Production never falls back to a private cache when shared Redis is absent:
+  // that would make writes served by another instance look stale.
+  const priorNodeEnv = process.env.NODE_ENV;
+  const priorUpstashUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const priorUpstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+  delete process.env.UPSTASH_REDIS_REST_URL;
+  delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  try {
+    await invalidateAll();
+    calls = 0;
+    await cached("production-without-redis", 1000, load);
+    await cached("production-without-redis", 1000, load);
+    assert.equal(calls, 2, "production must bypass the local cache without Redis");
+  } finally {
+    (process.env as Record<string, string | undefined>).NODE_ENV = priorNodeEnv;
+    if (priorUpstashUrl === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = priorUpstashUrl;
+    if (priorUpstashToken === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = priorUpstashToken;
+  }
+
+  await invalidateAll();
+  console.log("ok  cache primitive: dedupe, expiry, failure eviction, prefix invalidation, production no-local fallback");
 }
 
 // Tables that back a cached lookup -> the CACHE key that must be invalidated.
@@ -99,6 +121,7 @@ const TABLE_TO_KEY: Record<string, string> = {
   documentTypes: "documentTypes",
   expenseCategories: "expenseCategories",
   items: "items",
+  itemUnitConversionRules: "items",
   contacts: "contacts",
   bankAccounts: "bankAccounts",
   cashAccounts: "cashAccounts",
@@ -183,6 +206,8 @@ const NO_DOMAIN: Record<string, string> = {
   documentNumberLedger: "written beside every document, selected by no list",
   marketPurchaseRequests: "the market-purchase screen is not a cachedPageRead",
   contactOpeningBalances: "a pointer at the OPENING_BALANCE document; the ledger reads the document",
+  generalLedgerAccounts: "the cutover account set is resolved only inside document posting; no cached screen reads it yet",
+  generalLedgerEntries: "the cutover journal is write-only until the general-ledger reporting screen is introduced",
   unitConversions: "base quantities are resolved and stored on the line at write time",
   itemImages: "read per item on the detail screen, not in any list",
   taxes: "a document's tax is resolved and stored on it at write time",
@@ -190,6 +215,7 @@ const NO_DOMAIN: Record<string, string> = {
   userRoles: "as above, through the session's permissions",
   roles: "permission names, not list data",
   rolePermissions: "as above",
+  whatsappMessages: "read directly by the messaging log, never through a cached page-read model",
   SCOPE_COOKIE: "not a table — cookies().delete(), which the write regex can't tell apart",
 };
 

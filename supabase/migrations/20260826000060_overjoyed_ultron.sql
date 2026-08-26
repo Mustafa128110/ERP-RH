@@ -1,0 +1,1 @@
+DROP INDEX "idx_document_lines_item_document_line";

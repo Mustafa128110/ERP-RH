@@ -203,8 +203,8 @@ export async function createContactsBatch(
         .insert(contacts)
         .values(valid)
         .returning({ id: contacts.id, name: contacts.displayName, companyId: contacts.companyId });
-      invalidateLookups(CACHE.contacts);
-      invalidateReads(...READS);
+      await invalidateLookups(CACHE.contacts);
+      await invalidateReads(...READS);
       revalidatePath("/purchases/suppliers");
       revalidatePath("/contacts");
       await recordAudit({ action: "create", entity: "contact", summary: created.map((c) => c.name).slice(0, 5).join(", ") });
@@ -317,8 +317,8 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
         WHERE c.id = v.id AND ${scope}
       `);
 
-      invalidateLookups(CACHE.contacts);
-      invalidateReads(...READS);
+      await invalidateLookups(CACHE.contacts);
+      await invalidateReads(...READS);
       revalidatePath("/purchases/suppliers");
       revalidatePath("/contacts");
       await recordAudit({ action: "update", entity: "contact", summary: `${rows.length} contact(s) edited` });
@@ -339,8 +339,8 @@ export async function updateContact(contactId: string, _prevState: ActionResult 
 
     // Scoped so a guessed id can't reach a contact outside the user's companies.
     await db.update(contacts).set(data).where(and(eq(contacts.id, contactId), await companyInScope(contacts.companyId)));
-    invalidateLookups(CACHE.contacts);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.contacts);
+    await invalidateReads(...READS);
     revalidatePath("/purchases/suppliers");
     revalidatePath("/contacts");
     await recordAudit({ action: "update", entity: "contact", entityId: contactId, summary: data.displayName, companyId: data.companyId });
@@ -435,8 +435,8 @@ export async function mergeContacts(
     // more — a cheque picker would go on attributing cheques to a contact that
     // no longer exists. The single-contact create/rename/update paths above
     // write neither table, which is why they do not drop this key.
-    invalidateLookups(CACHE.contacts, CACHE.cheques);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.contacts, CACHE.cheques);
+    await invalidateReads(...READS);
     revalidatePath("/contacts");
     revalidatePath("/ledger");
     await recordAudit({

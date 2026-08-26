@@ -39,6 +39,7 @@ import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
+import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 
 // A sale writes the invoice, the stock it took out, the customer's ledger and
 // whatever settled it. `purchases` is deliberately absent — this file names no
@@ -651,6 +652,30 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
         await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, debit: String(balance) });
       }
 
+      // The party ledger above remains the customer statement. From the chosen
+      // cutover date onward this is the separate double-entry posting: cash and
+      // receivable together equal the sale total, while the exact outbound stock
+      // cost moves from inventory into COGS. Pre-cutover invoices do nothing
+      // here, so their historical accounting is never rewritten.
+      const stockCost = round1(stockLines.reduce((sum, { l }) => sum + (Number(l.unitCost) || 0) * Number(l.quantity), 0));
+      const glSettlementAccount = paidAmount > 0
+        ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
+        : null;
+      await postGeneralLedgerIfCutover(tx, {
+        companyId,
+        documentId: doc.id,
+        documentDate,
+        lines: [
+          ...(paidAmount > 0 ? [{ ...glSettlementAccount!, debit: paidAmount, memo: "Sale settled at counter" }] : []),
+          ...(balance > 0 ? [{ accountCode: "1100", debit: balance, memo: "Sale receivable" }] : []),
+          { accountCode: "4000", credit: grandTotal, memo: "Sales revenue" },
+          ...(stockCost > 0 ? [
+            { accountCode: "5000", debit: stockCost, memo: "Cost of goods sold" },
+            { accountCode: "1200", credit: stockCost, memo: "Inventory issued" },
+          ] : []),
+        ],
+      });
+
       // A customer who has paid ahead has money sitting on their account with
       // nowhere to go. This invoice is somewhere for it to go: recomputing the
       // queue lets the standing advance settle against it the moment it exists,
@@ -672,8 +697,8 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   // cached option lists are stale — without this a product typed into a sale is
   // missing from the item picker (and the products/stock pages) for the 5-minute
   // TTL, even though its stock movement is already recorded.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  await invalidateReads(...READS);
   // /sales is the entry form — the page you are standing on when a sale saves.
   // The list the sale has to appear in is /sales/invoices, a different route.
   revalidatePath("/sales");
@@ -761,6 +786,16 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
       .limit(1);
     if (!existingDoc) return { error: "Sale not found." };
+    const [postedReturn] = await db
+      .select({ id: documents.id })
+      .from(documents)
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+      .where(and(eq(documents.sourceDocumentId, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_RETURN")))
+      .limit(1);
+    // Return lines retain the original invoice's line numbers and prices. Editing
+    // that source afterwards would make the return's audit trail ambiguous, so
+    // correct the return first instead of silently changing its foundation.
+    if (postedReturn) return { error: "This sale has a posted sales return. Cancel that return before editing the sale." };
     const [confirmedMarketPurchase] = await db
       .select({ id: marketPurchaseRequests.id })
       .from(marketPurchaseRequests)
@@ -796,19 +831,21 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
           cashAccountId: documents.cashAccountId,
         })
         .from(documents)
-        .where(and(eq(documents.id, documentId), eq(documents.companyId, companyId)))
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, companyId), eq(documents.status, "posted")))
         .limit(1)
         .for("update");
       if (!lockedDoc) {
         vanishedDuringSave = true;
         return;
       }
+      await assertGeneralLedgerDateStaysPostCutover(tx, { companyId, documentId, documentDate });
       const [existingCheque] = await tx
         .select({ id: chequeRegister.id })
         .from(chequeRegister)
         .where(eq(chequeRegister.documentId, documentId))
         .limit(1)
         .for("update");
+      await reverseGeneralLedger(tx, companyId, documentId, "Reversed before sale correction");
       // Hand back the receipts before anything reads paid_amount. What is left is
       // the part payment taken at the counter, which is the only piece that came
       // through this invoice's own bank or cash account — the allocated piece
@@ -906,6 +943,25 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         );
       }
 
+      const stockCost = round1(stockLines.reduce((sum, { l }) => sum + (Number(l.unitCost) || 0) * Number(l.quantity), 0));
+      const glSettlementAccount = paidAmount > 0
+        ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
+        : null;
+      await postGeneralLedgerIfCutover(tx, {
+        companyId,
+        documentId,
+        documentDate,
+        lines: [
+          ...(paidAmount > 0 ? [{ ...glSettlementAccount!, debit: paidAmount, memo: "Sale settled at counter" }] : []),
+          ...(balance > 0 ? [{ accountCode: "1100", debit: balance, memo: "Sale receivable" }] : []),
+          { accountCode: "4000", credit: grandTotal, memo: "Sales revenue" },
+          ...(stockCost > 0 ? [
+            { accountCode: "5000", debit: stockCost, memo: "Cost of goods sold" },
+            { accountCode: "1200", credit: stockCost, memo: "Inventory issued" },
+          ] : []),
+        ],
+      });
+
       // Settlement is rebuilt from scratch for the party, in date order, rather
       // than patched: this edit may have changed the amount, the date or the
       // customer, and all three move the invoice's place in the queue. Both
@@ -922,8 +978,8 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     // cached option lists are stale — without this a product typed into a sale is
     // missing from the item picker (and the products/stock pages) for the 5-minute
     // TTL, even though its stock movement is already recorded.
-    invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+    await invalidateReads(...READS);
     revalidatePath("/sales");
     revalidatePath("/sales/invoices");
     revalidatePath("/inventory/products");
@@ -972,6 +1028,13 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
     .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInScope(documents.companyId)))
     .limit(1);
   if (!existingDoc) return { error: "Sale not found." };
+  const [postedReturn] = await db
+    .select({ id: documents.id })
+    .from(documents)
+    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
+    .where(and(eq(documents.sourceDocumentId, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_RETURN")))
+    .limit(1);
+  if (postedReturn) return { error: "This sale has a posted sales return. Cancel that return before cancelling the sale." };
   const [confirmedMarketPurchase] = await db
     .select({ id: marketPurchaseRequests.id })
     .from(marketPurchaseRequests)
@@ -1005,7 +1068,7 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
           cashAccountId: documents.cashAccountId,
         })
         .from(documents)
-        .where(and(eq(documents.id, documentId), eq(documents.companyId, existingDoc.companyId)))
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, existingDoc.companyId), eq(documents.status, "posted")))
         .limit(1)
         .for("update");
       if (!lockedDoc) {
@@ -1063,7 +1126,8 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
         FROM ledger_entries
         WHERE document_id = ${documentId}::uuid
       `);
-      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
+      await reverseGeneralLedger(tx, existingDoc.companyId, documentId, "Sale cancelled");
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
       // The invoice is gone from the queue, so every receipt on this customer's
       // account has to be walked again from the oldest item forward. Receipts that
       // were sitting on this invoice move to whatever is still outstanding, and any
@@ -1079,8 +1143,8 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
   // cached option lists are stale — without this a product typed into a sale is
   // missing from the item picker (and the products/stock pages) for the 5-minute
   // TTL, even though its stock movement is already recorded.
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts);
+  await invalidateReads(...READS);
   revalidatePath("/sales");
   revalidatePath("/sales/invoices");
   revalidatePath("/inventory/products");

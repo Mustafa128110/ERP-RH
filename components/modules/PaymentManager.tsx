@@ -29,6 +29,25 @@ type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type PaymentDetail = NonNullable<Awaited<ReturnType<typeof getPayment>>>;
 type PaymentCheques = Awaited<ReturnType<typeof listChequesForPayments>>;
+type MethodDetail = { method: string; number: string; amount: string };
+
+function readMethodDetails(value: Row[string]): MethodDetail[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is MethodDetail =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof entry.method === "string" &&
+        typeof entry.number === "string" &&
+        typeof entry.amount === "string",
+    );
+  } catch {
+    return [];
+  }
+}
 
 interface PaymentRow {
   id: string;
@@ -65,7 +84,7 @@ const buildColumns = (): ColumnDef[] => [
     // `_methods` so the panel doesn't have to recompute the group.
     render: (row) => {
       if (String(row.method) !== "Mixed") return <span>{String(row.method)}</span>;
-      const methods = (row._methods as { method: string; number: string; amount: string }[]) ?? [];
+      const methods = readMethodDetails(row._methods);
       return (
         <DetailHover
           trigger={<span className="cursor-help underline decoration-dotted decoration-zinc-400 underline-offset-4">Mixed</span>}
@@ -257,12 +276,14 @@ export function PaymentManager({
       // cell above collapsed to "Mixed", so it is omitted for single-method rows.
       _methods:
         methods.size > 1
-          ? members.map((m) => ({
-              method: m.paymentMethod ?? "—",
-              number: m.number,
-              amount: money(Number(m.grandTotal)),
-            }))
-          : undefined,
+          ? JSON.stringify(
+              members.map((m) => ({
+                method: m.paymentMethod ?? "—",
+                number: m.number,
+                amount: money(Number(m.grandTotal)),
+              })),
+            )
+          : null,
       // Not rendered, but DataTable searches every value on a row: without this
       // the numbers folded into a group would stop being findable.
       _numbers: members.map((m) => m.number).join(" "),

@@ -4,6 +4,73 @@ import { db } from "@/lib/db";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+export type CostLayer = { quantity: number; unitCost: number };
+
+// The value of what remains after FIFO issues. This is deliberately not a
+// weighted average: 20 pieces at Rs10 and 30 at Rs5 remain worth Rs350.
+export function fifoLayerValue(layers: CostLayer[], issuedQuantity: number): number {
+  let remainingToIssue = Math.max(0, issuedQuantity);
+  return layers.reduce((value, layer) => {
+    const quantity = Math.max(0, layer.quantity);
+    const consumed = Math.min(quantity, remainingToIssue);
+    remainingToIssue -= consumed;
+    return value + (quantity - consumed) * Math.max(0, layer.unitCost);
+  }, 0);
+}
+
+// Returns a FIFO value for each item/location pair. Historical movements remain
+// immutable; this derives the unissued portions of their positive layers at
+// read time. Transfer/adjustment inflows carry their recorded cost, so value
+// moves with goods rather than disappearing at the receiving location.
+export async function fifoValuations(rows: { itemId: string; locationId: string | null }[]): Promise<number[]> {
+  if (rows.length === 0) return [];
+  const values = sql.join(
+    rows.map((row, index) => sql`(${index}::int, ${row.itemId}::uuid, ${row.locationId}::uuid)`),
+    sql`, `,
+  );
+  const result = await db.execute<{ position: number; valuation: string }>(sql`
+    WITH input(position, item_id, location_id) AS (VALUES ${values}),
+    outflows AS (
+      SELECT input.position, coalesce(sum(it.base_quantity) FILTER (WHERE it.movement = -1), 0) AS issued_quantity
+      FROM input
+      LEFT JOIN document_lines dl
+        ON dl.item_id = input.item_id
+       AND dl.location_id IS NOT DISTINCT FROM input.location_id
+      LEFT JOIN inventory_transactions it ON it.document_line_id = dl.id
+      GROUP BY input.position
+    ), inflows AS (
+      SELECT input.position,
+             it.base_quantity,
+             coalesce(it.total_cost / nullif(it.base_quantity, 0), 0) AS unit_cost,
+             sum(it.base_quantity) OVER (
+               PARTITION BY input.position
+               ORDER BY d.document_date, it.created_at, it.id
+             ) AS cumulative_quantity
+      FROM input
+      JOIN document_lines dl
+        ON dl.item_id = input.item_id
+       AND dl.location_id IS NOT DISTINCT FROM input.location_id
+      JOIN inventory_transactions it ON it.document_line_id = dl.id AND it.movement = 1
+      JOIN documents d ON d.id = dl.document_id
+    ), valued AS (
+      SELECT inflows.position,
+             greatest(
+               0,
+               inflows.base_quantity - greatest(0, outflows.issued_quantity - (inflows.cumulative_quantity - inflows.base_quantity))
+             ) * inflows.unit_cost AS value
+      FROM inflows
+      JOIN outflows ON outflows.position = inflows.position
+    )
+    SELECT input.position, coalesce(sum(valued.value), 0)::text AS valuation
+    FROM input
+    LEFT JOIN valued ON valued.position = input.position
+    GROUP BY input.position
+    ORDER BY input.position
+  `);
+  const byPosition = new Map(result.map((row) => [Number(row.position), Number(row.valuation)]));
+  return rows.map((_, index) => byPosition.get(index) ?? 0);
+}
+
 // Weighted average cost of one item: the total cost of its priced inflows over
 // their quantity. Only movement = 1 rows carry a cost, which is the same basis
 // lib/actions/stock.ts values stock on, so this and the Stock page agree.

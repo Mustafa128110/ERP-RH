@@ -35,8 +35,8 @@ export function cachedPageRead<T>(domain: ReadDomain, key: string, load: () => P
 // read without pulling the session-aware lookup module into their import graph —
 // the same reason lib/cache-keys.ts is dependency-free. lib/queries/lookups.ts
 // re-exports it, which is where the action files import it from.
-export function invalidateReads(...domains: ReadDomain[]) {
-  invalidate(...domains.map((domain) => `${CACHE.pageReads}:${domain}`));
+export async function invalidateReads(...domains: ReadDomain[]) {
+  await invalidate(...domains.map((domain) => `${CACHE.pageReads}:${domain}`));
 }
 
 export function stableReadKey(value: unknown) {

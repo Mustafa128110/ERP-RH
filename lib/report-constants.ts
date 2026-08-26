@@ -17,6 +17,8 @@ export const REPORT_TYPES = [
   { slug: "dead-stock", label: "Dead / Slow Moving", desc: "Stock that has not sold lately." },
   { slug: "purchase", label: "Purchase", desc: "What was bought, from whom." },
   { slug: "gst", label: "GST", desc: "Tax charged on sales and paid on purchases." },
+  { slug: "trial-balance", label: "Trial Balance", desc: "Cumulative general-ledger balances through the selected end date." },
+  { slug: "general-ledger", label: "General Ledger", desc: "Every post-cutover debit and credit, including its source and lifecycle status." },
 ] as const;
 
 export type ReportSlug = (typeof REPORT_TYPES)[number]["slug"];

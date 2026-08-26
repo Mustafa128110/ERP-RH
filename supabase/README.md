@@ -19,7 +19,7 @@ Supabase CLI project: its schema history and any edge functions.
 
 - `config.toml` — Supabase CLI project config (project id, edge function
   settings).
-- `migrations/` — the full SQL schema history (54 migrations), copied from the
+- `migrations/` — the full SQL schema history, copied from the
   drizzle-generated history in `drizzle/`. Migration `0053` removed the inert
   RLS machinery (`app_user` role + policies; the app scopes per company in code
   via `lib/auth/scope.ts`), so the schema has no row-level security — do not

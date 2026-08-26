@@ -24,6 +24,8 @@ import { recordAudit } from "@/lib/actions/audit";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { financialDocumentError } from "@/lib/financial-input";
+import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
+import { interCompanyBuyerLedgerLines, interCompanySellerLedgerLines } from "@/lib/general-ledger-constants";
 
 // One transfer writes both sides of the trade, so it changes both companies'
 // lists: a sale, a purchase, the two ledgers behind them, and the stock that
@@ -152,7 +154,7 @@ async function writeInterCompanyLines(
   lines: TransferLineInput[],
   seller: Side,
   buyer: Side,
-) {
+): Promise<{ sellerInventoryCost: number }> {
   const sellerItemIds = await resolveItemIds(
     tx,
     lines.map((line) => ({ companyId: seller.companyId, itemId: line.itemId || null, itemName: line.itemName || null })),
@@ -218,6 +220,11 @@ async function writeInterCompanyLines(
       totalCost: pair.lineTotal,
     }));
   if (movements.length > 0) await tx.insert(inventoryTransactions).values(movements);
+  return {
+    sellerInventoryCost: pairs
+      .filter((pair) => pair.movement === -1 && pair.line.itemId)
+      .reduce((sum, pair) => sum + Number(pair.lineTotal), 0),
+  };
 }
 
 // inventory_transactions.document_line_id is ON DELETE RESTRICT, so the movements
@@ -237,9 +244,9 @@ async function clearLines(tx: InterCompanyTx, documentIds: string[]) {
 
 // Items and contacts can be created on the fly here, and stock moved on both
 // sides, so the cached lookups and every page reading them are stale.
-function invalidateInterCompanyViews() {
-  invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.contacts, CACHE.cheques);
-  invalidateReads(...READS);
+async function invalidateInterCompanyViews() {
+  await invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.contacts, CACHE.cheques);
+  await invalidateReads(...READS);
   revalidatePath("/inventory/inter-company");
   revalidatePath("/sales");
   revalidatePath("/purchases/stock");
@@ -466,7 +473,7 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
         .values({ ...headerValues, companyId: buyerCompanyId, documentTypeId: purchaseType.id, number: purchaseNumber, contactId: supplierId })
         .returning({ id: documents.id });
 
-      await writeInterCompanyLines(
+      const { sellerInventoryCost } = await writeInterCompanyLines(
         tx,
         header.lines,
         { companyId: sellerCompanyId, documentId: sale.id, locationId: header.fromLocationId },
@@ -485,6 +492,18 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
           { companyId: sellerCompanyId, documentId: sale.id, debit: String(total) },
           { companyId: buyerCompanyId, documentId: purchase.id, credit: String(total) },
         ]);
+        await postGeneralLedgerIfCutover(tx, {
+          companyId: sellerCompanyId,
+          documentId: sale.id,
+          documentDate: header.documentDate,
+          lines: interCompanySellerLedgerLines(total, sellerInventoryCost),
+        });
+        await postGeneralLedgerIfCutover(tx, {
+          companyId: buyerCompanyId,
+          documentId: purchase.id,
+          documentDate: header.documentDate,
+          lines: interCompanyBuyerLedgerLines(total),
+        });
       }
 
       return { saleId: sale.id, saleNumber, purchaseId: purchase.id, purchaseNumber };
@@ -494,7 +513,7 @@ export async function createInterCompanySale(_prevState: InterCompanyResult | un
     return { error: describeDbError(e, "Can't create — a document number is already in use for one of these companies.") };
   }
 
-  invalidateInterCompanyViews();
+  await invalidateInterCompanyViews();
   await recordAudit({
     action: "create",
     entity: "inter-company sale",
@@ -562,9 +581,13 @@ export async function updateInterCompanySale(
       const lockedDocs = await tx
         .select({ id: documents.id, companyId: documents.companyId, paidAmount: documents.paidAmount })
         .from(documents)
-        .where(inArray(documents.id, [sale.id, purchase.id]))
+        .where(and(inArray(documents.id, [sale.id, purchase.id]), eq(documents.status, "posted")))
         .for("update");
       if (lockedDocs.length !== 2) throw new Error("Inter-company pair changed while it was being saved.");
+      await assertGeneralLedgerDateStaysPostCutover(tx, { companyId: sale.companyId, documentId: sale.id, documentDate: header.documentDate });
+      await assertGeneralLedgerDateStaysPostCutover(tx, { companyId: purchase.companyId, documentId: purchase.id, documentDate: header.documentDate });
+      await reverseGeneralLedger(tx, sale.companyId, sale.id, "Reversed before inter-company sale correction");
+      await reverseGeneralLedger(tx, purchase.companyId, purchase.id, "Reversed before inter-company purchase correction");
 
       // ledger_entries.document_id is ON DELETE NO ACTION, and the amount owed is
       // about to change, so both sides' rows are dropped and re-added from the
@@ -597,18 +620,32 @@ export async function updateInterCompanySale(
       });
       if (ledgerRows.length > 0) await tx.insert(ledgerEntries).values(ledgerRows);
 
-      await writeInterCompanyLines(
+      const { sellerInventoryCost } = await writeInterCompanyLines(
         tx,
         header.lines,
         { companyId: sale.companyId, documentId: sale.id, locationId: header.fromLocationId },
         { companyId: purchase.companyId, documentId: purchase.id, locationId: header.toLocationId },
       );
+      if (total > 0) {
+        await postGeneralLedgerIfCutover(tx, {
+          companyId: sale.companyId,
+          documentId: sale.id,
+          documentDate: header.documentDate,
+          lines: interCompanySellerLedgerLines(total, sellerInventoryCost),
+        });
+        await postGeneralLedgerIfCutover(tx, {
+          companyId: purchase.companyId,
+          documentId: purchase.id,
+          documentDate: header.documentDate,
+          lines: interCompanyBuyerLedgerLines(total),
+        });
+      }
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't save this inter-company sale.") };
   }
 
-  invalidateInterCompanyViews();
+  await invalidateInterCompanyViews();
   revalidatePath(`/inventory/inter-company/${saleId}`);
   await recordAudit({
     action: "update",
@@ -668,7 +705,7 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
       const lockedDocs = await tx
         .select({ id: documents.id, paidAmount: documents.paidAmount })
         .from(documents)
-        .where(inArray(documents.id, ids))
+        .where(and(inArray(documents.id, ids), eq(documents.status, "posted")))
         .for("update");
       if (lockedDocs.length !== ids.length) {
         vanishedDuringDelete = true;
@@ -678,6 +715,8 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
         paidDuringDelete = true;
         return;
       }
+      await reverseGeneralLedger(tx, sale.companyId, sale.id, "Inter-company sale cancelled");
+      if (purchase) await reverseGeneralLedger(tx, purchase.companyId, purchase.id, "Inter-company purchase cancelled");
       await tx.delete(ledgerEntries).where(inArray(ledgerEntries.documentId, ids));
       await tx.execute(sql`
         INSERT INTO inventory_transactions
@@ -688,7 +727,7 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
         JOIN document_lines dl ON dl.id = it.document_line_id
         WHERE dl.document_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
       `);
-      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(inArray(documents.id, ids));
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(inArray(documents.id, ids), eq(documents.status, "posted")));
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't cancel this inter-company sale.") };
@@ -696,7 +735,7 @@ export async function deleteInterCompanySale(_prevState: ActionResult | undefine
   if (paidDuringDelete) return { error: "Something was paid against this while it was open — clear the payment first." };
   if (vanishedDuringDelete) return { error: "Inter-company sale not found — it may already be cancelled." };
 
-  invalidateInterCompanyViews();
+  await invalidateInterCompanyViews();
   await recordAudit({ action: "cancel", entity: "inter-company sale", entityId: saleId, summary: sale.number, companyId: sale.companyId });
   return { success: true };
   });

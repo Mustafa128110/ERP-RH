@@ -17,6 +17,7 @@ import { ContactStatementDocument, SheetRenderer, type Letterhead } from "@/comp
 import { PartyLedgerDialog, PartyLedgerPrintDocument } from "@/components/modules/PartyLedgerDialog";
 import { inCompany } from "@/lib/contact-scope";
 import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/actions/ledger";
+import { MANUAL_JOURNAL_COUNTERPARTS } from "@/lib/manual-journal-constants";
 
 const readOnlyClass = `${fieldClass} flex items-center bg-ivory text-steel`;
 
@@ -366,6 +367,17 @@ function LedgerEntryForm({
           )}
         </div>
       </div>
+
+      <label className={`${labelClass} w-72`}>
+        <span className={labelTextClass}>Counterpart account</span>
+        <select name="counterpartAccountCode" required defaultValue="" className={fieldClass}>
+          <option value="" disabled>Select the other side of the entry</option>
+          {MANUAL_JOURNAL_COUNTERPARTS.map((account) => (
+            <option key={account.code} value={account.code}>{account.code} — {account.name}</option>
+          ))}
+        </select>
+        <span className="text-xs text-steel">The party side posts automatically to Accounts Receivable or Accounts Payable.</span>
+      </label>
 
       <div className="flex flex-wrap gap-3">
         <label className={`${labelClass} w-52`}>

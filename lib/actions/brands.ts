@@ -35,9 +35,9 @@ export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateRe
     if (valid.length === 0) return { error: "Add at least one brand with a name." };
 
     const created = await db.insert(brands).values(valid).returning({ id: brands.id, name: brands.name });
-    invalidateLookups(CACHE.brands);
+    await invalidateLookups(CACHE.brands);
     // The product list carries each item's brand name, so a rename changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
     await recordAudit({ action: "create", entity: "brand", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -53,9 +53,9 @@ export async function updateBrand(brandId: string, _prevState: ActionResult | un
     if (!values.name) return { error: "Name is required." };
 
     await db.update(brands).set(values).where(eq(brands.id, brandId));
-    invalidateLookups(CACHE.brands);
+    await invalidateLookups(CACHE.brands);
     // The product list carries each item's brand name, so a rename changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
     await recordAudit({ action: "update", entity: "brand", entityId: brandId, summary: values.name });
     return { success: true };
@@ -70,9 +70,9 @@ export async function deleteBrand(_prevState: ActionResult | undefined, formData
     const brandId = String(formData.get("brandId") ?? "");
     await db.delete(brands).where(eq(brands.id, brandId));
 
-    invalidateLookups(CACHE.brands);
+    await invalidateLookups(CACHE.brands);
     // The product list carries each item's brand name, so a rename changes it.
-    invalidateReads(READ_DOMAIN.products);
+    await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
     await recordAudit({ action: "delete", entity: "brand", entityId: brandId, summary: brandId });
     return { success: true };

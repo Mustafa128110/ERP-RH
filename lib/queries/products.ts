@@ -22,6 +22,8 @@ export interface ProductRateRow {
   id: string;
   name: string;
   categoryId: string | null;
+  baseUnitId: string | null;
+  hasUnitRule: boolean;
   // What the item last cost landed — price plus its share of that delivery's
   // shipping, discount and tax (drizzle/0049) — straight from rate_list, and a
   // real purchase
@@ -64,6 +66,8 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
     sku: string;
     company: string;
     category_id: string | null;
+    base_unit_id: string | null;
+    has_unit_rule: boolean;
     category: string | null;
     brand: string | null;
     on_hand: string | null;
@@ -72,7 +76,8 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
     purchase_rate_3: string | null;
     sales_rate: string | null;
   }>(sql`
-    SELECT rl.id, rl.name, i.sku, coalesce(co.short_name, co.name) AS company, i.category_id,
+    SELECT rl.id, rl.name, i.sku, coalesce(co.short_name, co.name) AS company, i.category_id, i.base_unit_id,
+           EXISTS (SELECT 1 FROM item_unit_conversion_rules iucr WHERE iucr.item_id = i.id) AS has_unit_rule,
            cat.name AS category, br.name AS brand, oh.on_hand,
            coalesce(rl.purchase_rate_1, c.unit_cost) AS purchase_rate_1,
            rl.purchase_rate_2, rl.purchase_rate_3,
@@ -121,6 +126,8 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
     sku: r.sku,
     company: r.company,
     categoryId: r.category_id,
+    baseUnitId: r.base_unit_id,
+    hasUnitRule: r.has_unit_rule,
     category: r.category,
     brand: r.brand,
     onHand: r.on_hand,

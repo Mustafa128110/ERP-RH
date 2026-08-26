@@ -3,14 +3,15 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { companies, settings, taxes } from "@/lib/db/schema";
+import { companies, generalLedgerAccounts, generalLedgerEntries, settings, taxes } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
-import { SETTING_DEFS } from "@/lib/setting-constants";
+import { isValidIsoDate, SETTING_DEFS } from "@/lib/setting-constants";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
+import { SYSTEM_GENERAL_LEDGER_ACCOUNTS } from "@/lib/general-ledger-constants";
 
 // The settings table has existed since the first migration and nothing had ever
 // read or written it — the Settings page was a hard-coded list of numbers
@@ -51,6 +52,9 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
       if (def.kind === "number" && raw !== "" && !(Number(raw) >= 0)) {
         return { error: `${def.label} has to be a number of ${def.suffix ?? "units"}, zero or more.` };
       }
+      if (def.kind === "date" && raw !== "" && !isValidIsoDate(raw)) {
+        return { error: `${def.label} must be a valid date.` };
+      }
       values.push({ companyId, key: def.key, value: raw });
     }
 
@@ -58,6 +62,35 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
     if (taxIds.length > 0) {
       const found = await db.select({ id: taxes.id }).from(taxes).where(and(inArray(taxes.id, taxIds), eq(taxes.isActive, true)));
       if (found.length !== new Set(taxIds).size) return { error: "One of the selected default taxes is no longer active." };
+    }
+
+    const requestedCutover = values.find((value) => value.key === "gl_cutover_date")?.value ?? "";
+    const [storedCutover] = await db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(and(eq(settings.companyId, companyId), eq(settings.key, "gl_cutover_date")))
+      .limit(1);
+    if (requestedCutover) {
+      const controlAccounts = await db
+        .select({ code: generalLedgerAccounts.code, accountType: generalLedgerAccounts.accountType, isSystem: generalLedgerAccounts.isSystem, isActive: generalLedgerAccounts.isActive })
+        .from(generalLedgerAccounts)
+        .where(and(eq(generalLedgerAccounts.companyId, companyId), inArray(generalLedgerAccounts.code, SYSTEM_GENERAL_LEDGER_ACCOUNTS.map((account) => account.code))));
+      const controlByCode = new Map(controlAccounts.map((account) => [account.code, account]));
+      const chartIsReady = SYSTEM_GENERAL_LEDGER_ACCOUNTS.every((required) => {
+        const account = controlByCode.get(required.code);
+        return account?.isSystem && account.isActive && account.accountType === required.accountType;
+      });
+      if (!chartIsReady) {
+        return { error: "Initialize the complete GL control chart in Accounts → GL Setup before setting the cutover date." };
+      }
+    }
+    if ((storedCutover?.value ?? "") !== requestedCutover) {
+      const [existingPosting] = await db
+        .select({ id: generalLedgerEntries.id })
+        .from(generalLedgerEntries)
+        .where(eq(generalLedgerEntries.companyId, companyId))
+        .limit(1);
+      if (existingPosting) return { error: "The GL cutover date is locked because this company already has posted GL entries. Correct entries with reversals instead." };
     }
 
     // One upsert for the lot rather than one per key: settings is UNIQUE
@@ -68,9 +101,9 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
       .values(values)
       .onConflictDoUpdate({ target: [settings.companyId, settings.key], set: { value: sql`excluded.value` } });
 
-    invalidateLookups(CACHE.settings);
+    await invalidateLookups(CACHE.settings);
     // low_stock_qty is read per company by the stock list to mark a row low.
-    invalidateReads(READ_DOMAIN.stock);
+    await invalidateReads(READ_DOMAIN.stock);
     revalidatePath("/settings");
     await recordAudit({ action: "update", entity: "settings", summary: "Company settings changed", companyId });
     return { success: true };

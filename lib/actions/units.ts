@@ -53,8 +53,8 @@ export async function createUnitsBatch(rows: UnitBatchRow[]): Promise<CreateResu
       .insert(units)
       .values(valid.map((r) => ({ name: r.name.trim(), symbol: r.symbol.trim() || null })))
       .returning({ id: units.id, name: units.name, symbol: units.symbol });
-    invalidateLookups(CACHE.units);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.units);
+    await invalidateReads(...READS);
     revalidatePath("/inventory/units");
     await recordAudit({ action: "create", entity: "unit", summary: valid.map((r) => r.name).join(", ") });
     return { created };
@@ -70,8 +70,8 @@ export async function updateUnit(unitId: string, _prevState: ActionResult | unde
     if (!values.name) return { error: "Name is required." };
 
     await db.update(units).set(values).where(eq(units.id, unitId));
-    invalidateLookups(CACHE.units);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.units);
+    await invalidateReads(...READS);
     revalidatePath("/inventory/units");
     await recordAudit({ action: "update", entity: "unit", entityId: unitId, summary: values.name });
     return { success: true };
@@ -86,8 +86,8 @@ export async function deleteUnit(_prevState: ActionResult | undefined, formData:
     const unitId = String(formData.get("unitId") ?? "");
     await db.delete(units).where(eq(units.id, unitId));
 
-    invalidateLookups(CACHE.units);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.units);
+    await invalidateReads(...READS);
     revalidatePath("/inventory/units");
     await recordAudit({ action: "delete", entity: "unit", entityId: unitId, summary: unitId });
     return { success: true };

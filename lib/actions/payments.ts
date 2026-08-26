@@ -32,6 +32,7 @@ import { changeSummary } from "@/lib/audit-constants";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { allocatePaymentsFifo, reallocateAccountPaymentsFifo, releasePaymentAllocations } from "@/lib/actions/payment-allocation";
+import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, postPaymentGeneralLedgerBatch, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 
 // A payment settles invoices, so it changes the party's balance and how much of
 // each invoice is still owed — hence `purchases` and `products` alongside the
@@ -285,6 +286,21 @@ export async function createPayment(
         await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, ...paymentLedgerSide(direction, values.amount) });
       }
       await allocatePaymentsFifo(tx, [doc.id]);
+      const glSettlementAccount = await settlementGeneralLedgerAccount(tx, values.companyId, values.bankAccountId, values.cashAccountId, values.chequeId);
+      await postGeneralLedgerIfCutover(tx, {
+        companyId: values.companyId,
+        documentId: doc.id,
+        documentDate: values.paymentDate,
+        lines: direction === "received"
+          ? [
+              { ...glSettlementAccount, debit: Number(values.amount), memo: "Customer payment received" },
+              { accountCode: "1100", credit: Number(values.amount), memo: "Accounts receivable settled" },
+            ]
+          : [
+              { accountCode: "2000", debit: Number(values.amount), memo: "Supplier payable settled" },
+              { ...glSettlementAccount, credit: Number(values.amount), memo: "Supplier payment made" },
+            ],
+      });
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
@@ -293,8 +309,8 @@ export async function createPayment(
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
+  await invalidateReads(...READS);
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
@@ -522,14 +538,27 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
         .map(({ row, amount, documentId }) => ({ companyId: row.companyId, documentId, ...paymentLedgerSide(row.direction, amount) }));
       if (entries.length > 0) await tx.insert(ledgerEntries).values(entries);
       await allocatePaymentsFifo(tx, prepared.map(({ documentId }) => documentId));
+      await postPaymentGeneralLedgerBatch(
+        tx,
+        prepared.map(({ row, amount, documentId }) => ({
+          documentId,
+          companyId: row.companyId,
+          paymentDate: row.paymentDate,
+          amount,
+          direction: row.direction,
+          bankAccountId: row.bankAccountId,
+          cashAccountId: row.cashAccountId,
+          chequeId: row.chequeId,
+        })),
+      );
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     return { error: msg || "Can't create — check the rows and try again." };
   }
 
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
+  await invalidateReads(...READS);
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
@@ -596,13 +625,15 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
             cashAccountId: documents.cashAccountId,
           })
           .from(documents)
-          .where(and(eq(documents.id, paymentId), eq(documents.companyId, existing.companyId)))
+          .where(and(eq(documents.id, paymentId), eq(documents.companyId, existing.companyId), eq(documents.status, "posted")))
           .limit(1)
           .for("update");
         if (!lockedPayment) {
           vanishedDuringSave = true;
           return;
         }
+        await assertGeneralLedgerDateStaysPostCutover(tx, { companyId: existing.companyId, documentId: paymentId, documentDate: values.paymentDate });
+        await reverseGeneralLedger(tx, existing.companyId, paymentId, "Reversed before payment correction");
         await releasePaymentAllocations(tx, [paymentId]);
         const [existingCheque] = await tx
           .select({ id: chequeRegister.id })
@@ -641,6 +672,21 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         if (contactId) {
           await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
         }
+        const glSettlementAccount = await settlementGeneralLedgerAccount(tx, existing.companyId, values.bankAccountId, values.cashAccountId, values.chequeId);
+        await postGeneralLedgerIfCutover(tx, {
+          companyId: existing.companyId,
+          documentId: paymentId,
+          documentDate: values.paymentDate,
+          lines: direction === "received"
+            ? [
+                { ...glSettlementAccount, debit: Number(values.amount), memo: "Customer payment received" },
+                { accountCode: "1100", credit: Number(values.amount), memo: "Accounts receivable settled" },
+              ]
+            : [
+                { accountCode: "2000", debit: Number(values.amount), memo: "Supplier payable settled" },
+                { ...glSettlementAccount, credit: Number(values.amount), memo: "Supplier payment made" },
+              ],
+        });
         const paymentCode = direction === "made" ? "PAYMENT_MADE" : "PAYMENT_RECEIVED";
         await reallocateAccountPaymentsFifo(tx, existing.companyId, existing.contactId, paymentCode);
         if (contactId !== existing.contactId) {
@@ -653,8 +699,8 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
     }
     if (vanishedDuringSave) return { error: "Payment not found — it may already have been deleted." };
 
-    invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.contacts);
+    await invalidateReads(...READS);
     revalidatePath("/payments");
     revalidatePath("/ledger");
     await recordAudit({
@@ -737,7 +783,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
       const [lockedPayment] = await tx
         .select({ amount: documents.grandTotal, bankAccountId: documents.bankAccountId, cashAccountId: documents.cashAccountId })
         .from(documents)
-        .where(and(eq(documents.id, paymentId), eq(documents.companyId, existing.companyId)))
+        .where(and(eq(documents.id, paymentId), eq(documents.companyId, existing.companyId), eq(documents.status, "posted")))
         .limit(1)
         .for("update");
       if (!lockedPayment) {
@@ -760,7 +806,8 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
           ? { companyId: existing.companyId, documentId: paymentId, credit: lockedPayment.amount, debit: "0" }
           : { companyId: existing.companyId, documentId: paymentId, debit: lockedPayment.amount, credit: "0" },
       );
-      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, paymentId));
+      await reverseGeneralLedger(tx, existing.companyId, paymentId, "Payment cancelled");
+      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, paymentId), eq(documents.status, "posted")));
       await reallocateAccountPaymentsFifo(
         tx,
         existing.companyId,
@@ -782,8 +829,8 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
   }
   if (vanishedDuringDelete) return { error: "Payment not found — it may already have been deleted." };
 
-  invalidateLookups(CACHE.documentTypes, CACHE.cheques);
-  invalidateReads(...READS);
+  await invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+  await invalidateReads(...READS);
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({

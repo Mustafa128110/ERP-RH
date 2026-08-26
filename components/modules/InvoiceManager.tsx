@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { getInvoice, getSale, listChequesForSales } from "@/lib/actions/sales";
 import { SaleFormPage } from "@/components/modules/SaleForm";
@@ -8,7 +8,8 @@ import { DataTable } from "@/components/ui/DataTable";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { money } from "@/lib/format";
+import { money, todayISO } from "@/lib/format";
+import { cancelSalesReturn, createSalesReturn, getReturnableSale } from "@/lib/actions/returns";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
 import { InvoiceImageRenderer } from "@/components/modules/InvoiceDocument";
@@ -37,6 +38,7 @@ export type SaleFormOptions = {
 
 type SaleDetail = NonNullable<Awaited<ReturnType<typeof getSale>>>;
 type ChequeOptions = Awaited<ReturnType<typeof listChequesForSales>>;
+type ReturnableSale = NonNullable<Awaited<ReturnType<typeof getReturnableSale>>>;
 
 // The invoice number column lives in the component — it needs the line items,
 // which the row itself can't carry (a Row holds primitives).
@@ -83,6 +85,11 @@ export function InvoiceManager({
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [pdfId, setPdfId] = useState<string | null>(null);
   const [pngId, setPngId] = useState<string | null>(null);
+  const [returning, setReturning] = useState<ReturnableSale | null>(null);
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, string>>({});
+  const [returnBusy, setReturnBusy] = useState(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
+  const returnOperationId = useRef("");
   // The invoice currently being turned into a picture, mounted off-screen for
   // the moment it takes to photograph it.
   const [imaging, setImaging] = useState<Invoice | null>(null);
@@ -168,6 +175,57 @@ export function InvoiceManager({
     }
   }
 
+  async function openReturn(id: string) {
+    setReturnError(null);
+    setLoadingId(id);
+    try {
+      const sale = await getReturnableSale(id);
+      if (!sale) return;
+      setReturning(sale);
+      setReturnQuantities(Object.fromEntries(sale.lines.map((line) => [line.sourceLineId, ""])));
+      returnOperationId.current = crypto.randomUUID();
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function saveReturn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!returning || returnBusy) return;
+    setReturnBusy(true);
+    setReturnError(null);
+    const formData = new FormData(event.currentTarget);
+    formData.set("linesJson", JSON.stringify(returning.lines.map((line) => ({ sourceLineId: line.sourceLineId, quantity: returnQuantities[line.sourceLineId] ?? "" }))));
+    formData.set("operationId", returnOperationId.current || crypto.randomUUID());
+    try {
+      const result = await createSalesReturn(undefined, formData);
+      if (result.error) return setReturnError(result.error);
+      setReturning(null);
+    } catch {
+      setReturnError("Couldn't reach the server. The return was not confirmed; check the invoice before trying again.");
+    } finally {
+      setReturnBusy(false);
+    }
+  }
+
+  async function cancelReturn(documentId: string) {
+    if (!returning || returnBusy || !confirm("Cancel this sales return? Its stock and customer-credit effects will be reversed.")) return;
+    setReturnBusy(true);
+    setReturnError(null);
+    const formData = new FormData();
+    formData.set("documentId", documentId);
+    try {
+      const result = await cancelSalesReturn(undefined, formData);
+      if (result.error) return setReturnError(result.error);
+      const refreshed = await getReturnableSale(returning.id);
+      if (refreshed) setReturning(refreshed);
+    } catch {
+      setReturnError("Couldn't confirm the cancellation. Check the return history before trying again.");
+    } finally {
+      setReturnBusy(false);
+    }
+  }
+
   // Called by the off-screen copy once the browser has laid it out.
   //
   // Latched on a ref, not on state: in development React mounts that copy twice
@@ -211,6 +269,21 @@ export function InvoiceManager({
     ),
   });
 
+  const returnColumn: ColumnDef = {
+    key: "return",
+    label: "",
+    render: (row) => String(row.status) === "Cancelled" ? "—" : (
+      <button
+        type="button"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); void openReturn(String(row.id)); }}
+        className="rounded border border-sand px-2 py-1 text-xs font-medium text-navy-800 hover:bg-ivory"
+      >
+        Return
+      </button>
+    ),
+  };
+
   // Customer column with a hover showing the items on that invoice.
   const customerCol: ColumnDef = {
     key: "customer",
@@ -252,7 +325,7 @@ export function InvoiceManager({
       <PageHeader title="Invoices" subtitle={subtitle} />
 
       <DataTable
-        columns={[...allColumns, downloadColumn("pdf", pdfId), downloadColumn("png", pngId)]}
+        columns={[...allColumns, returnColumn, downloadColumn("pdf", pdfId), downloadColumn("png", pngId)]}
         rows={shown}
         idKey="id"
         onRowClick={(row) => void openEdit(String(row.id))}
@@ -272,6 +345,26 @@ export function InvoiceManager({
       {loadingId && <p className="shrink-0 text-sm text-steel">Opening…</p>}
 
       {imaging && <InvoiceImageRenderer invoice={imaging} onReady={(node) => void captureImage(node)} />}
+
+      {returning && (
+        <Dialog title={`Sales Return · ${returning.number}`} onClose={() => !returnBusy && setReturning(null)} size="wide">
+          <form onSubmit={(event) => void saveReturn(event)} className="flex flex-col gap-4">
+            <input type="hidden" name="sourceDocumentId" value={returning.id} />
+            <label className="w-fit text-sm text-ink">Return date
+              <input name="documentDate" type="date" required defaultValue={todayISO()} className="mt-1 block rounded border border-sand bg-white px-3 py-2" />
+            </label>
+            <p className="text-sm text-steel">Returned quantities restore stock at the recorded sale cost and create a customer credit. A refund can then be recorded as a normal payment out.</p>
+            <div className="overflow-x-auto rounded border border-sand">
+              <table className="w-full text-sm"><thead className="bg-ivory text-left text-steel"><tr><th className="p-2">Item</th><th className="p-2 text-right">Sold</th><th className="p-2 text-right">Already returned</th><th className="p-2 text-right">Return now</th></tr></thead>
+                <tbody>{returning.lines.map((line) => <tr key={line.sourceLineId} className="border-t border-sand"><td className="p-2 text-ink">{line.itemName ?? "Uncatalogued line"}{line.unitSymbol ? ` · ${line.unitSymbol}` : ""}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 text-right tabular-nums">{line.returnedQuantity}</td><td className="p-2 text-right"><input type="number" min="0" max={line.availableQuantity} step="0.001" value={returnQuantities[line.sourceLineId] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [line.sourceLineId]: event.target.value }))} className="w-24 rounded border border-sand px-2 py-1 text-right" aria-label={`Return quantity for ${line.itemName ?? "line"}`} /></td></tr>)}</tbody>
+              </table>
+            </div>
+            {returning.returns.length > 0 && <div className="rounded border border-sand p-3 text-sm"><p className="font-medium text-navy-800">Return history</p><ul className="mt-2 divide-y divide-sand">{returning.returns.map((entry) => <li key={entry.id} className="flex items-center justify-between gap-3 py-2"><span>{entry.number} · {entry.documentDate} · {money(entry.grandTotal)} · {entry.status}</span>{entry.status === "posted" && <button type="button" disabled={returnBusy} onClick={() => void cancelReturn(entry.id)} className="rounded border border-sand px-2 py-1 text-xs hover:bg-ivory">Cancel return</button>}</li>)}</ul></div>}
+            {returnError && <p className="rounded border border-error/30 bg-error-tint p-3 text-sm text-error">{returnError}</p>}
+            <div className="flex justify-end gap-2"><button type="button" onClick={() => setReturning(null)} disabled={returnBusy} className="rounded border border-sand px-4 py-2 text-sm">Cancel</button><button type="submit" disabled={returnBusy} className="rounded bg-navy-800 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{returnBusy ? "Saving…" : "Create return"}</button></div>
+          </form>
+        </Dialog>
+      )}
 
       {editing && (
         // Hidden rather than closed while this sale's write is in the air. The

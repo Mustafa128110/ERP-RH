@@ -10,7 +10,7 @@ import { queryReport, reportScope, type ReportFilters, type ReportResult } from 
 import type { AuthSession } from "@/lib/auth/session";
 
 // Same reasoning as the dashboard cache (lib/actions/dashboard.ts): a report
-// is a live aggregate, so the write-invalidation in invalidateLookups() is the
+// is a live aggregate, so the write-invalidation in await invalidateLookups() is the
 // freshness mechanism and the TTL is a backstop for anything that writes
 // outside the action layer.
 const AGGREGATE_TTL = MINUTE;
@@ -51,7 +51,7 @@ async function runScopedReport(session: AuthSession, slug: ReportSlug, filters: 
   // company, the location — so two visits whose raw filters mean the same
   // thing (an omitted date range, a company the user can't see) share one
   // entry. The permission check above runs on every request; only the query is
-  // cached, and invalidateLookups() clears every reports:… key on any write.
+  // cached, and await invalidateLookups() clears every reports:… key on any write.
   return cached(
     `reports:${slug}:${ids.length ? [...ids].sort().join(",") : "none"}:${scope.from}:${scope.to}:${scope.company ?? ""}:${scope.location ?? ""}`,
     AGGREGATE_TTL,

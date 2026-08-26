@@ -15,22 +15,18 @@ export default async function Page() {
           ← Settings
         </Link>
         <h1 className="mt-1 text-xl text-navy-800">Backups &amp; Export</h1>
-        <p className="text-sm text-steel">Where the real backups live, and how to take a copy of the data yourself.</p>
+        <p className="text-sm text-steel">Automated encrypted database protection, plus scoped CSV exports.</p>
       </div>
 
-      {/* This page used to list three invented backup files and a disabled "Run
-          Backup Now". Saying plainly where backups come from is more use than a
-          button that couldn't have worked: nothing running inside this app can
-          take a consistent dump of the database it is connected to. */}
       <div className="rounded-lg border border-sand bg-white p-5">
-        <h2 className="mb-2 text-sm font-semibold text-navy-800">Database backups</h2>
+        <h2 className="mb-2 text-sm font-semibold text-navy-800">Automated database backup</h2>
         <p className="text-sm text-ink">
-          Backups are taken by the database host, not by this app. On Supabase that is the <strong>Database → Backups</strong> page of the project dashboard,
-          where you can also restore to a point in time.
+          A GitHub workflow creates an encrypted ZIP at <strong>3:00 PM</strong> and <strong>8:30 PM Pakistan time</strong>, then stores it in Cloudflare R2.
+          The archive contains the ERP access roles, schema, data, and an integrity manifest.
         </p>
         <p className="mt-2 text-sm text-steel">
-          Check there that backups are actually enabled for your plan, and that the retention window is long enough to notice a problem before it rolls off. A
-          backup nobody has ever restored from is a hope, not a backup — restore one into a scratch project once and confirm the data is there.
+          Only one archive is retained. The previous archive is replaced only after the new archive is uploaded and verified. Restore testing is not automatic;
+          an administrator must explicitly request a test, which must run against a disposable database rather than production.
         </p>
       </div>
 

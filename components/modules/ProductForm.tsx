@@ -106,7 +106,7 @@ const toEditRow = (r: ProductEditRow, data: ProductEditData): EditRow => {
     brand: { id: r.brandId ?? "", text: r.brandName ?? "" },
     taxable: r.taxable,
     isActive: r.isActive,
-    unit: combo(r.lastUnitId, data.unitOptions),
+    unit: combo(r.baseUnitId, data.unitOptions),
     supplier: combo(r.lastSupplierId, data.supplierOptions),
     // Quantity stays blank on purpose: it means "how many arrived now", and the
     // answer to that is never "the same as last time".
@@ -363,7 +363,7 @@ export function ProductsBatchEditDialog({
     "Brand",
     "Tax",
     "Active",
-    "Unit",
+    "Base Stock Unit",
     "In Stock",
     "Sales Rate",
     ...(mode === "purchase" ? ["Supplier", "Qty Received", "Purchase Rate"] : []),

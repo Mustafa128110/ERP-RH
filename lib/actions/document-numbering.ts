@@ -51,6 +51,6 @@ export async function ensureDocumentType(values: typeof documentTypes.$inferInse
     .returning();
 
   // The list this function reads from is now one row out of date.
-  invalidateLookups(CACHE.documentTypes);
+  await invalidateLookups(CACHE.documentTypes);
   return row;
 }

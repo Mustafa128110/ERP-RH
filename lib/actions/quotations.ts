@@ -356,7 +356,7 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
 
       // A quotation can create items, units and contacts on the fly, so their
       // cached option lists are stale.
-      invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.units, CACHE.contacts, CACHE.cheques);
+      await invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.units, CACHE.contacts, CACHE.cheques);
       revalidatePath("/sales/quotations");
       await recordAudit({
         action: "create",
@@ -436,7 +436,7 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
       await writeLines(tx, f.companyId, documentId, f.validLines, tax);
     });
 
-    invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.units, CACHE.contacts, CACHE.cheques);
+    await invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.units, CACHE.contacts, CACHE.cheques);
     revalidatePath("/sales/quotations");
     await recordAudit({ action: "update", entity: "quotation", entityId: documentId, summary: existing.number, companyId: f.companyId, detail: `Total ${tax.grandTotal}` });
     return { success: true };
@@ -463,7 +463,7 @@ export async function deleteQuotation(_prevState: ActionResult | undefined, form
 
     await db.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, documentId));
 
-    invalidateLookups(CACHE.cheques);
+    await invalidateLookups(CACHE.cheques);
     revalidatePath("/sales/quotations");
     await recordAudit({ action: "cancel", entity: "quotation", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
     return { success: true };

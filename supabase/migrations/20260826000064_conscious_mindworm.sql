@@ -1,0 +1,4 @@
+ALTER TABLE "bank_accounts" ADD COLUMN "general_ledger_account_id" uuid;--> statement-breakpoint
+ALTER TABLE "cash_accounts" ADD COLUMN "general_ledger_account_id" uuid;--> statement-breakpoint
+ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_general_ledger_account_id_general_ledger_accounts_id_fk" FOREIGN KEY ("general_ledger_account_id") REFERENCES "public"."general_ledger_accounts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "cash_accounts" ADD CONSTRAINT "cash_accounts_general_ledger_account_id_general_ledger_accounts_id_fk" FOREIGN KEY ("general_ledger_account_id") REFERENCES "public"."general_ledger_accounts"("id") ON DELETE restrict ON UPDATE no action;

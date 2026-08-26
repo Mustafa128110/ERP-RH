@@ -16,6 +16,7 @@ import {
   locations,
   roles,
   taxes,
+  itemUnitConversionRules,
   unitConversions,
   units,
 } from "@/lib/db/schema";
@@ -58,7 +59,7 @@ const TTL = 5 * MINUTE;
 // Key names match the table they read, so invalidation reads as itself. Grouped
 // here rather than inlined as strings so a typo is a type error, not a cache
 // entry that never clears.
-export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][]) {
+export async function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][]) {
   // Every dashboard figure and every report row is derived from tables the
   // keys above guard, so any write that busts a lookup busts the aggregates
   // too — a sale that changes "Today's Sales" must show the moment the page is
@@ -73,7 +74,7 @@ export function invalidateLookups(...keys: (typeof CACHE)[keyof typeof CACHE][])
   // on every screen — for every user and every company scope — its cache entry,
   // and the cache was never warm for anything. Writers now name the domains they
   // can actually change through invalidateReads below.
-  invalidate(...keys, CACHE.dashboard, CACHE.reports);
+  await invalidate(...keys, CACHE.dashboard, CACHE.reports);
 }
 
 // The cached list reads a write can change (lib/cache-keys.ts holds what each one
@@ -149,12 +150,13 @@ export const getRoles = lookup(CACHE.roles, () => db.select().from(roles));
 export const getUnitConversionOptions = lookup(`${CACHE.items}:unit-conversions`, () =>
   db
     .select({
-      itemId: unitConversions.itemId,
+      itemId: itemUnitConversionRules.itemId,
       fromUnitId: unitConversions.fromUnitId,
       toUnitId: unitConversions.toUnitId,
       multiplier: unitConversions.multiplier,
     })
-    .from(unitConversions),
+    .from(itemUnitConversionRules)
+    .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId)),
 );
 
 // Still company-scoped: document types and expense categories belong to a company.

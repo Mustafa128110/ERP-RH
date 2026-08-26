@@ -10,12 +10,26 @@ export type SettingDef = {
   key: string;
   label: string;
   help: string;
-  kind: "number" | "text" | "tax" | "boolean";
+  kind: "number" | "text" | "tax" | "boolean" | "date";
   fallback: string;
   suffix?: string;
 };
 
+export function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
 export const SETTING_DEFS: SettingDef[] = [
+  {
+    key: "gl_cutover_date",
+    label: "General-ledger cutover date",
+    help: "Documents dated on or after this date receive new balanced general-ledger postings. Leave blank until opening balances and account mappings are ready; historic documents are never backfilled.",
+    kind: "date",
+    fallback: "",
+  },
   {
     key: "dead_stock_days",
     label: "Dead-stock threshold",

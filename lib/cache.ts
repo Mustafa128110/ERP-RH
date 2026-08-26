@@ -1,70 +1,119 @@
 import "server-only";
+import { Redis } from "@upstash/redis";
 
-// One in-process cache behind everything that reads rarely-changing data. The
-// database is ~170ms away, so a lookup table that changes twice a month should
-// not cost a round trip on every render.
-//
-// Entries hold the in-flight promise rather than the resolved value, which is
-// what makes this safe under concurrency: the stock-purchase page fires twelve
-// lookups at once, and on a cold cache all twelve share one query each instead
-// of stampeding the database. A rejected load evicts itself so a transient
-// failure isn't cached.
-//
-// Correctness rests on explicit invalidation, not on the TTL — every mutation
-// that writes one of these tables calls invalidate() for it. The TTL is only a
-// backstop for anything that learns to write behind our back (a migration, a
-// psql session, a future action nobody wired up).
-//
-// Design note: per-instance Map. Correct for the single server this runs on. Behind
-// a load balancer each instance would keep its own copy and invalidation would
-// only clear the instance that served the mutation — move to Redis at that point,
-// or set TTL to 0 and take the round trip back.
-
+// L1 coalesces duplicate work in one process.  Upstash is only the shared L2:
+// a quota, network, or service failure must make reads slower, never stale or
+// unavailable.  Versioned keys avoid expensive key scans and make invalidation
+// one small command per logical lookup prefix.
 type Entry = { expires: number; value: Promise<unknown> };
+type CacheGlobals = {
+  appCache?: Map<string, Entry>;
+  upstashClient?: Redis | null;
+  circuitUntil?: number;
+  epochRequired?: boolean;
+};
 
-const globalForCache = globalThis as unknown as { appCache?: Map<string, Entry> };
+const globalForCache = globalThis as unknown as CacheGlobals;
 const store = (globalForCache.appCache ??= new Map<string, Entry>());
-
-// Expired entries are never visited again, so without a bound an instance that
-// serves a lot of distinct keys would keep them all in memory forever — the
-// report cache is keyed per filter combination, so a month of report views is
-// a month of entries. A sweep on insert drops everything already past its TTL
-// whenever the store grows past the cap, which keeps the cost amortised O(1)
-// and only ever removes data that is already dead.
 const MAX_ENTRIES = 1000;
+const NAMESPACE = "erp:cache:v1";
+const CIRCUIT_MS = 60_000;
 
 export const MINUTE = 60_000;
 
-export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+function localCached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const hit = store.get(key);
   if (hit && hit.expires > Date.now()) return hit.value as Promise<T>;
-
   if (store.size > MAX_ENTRIES) {
     const now = Date.now();
-    for (const [k, entry] of store) {
-      if (entry.expires <= now) store.delete(k);
-    }
+    for (const [existingKey, entry] of store) if (entry.expires <= now) store.delete(existingKey);
   }
-
-  const value = load().catch((err) => {
-    store.delete(key);
-    throw err;
-  });
+  const value = load().catch((error) => { store.delete(key); throw error; });
   store.set(key, { expires: Date.now() + ttlMs, value });
   return value;
 }
 
-// Clears each key and any parameterised variants of it — invalidate("cheques")
-// also drops "cheques:<documentId>:<expenseId>".
-export function invalidate(...keys: string[]) {
-  for (const key of keys) {
-    store.delete(key);
-    for (const existing of store.keys()) {
-      if (existing.startsWith(key + ":")) store.delete(existing);
+function client(): Redis | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return null;
+  if (globalForCache.upstashClient === undefined) globalForCache.upstashClient = new Redis({ url, token });
+  return globalForCache.upstashClient;
+}
+
+function unavailable() {
+  globalForCache.circuitUntil = Date.now() + CIRCUIT_MS;
+  // A failed shared invalidation means this process cannot trust any value it
+  // previously saw.  The next healthy L2 call advances the global epoch first.
+  globalForCache.epochRequired = true;
+  store.clear();
+}
+
+async function shared<T>(operation: (redis: Redis) => Promise<T>): Promise<T | null> {
+  const redis = client();
+  if (!redis || (globalForCache.circuitUntil ?? 0) > Date.now()) return null;
+  try {
+    if (globalForCache.epochRequired) {
+      await redis.incr(versionKey("all"));
+      globalForCache.epochRequired = false;
     }
+    const result = await operation(redis);
+    globalForCache.circuitUntil = 0;
+    return result;
+  } catch {
+    unavailable();
+    return null;
   }
 }
 
-export function invalidateAll() {
+function prefixes(key: string) {
+  const parts = key.split(":");
+  return ["all", ...parts.map((_, index) => parts.slice(0, index + 1).join(":"))];
+}
+
+function versionKey(prefix: string) { return `${NAMESPACE}:version:${prefix}`; }
+function valueKey(key: string, versions: string[]) { return `${NAMESPACE}:value:${Buffer.from(key).toString("base64url")}:${versions.join(":")}`; }
+
+async function versionsFor(redis: Redis, key: string) {
+  const values = await redis.mget<string[]>(...prefixes(key).map(versionKey));
+  return values.map((value) => value ?? "0");
+}
+
+export async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const redis = client();
+  if (!redis) return process.env.NODE_ENV === "production" ? load() : localCached(key, ttlMs, load);
+  const versions = await shared((ready) => versionsFor(ready, key));
+  if (!versions) return load();
+  const sharedKey = valueKey(key, versions);
+  return localCached(sharedKey, ttlMs, async () => {
+    const serialized = await shared((ready) => ready.get<string>(sharedKey));
+    if (serialized !== null && serialized !== undefined) {
+      try { return JSON.parse(serialized) as T; } catch { /* corrupted cache is a miss */ }
+    }
+    const value = await load();
+    await shared((ready) => ready.set(sharedKey, JSON.stringify(value), { px: ttlMs }));
+    return value;
+  });
+}
+
+function clearLocal(keys: string[]) {
+  for (const key of keys) {
+    const encoded = Buffer.from(key).toString("base64url");
+    for (const existing of store.keys()) if (existing === key || existing.startsWith(`${key}:`) || existing.includes(`:${encoded}:`)) store.delete(existing);
+  }
+}
+
+export async function invalidate(...keys: string[]) {
+  clearLocal(keys);
+  if (keys.length === 0) return;
+  const result = await shared((ready) => Promise.all(keys.map((key) => ready.incr(versionKey(key)))));
+  // shared() already opens the circuit and clears L1 on an error.  This remains
+  // deliberately non-throwing because writes must commit even when cache quota
+  // is exhausted.
+  void result;
+}
+
+export async function invalidateAll() {
   store.clear();
+  await shared((ready) => ready.incr(versionKey("all")));
 }

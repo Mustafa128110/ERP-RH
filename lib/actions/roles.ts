@@ -139,7 +139,7 @@ export async function createRole(_prevState: ActionResult | undefined, formData:
       // A brand-new role changes nobody's permissions until it's assigned, but
       // keep the invalidation here too so the rule "any permission write clears
       // sessions" has no exceptions to reason about.
-      invalidateSessions();
+      await invalidateSessions();
       revalidatePath("/roles");
       await recordAudit({ action: "create", entity: "role", summary: name, detail: `${permissionIds.length} permission(s)` });
       return { success: true };
@@ -177,7 +177,7 @@ export async function updateRole(roleId: string, _prevState: ActionResult | unde
       // Permissions changed for everyone holding this role — drop cached
       // sessions so the change takes effect on their next request, not their
       // next login.
-      invalidateSessions();
+      await invalidateSessions();
       revalidatePath("/roles");
       await recordAudit({ action: "update", entity: "role", entityId: roleId, summary: name, detail: `${permissionIds.length} permission(s)` });
       return { success: true };
@@ -206,7 +206,7 @@ export async function deleteRole(_prevState: ActionResult | undefined, formData:
       await tx.delete(roles).where(eq(roles.id, roleId));
     });
 
-    invalidateSessions();
+    await invalidateSessions();
     revalidatePath("/roles");
     await recordAudit({ action: "delete", entity: "role", entityId: roleId, summary: roleId });
     return { success: true };

@@ -47,11 +47,11 @@ export async function linkCheque(tx: Tx, chequeId: string, documentId: string, d
     )
     .returning({ id: chequeRegister.id });
   if (linked.length === 0) throw new ChequeUnavailableError();
-  invalidate(CACHE.cheques);
+  await invalidate(CACHE.cheques);
   // The three lists that name the cheque settling a row. Dropped from inside the
   // caller's transaction, like the lookup above: if the commit then fails, a
   // cache entry was thrown away for nothing, which costs one re-read. Every
   // caller invalidates the same domains again after its commit, which is what
   // makes a reader that repopulated mid-transaction correct anyway.
-  invalidateReads(READ_DOMAIN.payments, READ_DOMAIN.expenses, READ_DOMAIN.accounts);
+  await invalidateReads(READ_DOMAIN.payments, READ_DOMAIN.expenses, READ_DOMAIN.accounts);
 }

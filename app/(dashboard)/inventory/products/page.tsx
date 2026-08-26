@@ -32,6 +32,8 @@ export default async function Page() {
     // Incomplete when the item has no category (e.g. created on the fly from a
     // sale/purchase line).
     _incomplete: !item.categoryId,
+    _hasUnitRule: item.hasUnitRule,
+    _hasBaseUnit: Boolean(item.baseUnitId),
   }));
 
   return (

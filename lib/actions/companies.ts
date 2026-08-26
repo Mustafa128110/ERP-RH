@@ -90,8 +90,8 @@ export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<Act
         .onConflictDoNothing();
     });
 
-    invalidateLookups(CACHE.companies);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.companies);
+    await invalidateReads(...READS);
     // The new company changes what the Topbar scope selector offers, and that
     // lives in the dashboard layout rather than on this page.
     revalidatePath("/", "layout");
@@ -109,8 +109,8 @@ export async function updateCompany(companyId: string, _prevState: ActionResult 
     if (!values.name) return { error: "Name is required." };
 
     await db.update(companies).set(values).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "edit")));
-    invalidateLookups(CACHE.companies);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.companies);
+    await invalidateReads(...READS);
     revalidatePath("/", "layout");
     await recordAudit({ action: "update", entity: "company", entityId: companyId, summary: values.name, companyId });
     return { success: true };
@@ -124,8 +124,8 @@ export async function deleteCompany(_prevState: ActionResult | undefined, formDa
     requirePermission(session, "companies", "delete", { companyId });
     await db.delete(companies).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "delete")));
 
-    invalidateLookups(CACHE.companies);
-    invalidateReads(...READS);
+    await invalidateLookups(CACHE.companies);
+    await invalidateReads(...READS);
     revalidatePath("/", "layout");
     await recordAudit({ action: "delete", entity: "company", entityId: companyId, summary: companyId });
     return { success: true };

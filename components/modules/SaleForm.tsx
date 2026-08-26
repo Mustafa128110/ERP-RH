@@ -16,7 +16,7 @@ import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
-import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
+import { multiplierToBase, priceForUnit, unitIdsForProduct, type UnitConversionOption } from "@/lib/unit-conversion";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -298,6 +298,13 @@ export function SaleFormPage({
   const unitOpts = unitOptions;
   const customerOpts = customerOptions;
 
+  function unitsForLine(line: Line) {
+    const item = itemOpts.find((option) => option.id === line.itemId);
+    if (!item) return unitOpts;
+    const allowed = new Set(unitIdsForProduct(item.id, item.baseUnitId, conversionOptions));
+    return unitOpts.filter((unit) => allowed.has(unit.id));
+  }
+
   // Creating a sale used to navigate to the one just created, which put the next
   // sale two clicks away — the shop enters them back to back. It empties the form
   // instead; the success message links to what was created.
@@ -458,7 +465,7 @@ export function SaleFormPage({
   }
 
   function pickUnit(i: number, name: string) {
-    const unitId = unitOpts.find((unit) => unit.name === name)?.id ?? "";
+    const unitId = unitsForLine(lines[i]).find((unit) => unit.name === name)?.id ?? "";
     patchLine(i, (line) => {
       const item = itemOpts.find((option) => option.id === line.itemId);
       const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
@@ -669,7 +676,7 @@ export function SaleFormPage({
                     <td className={tdClass}>
                       <ComboBox
                         value={line.unitText}
-                        options={unitOpts}
+                        options={unitsForLine(line)}
                         placeholder="Unit"
                         className={cellInput}
                         inputProps={{ "data-cell": `${r}-1` }}

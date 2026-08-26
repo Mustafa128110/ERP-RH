@@ -36,7 +36,7 @@ function businessToday() {
 
 // The dashboard is live figures, not reference data, so the cache TTL is a
 // backstop rather than the freshness mechanism — the write-invalidation in
-// invalidateLookups() (lib/queries/lookups.ts) is what keeps a sale showing
+// await invalidateLookups() (lib/queries/lookups.ts) is what keeps a sale showing
 // the moment it's made. 60s bounds the worst case for anything that writes
 // outside the action layer (a psql session, a future action nobody wired up)
 // and for the per-instance copies behind a load balancer.

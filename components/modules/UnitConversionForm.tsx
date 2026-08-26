@@ -1,281 +1,127 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { updateUnitConversion, deleteUnitConversion, createUnitConversionsBatch, type UnitConversionBatchRow } from "@/lib/actions/unit-conversions";
-import { ProductBatchAddDialog } from "@/components/modules/ProductForm";
+import { createUnitConversion, deleteUnitConversion, setUnitConversionRuleItems, updateUnitConversion } from "@/lib/actions/unit-conversions";
 import { UnitBatchAddDialog } from "@/components/modules/UnitForm";
-import { QuickAddSelect, QuickAddButton } from "@/components/ui/QuickAddSelect";
-import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
-import { ComboBox } from "@/components/ui/ComboBox";
+import { QuickAddSelect } from "@/components/ui/QuickAddSelect";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 
-interface ConversionValues {
-  companyId: string | null;
-  itemId: string;
-  fromUnitId: string;
-  toUnitId: string;
-  multiplier: string;
-}
-
+type RuleValues = { id?: string; name: string; fromUnitId: string; toUnitId: string; multiplier: string; itemIds?: string[] };
 type ItemOption = { id: string; name: string; sku: string };
 type UnitOption = { id: string; name: string; symbol: string | null };
 
-const itemLabel = (o: ItemOption) => o.sku ? `${o.sku} — ${o.name}` : o.name;
-const unitLabel = (o: UnitOption) => o.symbol ? `${o.name} (${o.symbol})` : o.name;
+const unitLabel = (unit: UnitOption) => unit.symbol ? `${unit.name} (${unit.symbol})` : unit.name;
 
-// --- Batch add ------------------------------------------------------------
-
-type BatchRow = { companyId: null; itemId: string; fromUnitId: string; toUnitId: string; multiplier: string };
-
-export function UnitConversionBatchAddDialog({
-  itemOptions,
-  unitOptions,
-  onClose,
-  onDone,
-}: {
-  itemOptions: ItemOption[];
-  unitOptions: UnitOption[];
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [itemOpts, setItemOpts] = useState(itemOptions);
-  const [unitOpts, setUnitOpts] = useState(unitOptions);
-
-  const emptyRow = (): BatchRow => ({ companyId: null, itemId: "", fromUnitId: "", toUnitId: "", multiplier: "1" });
-
-  return (
-    <BatchAddDialog<BatchRow>
-      title="Add Unit Conversions"
-      onClose={onClose}
-      onDone={onDone}
-      initialRows={1}
-      autoAppend
-      emptyRow={emptyRow}
-      headers={["Item", "From Unit", "To Unit", "Multiplier"]}
-      toolbar={
-        <>
-          <QuickAddButton
-            label="+ Add Item"
-            onCreated={(rows) => setItemOpts((prev) => [...rows.map((r) => ({ id: r.id, name: r.name, sku: "" })), ...prev])}
-            renderDialog={({ onClose, onCreated }) => (
-              <ProductBatchAddDialog
-                companyOptions={[]}
-                categoryOptions={[]}
-                brandOptions={[]}
-                initialRows={1}
-                onClose={onClose}
-                onDone={(created) => onCreated((created ?? []).map((c) => ({ id: c.id, name: `${c.sku} — ${c.name}` })))}
-              />
-            )}
-          />
-          <QuickAddButton
-            label="+ Add Unit"
-            onCreated={(rows) => setUnitOpts((prev) => [...rows.map((r) => ({ id: r.id, name: r.name, symbol: "" })), ...prev])}
-            renderDialog={({ onClose, onCreated }) => (
-              <UnitBatchAddDialog
-                initialRows={1}
-                onClose={onClose}
-                onDone={(created) => onCreated((created ?? []).map((c) => ({ id: c.id, name: `${c.name} (${c.symbol})` })))}
-              />
-            )}
-          />
-        </>
-      }
-      onSubmit={async (rows) => {
-        const values: UnitConversionBatchRow[] = rows.map((r) => ({
-          companyId: null,
-          itemId: r.itemId,
-          fromUnitId: r.fromUnitId,
-          toUnitId: r.toUnitId,
-          multiplier: r.multiplier.trim() || "0",
-        }));
-        return createUnitConversionsBatch(values);
-      }}
-      renderRow={(row, _index, update) => (
-        <>
-          <td className={batchCellClass}>
-            <ComboBox
-              value={row.itemId ? itemOpts.find((o) => o.id === row.itemId)?.name ?? "" : ""}
-              onChange={(name) => {
-                const match = itemOpts.find((o) => o.name === name || (o.sku && `${o.sku} — ${o.name}` === name));
-                update({ itemId: match?.id ?? "" });
-              }}
-              options={itemOpts.map((o) => ({ id: o.id, name: itemLabel(o) }))}
-              placeholder="Search item…"
-              className={batchInputClass}
-            />
-          </td>
-          <td className={batchCellClass}>
-            <ComboBox
-              value={row.fromUnitId ? unitOpts.find((o) => o.id === row.fromUnitId)?.name ?? "" : ""}
-              onChange={(name) => {
-                const match = unitOpts.find((o) => o.name === name || (o.symbol && `${o.name} (${o.symbol})` === name));
-                update({ fromUnitId: match?.id ?? "" });
-              }}
-              options={unitOpts.map((o) => ({ id: o.id, name: unitLabel(o) }))}
-              placeholder="Search unit…"
-              className={batchInputClass}
-            />
-          </td>
-          <td className={batchCellClass}>
-            <ComboBox
-              value={row.toUnitId ? unitOpts.find((o) => o.id === row.toUnitId)?.name ?? "" : ""}
-              onChange={(name) => {
-                const match = unitOpts.find((o) => o.name === name || (o.symbol && `${o.name} (${o.symbol})` === name));
-                update({ toUnitId: match?.id ?? "" });
-              }}
-              options={unitOpts.map((o) => ({ id: o.id, name: unitLabel(o) }))}
-              placeholder="Search unit…"
-              className={batchInputClass}
-            />
-          </td>
-          <td className={batchCellClass}>
-            <input
-              type="number"
-              step="0.000001"
-              min="0"
-              value={row.multiplier}
-              onChange={(e) => update({ multiplier: e.target.value })}
-              className={batchInputClass}
-            />
-          </td>
-        </>
-      )}
-    />
-  );
-}
-
-// --- Edit (single) --------------------------------------------------------
-
-function EditFields({
-  defaults,
-  itemOptions,
-  unitOptions,
-}: {
-  defaults: ConversionValues;
-  itemOptions: ItemOption[];
-  unitOptions: UnitOption[];
-}) {
-  const [itemId, setItemId] = useState(defaults.itemId);
-  const [fromUnitId, setFromUnitId] = useState(defaults.fromUnitId);
-  const [toUnitId, setToUnitId] = useState(defaults.toUnitId);
-
+function RuleFields({ defaults, unitOptions }: { defaults?: RuleValues; unitOptions: UnitOption[] }) {
+  const [fromUnitId, setFromUnitId] = useState(defaults?.fromUnitId ?? "");
+  const [toUnitId, setToUnitId] = useState(defaults?.toUnitId ?? "");
   return (
     <>
-      <QuickAddSelect
-        label="Item"
-        name="itemId"
-        required
-        value={itemId}
-        onChange={setItemId}
-        options={itemOptions.map((o) => ({ id: o.id, name: itemLabel(o) }))}
-        placeholder="Select an item"
-        renderDialog={({ onClose, onCreated }) => (
-          <ProductBatchAddDialog
-            companyOptions={[]}
-            categoryOptions={[]}
-            brandOptions={[]}
-            initialRows={1}
-            onClose={onClose}
-            onDone={(created) => onCreated((created ?? []).map((c) => ({ id: c.id, name: `${c.sku} — ${c.name}` })))}
-          />
-        )}
-      />
-
+      <label className={labelClass}>
+        <span className={labelTextClass}>Rule Name</span>
+        <input name="name" required maxLength={150} defaultValue={defaults?.name ?? ""} placeholder="e.g. Dozen to Pieces" className={inputClass} />
+      </label>
       <QuickAddSelect
         label="From Unit"
         name="fromUnitId"
         required
         value={fromUnitId}
         onChange={setFromUnitId}
-        options={unitOptions.map((o) => ({ id: o.id, name: unitLabel(o) }))}
+        options={unitOptions.map((unit) => ({ id: unit.id, name: unitLabel(unit) }))}
         placeholder="Select a unit"
-        renderDialog={({ onClose, onCreated }) => (
-          <UnitBatchAddDialog
-            initialRows={1}
-            onClose={onClose}
-            onDone={(created) => onCreated((created ?? []).map((c) => ({ id: c.id, name: `${c.name} (${c.symbol})` })))}
-          />
-        )}
+        renderDialog={({ onClose }) => <UnitBatchAddDialog initialRows={1} onClose={onClose} onDone={() => onClose()} />}
       />
-
       <QuickAddSelect
         label="To Unit"
         name="toUnitId"
         required
         value={toUnitId}
         onChange={setToUnitId}
-        options={unitOptions.map((o) => ({ id: o.id, name: unitLabel(o) }))}
+        options={unitOptions.map((unit) => ({ id: unit.id, name: unitLabel(unit) }))}
         placeholder="Select a unit"
-        renderDialog={({ onClose, onCreated }) => (
-          <UnitBatchAddDialog
-            initialRows={1}
-            onClose={onClose}
-            onDone={(created) => onCreated((created ?? []).map((c) => ({ id: c.id, name: `${c.name} (${c.symbol})` })))}
-          />
-        )}
+        renderDialog={({ onClose }) => <UnitBatchAddDialog initialRows={1} onClose={onClose} onDone={() => onClose()} />}
       />
-
       <label className={labelClass}>
         <span className={labelTextClass}>Multiplier</span>
-        <input name="multiplier" type="number" step="0.000001" min="0" required defaultValue={defaults.multiplier} className={inputClass} />
-        <span className="text-xs text-steel">1 From Unit = this many To Units</span>
+        <input name="multiplier" type="number" step="0.000001" min="0.000001" required defaultValue={defaults?.multiplier ?? "1"} className={inputClass} />
+        <span className="text-xs text-steel">Works both ways: 1 dozen = 12 pieces, and 12 pieces = 1 dozen.</span>
       </label>
     </>
   );
 }
 
-export function UnitConversionEditForm({
-  conversionId,
-  defaults,
-  itemOptions,
-  unitOptions,
-  onDone,
-}: {
-  conversionId: string;
-  defaults: ConversionValues;
-  itemOptions: ItemOption[];
-  unitOptions: UnitOption[];
-  onDone?: () => void;
-}) {
-  const [state, action, pending] = useActionState(updateUnitConversion.bind(null, conversionId), undefined);
-
-  useEffect(() => {
-    if (state?.success) onDone?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
-
+export function UnitConversionCreateForm({ unitOptions, onDone }: { unitOptions: UnitOption[]; onDone?: () => void }) {
+  const [state, action, pending] = useActionState(createUnitConversion, undefined);
+  useEffect(() => { if (state?.success) onDone?.(); }, [state?.success, onDone]);
   return (
     <form action={action} className="flex flex-col gap-4">
-      <EditFields defaults={defaults} itemOptions={itemOptions} unitOptions={unitOptions} />
+      <RuleFields unitOptions={unitOptions} />
+      <p className="text-xs text-steel">Products are selected after saving this rule.</p>
+      {state?.error && <p className={errorTextClass}>{state.error}</p>}
+      <button type="submit" disabled={pending} className={submitClass}>{pending ? "Saving…" : "Save rule"}</button>
+    </form>
+  );
+}
+
+export function UnitConversionEditForm({ conversionId, defaults, unitOptions, onDone }: { conversionId: string; defaults: RuleValues; unitOptions: UnitOption[]; onDone?: () => void }) {
+  const [state, action, pending] = useActionState(updateUnitConversion.bind(null, conversionId), undefined);
+  useEffect(() => { if (state?.success) onDone?.(); }, [state?.success, onDone]);
+  return (
+    <form action={action} className="flex flex-col gap-4">
+      <RuleFields defaults={defaults} unitOptions={unitOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
       {state?.success && <p className={successTextClass}>Saved.</p>}
-      <button type="submit" disabled={pending} className={submitClass}>
-        {pending ? "Saving…" : "Save"}
-      </button>
+      <button type="submit" disabled={pending} className={submitClass}>{pending ? "Saving…" : "Save rule"}</button>
     </form>
+  );
+}
+
+export function UnitRuleProductsForm({ ruleId, itemIds, itemOptions, onDone }: { ruleId: string; itemIds: string[]; itemOptions: ItemOption[]; onDone?: () => void }) {
+  const [selected, setSelected] = useState(itemIds);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col gap-3 border-t border-sand pt-4">
+      <div>
+        <p className={labelTextClass}>Products using this rule</p>
+        <p className="text-xs text-steel">A product may use more than one compatible rule.</p>
+      </div>
+      <select
+        multiple
+        value={selected}
+        onChange={(event) => setSelected(Array.from(event.currentTarget.selectedOptions, (option) => option.value))}
+        className={`${inputClass} min-h-40`}
+        aria-label="Products using this rule"
+      >
+        {itemOptions.map((item) => <option key={item.id} value={item.id}>{item.sku ? `${item.sku} — ${item.name}` : item.name}</option>)}
+      </select>
+      {message && <p className={message.startsWith("Saved") ? successTextClass : errorTextClass}>{message}</p>}
+      <button
+        type="button"
+        disabled={saving}
+        className={submitClass}
+        onClick={async () => {
+          setSaving(true);
+          setMessage(null);
+          const result = await setUnitConversionRuleItems(ruleId, selected);
+          setSaving(false);
+          if (result.error) setMessage(result.error);
+          else { setMessage("Saved product assignments."); onDone?.(); }
+        }}
+      >
+        {saving ? "Saving…" : "Save product assignments"}
+      </button>
+    </div>
   );
 }
 
 export function DeleteUnitConversionButton({ conversionId, onDone }: { conversionId: string; onDone?: () => void }) {
   const [state, action, pending] = useActionState(deleteUnitConversion, undefined);
-
-  useEffect(() => {
-    if (state?.success) onDone?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
-
+  useEffect(() => { if (state?.success) onDone?.(); }, [state?.success, onDone]);
   return (
-    <form
-      action={action}
-      onSubmit={(e) => {
-        if (!confirm("Delete this unit conversion?")) e.preventDefault();
-      }}
-    >
+    <form action={action} onSubmit={(event) => { if (!confirm("Delete this rule and remove it from its products?")) event.preventDefault(); }}>
       <input type="hidden" name="id" value={conversionId} />
-      <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Deleting…" : "Delete this conversion"}
-      </button>
+      <button type="submit" disabled={pending} className={deleteButtonClass}>{pending ? "Deleting…" : "Delete this rule"}</button>
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>
   );

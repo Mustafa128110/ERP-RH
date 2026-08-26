@@ -296,11 +296,11 @@ async function writeTransferLines(
 
 // Stock moved, and items can appear out of nowhere (resolve-refs.ts), so the
 // lookup lists and every page reading stock are stale.
-function invalidateTransferViews() {
-  invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.cheques);
+async function invalidateTransferViews() {
+  await invalidateLookups(CACHE.documentTypes, CACHE.items, CACHE.cheques);
   // Moving stock changes on-hand per location, and the product list carries
   // on-hand beside each rate.
-  invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
+  await invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
   revalidatePath("/inventory/stock-transfers");
   revalidatePath("/inventory/stock");
   revalidatePath("/inventory/products");
@@ -355,7 +355,7 @@ export async function createStockTransfer(
     return { error: describeDbError(e, "Can't create — document number already in use for this company/type.") };
   }
 
-  invalidateTransferViews();
+  await invalidateTransferViews();
   await recordAudit({ action: "create", entity: "stock transfer", entityId: createdId, summary: createdNumber, companyId: header.companyId });
   return { success: true, id: createdId };
   });
@@ -389,8 +389,19 @@ export async function updateStockTransfer(
   if (!existing) return { error: "Transfer not found." };
   if (existing.companyId !== header.companyId) return { error: "A posted transfer can't be moved to another company. Delete it and enter it in the correct company." };
 
+  let vanishedDuringSave = false;
   try {
     await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ id: documents.id })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, existing.companyId), eq(documents.status, "posted")))
+        .limit(1)
+        .for("update");
+      if (!locked) {
+        vanishedDuringSave = true;
+        return;
+      }
       await tx
         .update(documents)
         .set({ companyId: header.companyId, documentDate: header.documentDate, status: "posted", updatedAt: new Date() })
@@ -414,8 +425,9 @@ export async function updateStockTransfer(
   } catch (e) {
     return { error: describeDbError(e, "Can't save this transfer.") };
   }
+  if (vanishedDuringSave) return { error: "Transfer not found — it may already have been cancelled." };
 
-  invalidateTransferViews();
+  await invalidateTransferViews();
   revalidatePath(`/inventory/stock-transfers/${documentId}`);
   await recordAudit({ action: "update", entity: "stock transfer", entityId: documentId, summary: existing.number, companyId: header.companyId });
   return { success: true };
@@ -442,8 +454,19 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
   if (!doomed) return { error: "Transfer not found." };
   requirePermission(session, "stock_transfers", "delete", { companyId: doomed.companyId });
 
+  let vanishedDuringDelete = false;
   try {
     await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ id: documents.id })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.companyId, doomed.companyId), eq(documents.status, "posted")))
+        .limit(1)
+        .for("update");
+      if (!locked) {
+        vanishedDuringDelete = true;
+        return;
+      }
       await tx.execute(sql`
         INSERT INTO inventory_transactions
           (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
@@ -461,8 +484,9 @@ export async function deleteStockTransfer(_prevState: ActionResult | undefined, 
   } catch (e) {
     return { error: describeDbError(e, "Can't cancel this transfer.") };
   }
+  if (vanishedDuringDelete) return { error: "Transfer not found — it may already have been cancelled." };
 
-  invalidateTransferViews();
+  await invalidateTransferViews();
   await recordAudit({ action: "cancel", entity: "stock transfer", entityId: documentId, summary: doomed.number, companyId: doomed.companyId });
   return { success: true };
   });
