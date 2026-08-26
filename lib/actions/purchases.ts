@@ -82,6 +82,7 @@ export interface StockPurchaseItemRow {
   // lines written before drizzle/0049, which the list shows as the price alone.
   unitCost: string | null;
   lineTotal: string;
+  unitName: string | null;
   unitSymbol: string | null;
 }
 
@@ -137,6 +138,7 @@ export async function listStockPurchases(companyId?: string) {
         unitPrice: documentLines.unitPrice,
         unitCost: documentLines.unitCost,
         lineTotal: documentLines.lineTotal,
+        unitName: units.name,
         unitSymbol: units.symbol,
       })
       .from(documentLines)
@@ -157,6 +159,7 @@ export async function listStockPurchases(companyId?: string) {
       unitPrice: l.unitPrice,
       unitCost: l.unitCost,
       lineTotal: l.lineTotal,
+      unitName: l.unitName,
       unitSymbol: l.unitSymbol,
     });
     linesByDoc.set(l.documentId, arr);

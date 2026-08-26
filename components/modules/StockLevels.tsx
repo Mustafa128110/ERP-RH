@@ -68,6 +68,8 @@ export function StockLevels({ items }: { items: StockItem[] }) {
       key: "valuation",
       label: "Valuation",
       align: "right",
+      sortable: true,
+      sortBy: "_sortValuation",
       render: (row) => (
         <div className="flex flex-col gap-0.5">
           {totalsOf(row).map((u) => (
@@ -91,8 +93,11 @@ export function StockLevels({ items }: { items: StockItem[] }) {
     id: it.itemId,
     sku: it.sku,
     itemName: it.itemName,
+    _searchItem: `${it.itemName} ${it.sku}`,
+    _searchUnit: [...it.unitTotals.map((unit) => unit.unit), ...it.breakdown.map((row) => row.unit)].join(" "),
     company: it.company,
     location: it.location,
+    _sortValuation: it.unitTotals.reduce((sum, unit) => sum + unit.valuation, 0),
     status: it.unitTotals.every((u) => u.onHand <= 0) ? "Out" : it.unitTotals.some((u) => u.onHand <= it.lowStockQty) ? "Low" : "OK",
     unitTotals: it.unitTotals,
     breakdown: it.breakdown,

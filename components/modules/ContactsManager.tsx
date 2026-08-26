@@ -18,6 +18,7 @@ const columns: ColumnDef[] = [
   {
     key: "displayName",
     label: "Name",
+    sortable: true,
     // Balance and last activity: what you want to know about a contact before
     // deciding whether to open them. The columns already show how to reach them.
     render: (row) => (

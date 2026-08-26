@@ -23,7 +23,7 @@ type PurchaseCheques = Awaited<ReturnType<typeof listChequesForPurchases>>;
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
-type PurchaseItemRow = { itemName: string; qty: string; unitPrice: string; unitCost: string; lineTotal: string };
+type PurchaseItemRow = { itemName: string; qty: string; unit: string; unitPrice: string; unitCost: string; lineTotal: string };
 type PurchaseBreakdown = {
   subtotal: string;
   discount: string | null;
@@ -39,6 +39,9 @@ type PurchaseRow = {
   total: string;
   date: string;
   paid: string;
+  _searchItem: string;
+  _searchUnit: string;
+  _searchContact: string;
   breakdown: PurchaseBreakdown;
   items: PurchaseItemRow[];
 };

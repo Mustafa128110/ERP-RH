@@ -63,6 +63,14 @@ async function main() {
   assert.ok(Array.isArray(literal), "wildcard characters must not break the query");
   console.log(`ok   "%_%" is escaped and matched literally (${literal.length} row(s))`);
 
+  // A type prefix must prune every other branch. This is the contract behind
+  // item:, unit:, contact:, and the other entity prefixes in the top bar.
+  const unitOnly = await searchRows(scope, "a", { users: true, roles: true }, "unit");
+  assert.ok(unitOnly.every((hit) => hit.kind === "unit"), "unit-scoped search returned another entity kind");
+  const contactOnly = await searchRows(scope, "a", { users: true, roles: true }, "contact");
+  assert.ok(contactOnly.every((hit) => hit.kind === "contact"), "contact-scoped search returned another entity kind");
+  console.log("ok   type-prefixed searches prune unrelated entity branches");
+
   console.log("\nall global search checks passed");
   process.exit(0);
 }

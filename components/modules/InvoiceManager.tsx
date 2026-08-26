@@ -46,7 +46,7 @@ type ReturnableSale = NonNullable<Awaited<ReturnType<typeof getReturnableSale>>>
 // then the money, then how it stands. Age and type come after that — they
 // qualify a row you've already found rather than help you find it — and the two
 // download buttons sit at the far end.
-type InvoiceItem = { name: string; qty: string; rate: string };
+type InvoiceItem = { name: string; qty: string; rate: string; unit: string };
 
 const columns: ColumnDef[] = [
   { key: "date", label: "Date" },
@@ -288,6 +288,7 @@ export function InvoiceManager({
   const customerCol: ColumnDef = {
     key: "customer",
     label: "Customer",
+    sortable: true,
     render: (row) => {
       const id = String(row.id);
       const items = itemsBySaleId?.get(id);

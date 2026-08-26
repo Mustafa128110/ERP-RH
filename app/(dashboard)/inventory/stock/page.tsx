@@ -14,7 +14,7 @@ const flatColumns: ColumnDef[] = [
   { key: "company", label: "Company" },
   { key: "location", label: "Location" },
   { key: "onHand", label: "On Hand", align: "right" },
-  { key: "valuation", label: "Valuation", align: "right" },
+  { key: "valuation", label: "Valuation", align: "right", sortBy: "_sortValuation" },
   { key: "status", label: "Status", badge: true },
 ];
 
@@ -35,10 +35,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ l
                 id: `${it.itemId}::${u.unit}`,
                 sku: it.sku,
                 itemName: it.itemName,
+                _searchItem: `${it.itemName} ${it.sku}`,
+                _searchUnit: u.unit,
                 company: it.company,
                 location: it.location,
                 onHand: `${qty(u.onHand)} ${u.unit}`,
                 valuation: money(u.valuation),
+                _sortValuation: u.valuation,
                 status: u.onHand <= 0 ? "Out" : u.onHand <= it.lowStockQty ? "Low" : "OK",
               }),
             ),

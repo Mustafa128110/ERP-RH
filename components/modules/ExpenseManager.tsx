@@ -53,6 +53,7 @@ const buildColumns = (byRowId: Map<string, DayGroup<Expense>>): ColumnDef[] => [
   {
     key: "category",
     label: "Category",
+    sortable: true,
     // The note is the part of an expense that says what it actually was ("van
     // tyres, Shahrah-e-Faisal"), and it never fits a column. Hovering the
     // category shows it along with everything else the row had to leave out.

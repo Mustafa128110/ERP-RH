@@ -5,6 +5,7 @@ import { PermissionError } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { searchRows } from "@/lib/queries/search";
 import { SEARCH_HREF, type SearchHit, type SearchKind } from "@/lib/search-constants";
+import { parseGlobalSearch } from "@/lib/search-query";
 
 // What the box in the top bar searches. It was a plain <input> that did nothing
 // at all — the one control on every screen, wired to nothing.
@@ -19,7 +20,8 @@ export async function globalSearch(query: string): Promise<SearchHit[]> {
   const session = await getSession();
   if (!session) throw new PermissionError("Not authenticated");
 
-  const q = query.trim();
+  const parsed = parseGlobalSearch(query);
+  const q = parsed.term;
   // One character matches most of the catalogue — that's a table scan rendered
   // as a dropdown, not a search.
   if (q.length < 2) return [];
@@ -35,7 +37,7 @@ export async function globalSearch(query: string): Promise<SearchHit[]> {
   };
 
   const scope = await getScopeCompanyIds();
-  const rows = await searchRows(scope, q, { users: can("users", "view"), roles: can("roles", "view") });
+  const rows = await searchRows(scope, q, { users: can("users", "view"), roles: can("roles", "view") }, parsed.kind);
 
   return rows.map((r) => {
     const kind = r.kind as SearchKind;

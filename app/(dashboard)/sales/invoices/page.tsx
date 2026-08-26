@@ -52,6 +52,7 @@ export default async function Page({
         name: it.itemName,
         qty: `${Number(it.quantity)}${it.unitSymbol ? ' ' + it.unitSymbol : ''}`.trim(),
         rate: money(it.unitPrice),
+        unit: [it.unitName, it.unitSymbol].filter(Boolean).join(" "),
       })),
     ]),
   );
@@ -74,6 +75,9 @@ export default async function Page({
       // value on the row — so without this, an invoice whose customer/company
       // columns don't mention it would be missed by a search for an item name.
       itemNames: lineItems.map((it) => it.name).join(" "),
+      _searchItem: lineItems.map((it) => it.name).join(" "),
+      _searchUnit: lineItems.map((it) => it.unit).join(" "),
+      _searchContact: s.customer ?? "",
     };
   });
 

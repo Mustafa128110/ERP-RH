@@ -17,10 +17,22 @@ import type { ColumnDef, Row } from "@/lib/table";
 
 // No S.No column here — DataTable numbers every row itself.
 const columns: ColumnDef[] = [
+  {
+    key: "setup",
+    label: "Setup",
+    render: (row) => (
+      <span className="inline-flex items-center gap-1" aria-label="Product setup status">
+        {row._missingCategory === true && <span title="Missing category" className="h-2.5 w-2.5 rounded-full bg-red-500" />}
+        {row._hasUnitRule !== true && <span title="No unit rule" className="h-2.5 w-2.5 rounded-full bg-blue-500" />}
+        {row._hasBaseUnit !== true && <span title="No base stock unit" className="h-2.5 w-2.5 rounded-full bg-green-500" />}
+      </span>
+    ),
+  },
   { key: "sku", label: "SKU", hideOnMobile: true },
   {
     key: "name",
     label: "Item Name",
+    sortable: true,
     // Product names remain plain database values.  Setup state is intentionally
     // kept in its own column so a red marker never becomes part of the name.
     render: (row) => (
@@ -34,26 +46,15 @@ const columns: ColumnDef[] = [
           { label: "Brand", value: String(row.brand) },
           { label: "Company", value: String(row.company) },
         ]}
-        footer={row._incomplete === true ? "Created from a sale or purchase line — no category yet." : undefined}
-        extraHeight={row._incomplete === true ? 16 : 0}
+        footer={row._missingCategory === true ? "Created from a sale or purchase line — no category yet." : undefined}
+        extraHeight={row._missingCategory === true ? 16 : 0}
       />
     ),
   },
-  {
-    key: "setup",
-    label: "Setup",
-    render: (row) => (
-      <span className="inline-flex items-center gap-1" aria-label="Product setup status">
-        {row._incomplete === true && <span title="Missing category" className="h-2.5 w-2.5 rounded-full bg-red-500" />}
-        {row._hasUnitRule !== true && <span title="No unit rule" className="h-2.5 w-2.5 rounded-full bg-blue-500" />}
-        {row._hasBaseUnit !== true && <span title="No base stock unit" className="h-2.5 w-2.5 rounded-full bg-green-500" />}
-      </span>
-    ),
-  },
+  { key: "salesRate", label: "Sales Rate", align: "right" },
   { key: "rate1", label: "Purchase Rate 1", align: "right" },
   { key: "rate2", label: "Purchase Rate 2", align: "right" },
   { key: "rate3", label: "Purchase Rate 3", align: "right" },
-  { key: "salesRate", label: "Sales Rate", align: "right" },
 ];
 
 type Option = { id: string; name: string };

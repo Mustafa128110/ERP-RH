@@ -23,6 +23,7 @@ export default async function Page() {
     address: contact.address,
     taxNumber: contact.taxNumber,
     _incomplete: !contact.phone && !contact.email,
+    _searchContact: [contact.displayName, contact.companyName, contact.phone, contact.email].filter(Boolean).join(" "),
   }));
 
   return <ContactsManager rows={rows} companyOptions={companyRows} />;

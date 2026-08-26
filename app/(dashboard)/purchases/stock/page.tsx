@@ -31,12 +31,16 @@ export default async function Page() {
     items: p.items.map((it) => ({
       itemName: it.itemName,
       qty: `${qty(it.quantity)} ${it.unitSymbol ?? ""}`.trim(),
+      unit: [it.unitName, it.unitSymbol].filter(Boolean).join(" "),
       unitPrice: money(it.unitPrice),
       // Purchases saved before the shipping share was worked out per line have
       // no cost of their own; the price is the closest true thing to show.
       unitCost: money(it.unitCost ?? it.unitPrice),
       lineTotal: money(it.lineTotal),
     })),
+    _searchItem: p.items.map((it) => it.itemName).join(" "),
+    _searchUnit: p.items.flatMap((it) => [it.unitName, it.unitSymbol]).filter(Boolean).join(" "),
+    _searchContact: p.supplier ?? "",
   }));
 
   return <StockPurchaseManager rows={rows} {...options} locationOptions={filteredLocationOptions} />;

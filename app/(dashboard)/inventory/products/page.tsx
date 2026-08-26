@@ -31,7 +31,11 @@ export default async function Page() {
     onHand: item.onHand === null ? "None recorded" : qty(item.onHand),
     // Incomplete when the item has no category (e.g. created on the fly from a
     // sale/purchase line).
-    _incomplete: !item.categoryId,
+    // Products render setup gaps in their dedicated Setup column. Do not use
+    // DataTable's generic `_incomplete` flag, which would also put a red dot
+    // before the first data cell.
+    _missingCategory: !item.categoryId,
+    _searchItem: `${item.name} ${item.sku}`,
     _hasUnitRule: item.hasUnitRule,
     _hasBaseUnit: Boolean(item.baseUnitId),
   }));

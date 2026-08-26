@@ -61,6 +61,7 @@ export interface SaleItemRow {
   quantity: string;
   unitPrice: string;
   lineTotal: string;
+  unitName: string | null;
   unitSymbol: string | null;
 }
 
@@ -138,6 +139,7 @@ export async function listSales(filters: SalesFilters = {}) {
         quantity: documentLines.quantity,
         unitPrice: documentLines.unitPrice,
         lineTotal: documentLines.lineTotal,
+        unitName: units.name,
         unitSymbol: units.symbol,
       })
       .from(documentLines)
@@ -152,7 +154,7 @@ export async function listSales(filters: SalesFilters = {}) {
   const linesByDoc = new Map<string, SaleItemRow[]>();
   for (const l of lineRows) {
     const arr = linesByDoc.get(l.documentId) ?? [];
-    arr.push({ itemName: l.itemName, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal, unitSymbol: l.unitSymbol });
+    arr.push({ itemName: l.itemName, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal, unitName: l.unitName, unitSymbol: l.unitSymbol });
     linesByDoc.set(l.documentId, arr);
   }
 

@@ -24,7 +24,7 @@ export function UnitManager({ units }: { units: Unit[] }) {
       columns={columns}
       // A unit typed into a sale line is created name-only; the missing symbol is
       // what flags it incomplete here.
-      toRow={(u) => ({ id: u.id, name: u.name, symbol: u.symbol ?? "—", _incomplete: !u.symbol })}
+      toRow={(u) => ({ id: u.id, name: u.name, symbol: u.symbol ?? "—", _searchUnit: `${u.name} ${u.symbol ?? ""}`, _incomplete: !u.symbol })}
       searchPlaceholder="Search units…"
       emptyMessage="No units yet."
       dialogTitle={(u) => u.name}

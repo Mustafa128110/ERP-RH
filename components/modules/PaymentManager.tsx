@@ -67,6 +67,7 @@ const buildColumns = (): ColumnDef[] => [
   {
     key: "type",
     label: "Type",
+    sortable: true,
     render: (row) => (
       <span title={String(row.type)} className={String(row.type) === "Received" ? "text-emerald-600" : "text-red-500"}>
         <Icon name={String(row.type) === "Received" ? "arrowUp" : "arrowDown"} className="h-4 w-4" />

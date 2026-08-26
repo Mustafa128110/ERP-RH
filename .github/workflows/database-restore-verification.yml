@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: restore_verify
           POSTGRES_USER: restore_verify
@@ -48,8 +48,13 @@ jobs:
             test -n "${!key}" || { echo "Missing required restore secret: $key"; exit 1; }
           done
 
-      - name: Install archive utility
-        run: sudo apt-get update && sudo apt-get install --yes p7zip-full
+      - name: Install PostgreSQL 17 client and archive utility
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17 p7zip-full
+          /usr/lib/postgresql/17/bin/psql --version
 
       - name: Download, verify, and restore latest archive
         shell: bash
@@ -63,9 +68,10 @@ jobs:
           7z t -p"$BACKUP_ARCHIVE_PASSWORD" latest.zip >/dev/null
           7z x -y -p"$BACKUP_ARCHIVE_PASSWORD" latest.zip >/dev/null
           test -s roles.sql && test -s schema.sql && test -s data.sql && test -s manifest.json
-          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
-          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f roles.sql
-          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f data.sql
-          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT count(*) AS products FROM public.items; SELECT count(*) AS documents FROM public.documents; SELECT count(*) AS ledger_entries FROM public.ledger_entries;"
+          psql_17=/usr/lib/postgresql/17/bin/psql
+          "$psql_17" "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
+          "$psql_17" "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f roles.sql
+          "$psql_17" "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f data.sql
+          "$psql_17" "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT count(*) AS products FROM public.items; SELECT count(*) AS documents FROM public.documents; SELECT count(*) AS ledger_entries FROM public.ledger_entries;"
           echo "## Restore verification passed" >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow used a disposable PostgreSQL service only; production was not touched." >> "$GITHUB_STEP_SUMMARY"
