@@ -1,0 +1,71 @@
+name: ERP restore verification
+
+# There is deliberately no schedule here. An administrator starts this only
+# when they request a restore test; it restores into the disposable PostgreSQL
+# service below and never writes to production.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: erp-restore-verification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: restore_verify
+          POSTGRES_USER: restore_verify
+          POSTGRES_PASSWORD: restore_verify_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restore_verify -d restore_verify"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      BACKUP_ARCHIVE_PASSWORD: ${{ secrets.BACKUP_ARCHIVE_PASSWORD }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      VERIFY_DATABASE_URL: postgresql://restore_verify:restore_verify_only@localhost:5432/restore_verify
+    steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET BACKUP_ARCHIVE_PASSWORD; do
+            test -n "${!key}" || { echo "Missing required restore secret: $key"; exit 1; }
+          done
+
+      - name: Install archive utility
+        run: sudo apt-get update && sudo apt-get install --yes p7zip-full
+
+      - name: Download, verify, and restore latest archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="${R2_ENDPOINT%/}"
+          aws s3 cp "s3://$R2_BUCKET/erp-backups/latest.zip" latest.zip --endpoint-url "$endpoint"
+          expected="$(aws s3api head-object --bucket "$R2_BUCKET" --key erp-backups/latest.zip --endpoint-url "$endpoint" --query 'Metadata.sha256' --output text)"
+          actual="$(sha256sum latest.zip | awk '{print $1}')"
+          test "$expected" = "$actual"
+          7z t -p"$BACKUP_ARCHIVE_PASSWORD" latest.zip >/dev/null
+          7z x -y -p"$BACKUP_ARCHIVE_PASSWORD" latest.zip >/dev/null
+          test -s roles.sql && test -s schema.sql && test -s data.sql && test -s manifest.json
+          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
+          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f roles.sql
+          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -f data.sql
+          psql "$VERIFY_DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT count(*) AS products FROM public.items; SELECT count(*) AS documents FROM public.documents; SELECT count(*) AS ledger_entries FROM public.ledger_entries;"
+          echo "## Restore verification passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow used a disposable PostgreSQL service only; production was not touched." >> "$GITHUB_STEP_SUMMARY"

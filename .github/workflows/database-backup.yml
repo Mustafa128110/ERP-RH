@@ -1,0 +1,110 @@
+name: ERP database backup
+
+on:
+  schedule:
+    # GitHub cron is UTC. Pakistan is UTC+05:00 with no daylight saving time.
+    - cron: "0 10 * * *"   # 3:00 PM PKT
+    - cron: "30 15 * * *"  # 8:30 PM PKT
+  workflow_dispatch:
+
+concurrency:
+  group: erp-database-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL_DIRECT: ${{ secrets.DATABASE_URL_DIRECT }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      BACKUP_ARCHIVE_PASSWORD: ${{ secrets.BACKUP_ARCHIVE_PASSWORD }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in DATABASE_URL_DIRECT R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET BACKUP_ARCHIVE_PASSWORD; do
+            test -n "${!key}" || { echo "Missing required backup secret: $key"; exit 1; }
+          done
+
+      - name: Install archive utility
+        run: sudo apt-get update && sudo apt-get install --yes p7zip-full
+
+      - name: Create verified encrypted backup
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          cd "$workdir"
+          backup_id="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::12}"
+
+          # These are ERP access roles, not PostgreSQL server roles. Hosted
+          # Supabase does not grant the application account permission to dump
+          # server-global roles; ERP roles/permissions are what restores access.
+          pg_dump "$DATABASE_URL_DIRECT" --data-only --no-owner --no-privileges \
+            --table=public.roles --table=public.permissions --table=public.role_permissions \
+            --table=public.user_roles --file=roles.sql
+          pg_dump "$DATABASE_URL_DIRECT" --schema-only --no-owner --no-privileges --file=schema.sql
+          pg_dump "$DATABASE_URL_DIRECT" --data-only --no-owner --no-privileges \
+            --exclude-table-data=public.roles --exclude-table-data=public.permissions \
+            --exclude-table-data=public.role_permissions --exclude-table-data=public.user_roles \
+            --file=data.sql
+
+          test -s roles.sql && test -s schema.sql && test -s data.sql
+          roles_sha="$(sha256sum roles.sql | awk '{print $1}')"
+          schema_sha="$(sha256sum schema.sql | awk '{print $1}')"
+          data_sha="$(sha256sum data.sql | awk '{print $1}')"
+          jq -n \
+            --arg backup_id "$backup_id" --arg created_at "$(date -u --iso-8601=seconds)" \
+            --arg pakistan_time "$(TZ=Asia/Karachi date --iso-8601=seconds)" --arg commit "$GITHUB_SHA" \
+            --arg roles_sha "$roles_sha" --arg schema_sha "$schema_sha" --arg data_sha "$data_sha" \
+            '{backup_id:$backup_id,created_at_utc:$created_at,created_at_pakistan:$pakistan_time,commit:$commit,role_scope:"ERP application roles and permissions",files:{"roles.sql":$roles_sha,"schema.sql":$schema_sha,"data.sql":$data_sha}}' > manifest.json
+          7z a -tzip -mem=AES256 -p"$BACKUP_ARCHIVE_PASSWORD" latest.zip roles.sql schema.sql data.sql manifest.json >/dev/null
+          7z t -p"$BACKUP_ARCHIVE_PASSWORD" latest.zip >/dev/null
+          archive_sha="$(sha256sum latest.zip | awk '{print $1}')"
+          printf '%s\n' "$archive_sha" > latest.zip.sha256
+          echo "backup_id=$backup_id" >> "$GITHUB_OUTPUT"
+          echo "archive_sha=$archive_sha" >> "$GITHUB_OUTPUT"
+          cp latest.zip "$GITHUB_WORKSPACE/latest.zip"
+
+      - name: Upload then atomically replace latest archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="${R2_ENDPOINT%/}"
+          staging="erp-backups/staging/${{ steps.archive.outputs.backup_id }}.zip"
+          latest="erp-backups/latest.zip"
+          aws s3 cp latest.zip "s3://$R2_BUCKET/$staging" --endpoint-url "$endpoint" --metadata "sha256=${{ steps.archive.outputs.archive_sha }}"
+          remote_sha="$(aws s3api head-object --bucket "$R2_BUCKET" --key "$staging" --endpoint-url "$endpoint" --query 'Metadata.sha256' --output text)"
+          test "$remote_sha" = "${{ steps.archive.outputs.archive_sha }}"
+          # The old latest.zip remains intact until the newly uploaded staging
+          # archive has passed its remote verification.
+          aws s3 cp "s3://$R2_BUCKET/$staging" "s3://$R2_BUCKET/$latest" --endpoint-url "$endpoint" --metadata-directive COPY
+          latest_sha="$(aws s3api head-object --bucket "$R2_BUCKET" --key "$latest" --endpoint-url "$endpoint" --query 'Metadata.sha256' --output text)"
+          test "$latest_sha" = "${{ steps.archive.outputs.archive_sha }}"
+          aws s3 rm "s3://$R2_BUCKET/$staging" --endpoint-url "$endpoint"
+          # Successful runs leave exactly one ZIP below erp-backups/. Staging
+          # remnants from an interrupted prior run are safe to clear now.
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix erp-backups/ --endpoint-url "$endpoint" --query 'Contents[?Key!=`erp-backups/latest.zip`].Key' --output text \
+            | tr '\t' '\n' | while read -r key; do test -z "$key" || aws s3 rm "s3://$R2_BUCKET/$key" --endpoint-url "$endpoint"; done
+
+      - name: Retain checksum in workflow summary
+        run: |
+          echo "## ERP backup complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Schedule: 3:00 PM / 8:30 PM Pakistan time" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Object: erp-backups/latest.zip" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SHA-256: ${{ steps.archive.outputs.archive_sha }}" >> "$GITHUB_STEP_SUMMARY"
