@@ -1,0 +1,33 @@
+name: Application quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-service-role-key
+      DATABASE_URL_DIRECT: postgresql://ci:ci@127.0.0.1:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm audit --audit-level=moderate
+      - run: npm run build

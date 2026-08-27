@@ -5,6 +5,7 @@ import { updateTax, deleteTax, createTaxesBatch, type TaxBatchRow } from "@/lib/
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { optimistically } from "@/lib/optimistic-records";
+import { MAX_TAX_RATE, MIN_TAX_RATE } from "@/lib/tax-rate";
 
 // Taxes are global reference data — no company scope, so no company field.
 interface TaxValues {
@@ -22,7 +23,7 @@ function Fields({ defaults }: { defaults?: TaxValues }) {
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Rate (%)</span>
-        <input name="rate" type="number" step="0.0001" required defaultValue={defaults?.rate} className={inputClass} />
+        <input name="rate" type="number" min={MIN_TAX_RATE} max={MAX_TAX_RATE} step="0.0001" required defaultValue={defaults?.rate} className={inputClass} />
       </label>
       <label className="flex items-center gap-2 text-sm">
         <input name="isActive" type="checkbox" defaultChecked={defaults?.isActive ?? true} className="h-5 w-5 rounded border-sand" />
@@ -89,7 +90,7 @@ export function TaxBatchAddDialog({ onClose, onDone }: { onClose: () => void; on
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="GST" />
           </td>
           <td className={batchCellClass}>
-            <input type="number" step="0.0001" value={row.rate} onChange={(e) => update({ rate: e.target.value })} className={batchInputClass} />
+            <input type="number" min={MIN_TAX_RATE} max={MAX_TAX_RATE} step="0.0001" value={row.rate} onChange={(e) => update({ rate: e.target.value })} className={batchInputClass} />
           </td>
           <td className={`${batchCellClass} text-center`}>
             <input type="checkbox" checked={row.isActive} onChange={(e) => update({ isActive: e.target.checked })} className="h-5 w-5 rounded border-sand" />

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { financialDocumentError } from "./financial-input";
+import { financialDocumentError, itemBearingLines } from "./financial-input";
 
 function validate(lines: Parameters<typeof financialDocumentError>[0], values: Array<[string, unknown]> = []) {
   return financialDocumentError(
@@ -15,6 +15,18 @@ async function main() {
   assert.match(validate([{ quantity: "1", unitPrice: "1" }], [["Tax", "NaN"]]) ?? "", /Tax/);
   assert.match(validate([{ quantity: "1", unitPrice: "10" }], [["Discount", "11"]]) ?? "", /Discount/);
   assert.equal(financialDocumentError([{ quantity: "0", unitPrice: "10" }], [], { allowZeroQuantity: true }), null);
+  assert.deepEqual(
+    itemBearingLines([
+      { itemId: "", itemName: "", quantity: "1" },
+      { itemId: "item-1", itemName: "", quantity: "0" },
+      { itemId: "", itemName: "Typed item", quantity: "-1" },
+    ]),
+    [
+      { itemId: "item-1", itemName: "", quantity: "0" },
+      { itemId: "", itemName: "Typed item", quantity: "-1" },
+    ],
+    "filled lines must reach validation even when their quantity is invalid",
+  );
   console.log("financial input checks passed");
 }
 

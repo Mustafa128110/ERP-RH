@@ -376,7 +376,7 @@ export function DeleteStockAdjustmentButton({ adjustmentId }: { adjustmentId: st
 
 export function ApproveStockAdjustmentButton({ adjustmentId }: { adjustmentId: string }) {
   const router = useRouter();
-  const [_, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [state, action, pending] = useActionState(approveStockAdjustment, undefined);
   useEffect(() => {
     // The action already invalidated the stock/products reads, so the refresh

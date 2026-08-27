@@ -9,6 +9,22 @@ export interface FinancialAdjustmentInput {
   value: unknown;
 }
 
+export interface ItemBearingInput {
+  itemId?: unknown;
+  itemName?: unknown;
+}
+
+// Document grids render spare rows, so a completely blank row is deliberately
+// ignored. Once an item is picked or typed, however, the row is business input:
+// keep it in the validation set even when its quantity is invalid. Filtering on
+// `quantity > 0` used to silently discard a filled zero/negative row while the
+// rest of the document posted successfully.
+export function itemBearingLines<T extends ItemBearingInput>(lines: T[]): T[] {
+  return lines.filter((line) =>
+    Boolean(String(line?.itemId ?? "").trim() || String(line?.itemName ?? "").trim()),
+  );
+}
+
 function finiteNonNegative(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0;

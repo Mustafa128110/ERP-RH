@@ -9,6 +9,7 @@ import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { CACHE, invalidateLookups } from "@/lib/queries/lookups";
+import { parseTaxRate } from "@/lib/tax-rate";
 
 export async function listTaxes() {
   const session = await getSession();
@@ -26,7 +27,7 @@ export async function getTax(taxId: string) {
 function readTaxForm(formData: FormData) {
   return {
     name: String(formData.get("name") ?? "").trim(),
-    rate: String(formData.get("rate") ?? "0"),
+    rate: String(formData.get("rate") ?? "").trim(),
     isActive: formData.get("isActive") === "on",
   };
 }
@@ -42,8 +43,15 @@ export async function createTaxesBatch(rows: TaxBatchRow[]): Promise<ActionResul
     const session = await getLiveSession();
     requireGlobalPermission(session, "taxes", "create");
 
-    const valid = rows.filter((r) => r.name.trim() && !Number.isNaN(Number(r.rate)));
-    if (valid.length === 0) return { error: "Add at least one tax with a name and a numeric rate." };
+    const entered = rows.filter((row) => row.name.trim());
+    if (entered.length === 0) return { error: "Add at least one tax with a name and rate." };
+
+    const valid: TaxBatchRow[] = [];
+    for (const [index, row] of entered.entries()) {
+      const parsed = parseTaxRate(row.rate);
+      if ("error" in parsed) return { error: `Row ${index + 1}: ${parsed.error}` };
+      valid.push({ name: row.name.trim(), rate: parsed.value, isActive: Boolean(row.isActive) });
+    }
 
     await db.insert(taxes).values(valid);
     await invalidateLookups(CACHE.taxes);
@@ -60,7 +68,9 @@ export async function updateTax(taxId: string, _prevState: ActionResult | undefi
 
     const values = readTaxForm(formData);
     if (!values.name) return { error: "Name is required." };
-    if (Number.isNaN(Number(values.rate))) return { error: "Rate must be a number." };
+    const parsedRate = parseTaxRate(values.rate);
+    if ("error" in parsedRate) return { error: parsedRate.error };
+    values.rate = parsedRate.value;
 
     await db.update(taxes).set(values).where(eq(taxes.id, taxId));
     await invalidateLookups(CACHE.taxes);

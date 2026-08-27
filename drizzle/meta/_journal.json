@@ -470,6 +470,27 @@
       "when": 1787763762261,
       "tag": "0066_chief_trauma",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787790000000,
+      "tag": "0067_tax_rate_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787790001000,
+      "tag": "0068_close_public_database_api",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787790002000,
+      "tag": "0069_remove_inherited_public_api_grants",
+      "breakpoints": true
     }
   ]
 }

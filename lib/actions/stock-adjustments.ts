@@ -23,6 +23,7 @@ import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { averageCosts } from "@/lib/queries/stock-cost";
 import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-constants";
 import { UNASSIGNED_LABEL, locationIdOrNull } from "@/lib/location-constants";
+import { itemBearingLines } from "@/lib/financial-input";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
@@ -205,9 +206,7 @@ function readLines(formData: FormData): AdjustmentLineInput[] {
   } catch {
     return [];
   }
-  // Zero adjusts nothing, so a line counts only with an item and a non-zero
-  // quantity — either direction.
-  return lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) !== 0);
+  return itemBearingLines(lines);
 }
 
 function getOrCreateAdjustmentDocumentType(companyId: string) {
@@ -247,6 +246,8 @@ export async function createStockAdjustment(
 
   const validLines = readLines(formData);
   if (validLines.length === 0) return { error: "Add at least one item with a non-zero quantity." };
+  const invalidLine = validLines.findIndex((line) => !Number.isFinite(Number(line.quantity)) || Number(line.quantity) === 0);
+  if (invalidLine >= 0) return { error: `Line ${invalidLine + 1}: quantity must be a non-zero number.` };
 
   const documentType = await getOrCreateAdjustmentDocumentType(companyId);
   const approvalThreshold = Number(await companySettingValue(companyId, "adjustment_approval_amount")) || 0;

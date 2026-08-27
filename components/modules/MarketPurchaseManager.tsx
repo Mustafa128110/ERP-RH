@@ -40,7 +40,7 @@ export function MarketPurchaseManager({
   chequeOptions: AccountOption[];
 }) {
   const router = useRouter();
-  const [_, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const pendingRows = requests.filter((request) => request.status === "pending");
   const [selected, setSelected] = useState<string[]>([]);
   const [costs, setCosts] = useState<Record<string, string>>({});

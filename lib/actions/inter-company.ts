@@ -23,7 +23,7 @@ import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
-import { financialDocumentError } from "@/lib/financial-input";
+import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
 import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
 import { interCompanyBuyerLedgerLines, interCompanySellerLedgerLines } from "@/lib/general-ledger-constants";
 
@@ -76,7 +76,7 @@ function readLines(formData: FormData): TransferLineInput[] {
   } catch {
     return [];
   }
-  return lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
+  return itemBearingLines(lines);
 }
 
 // Everything the two documents are written from, validated once for create and

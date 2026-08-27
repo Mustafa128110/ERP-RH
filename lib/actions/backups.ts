@@ -1,6 +1,6 @@
 "use server";
 
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
@@ -22,18 +22,18 @@ import { guard, type ActionResult } from "@/lib/actions/guard";
 //     safety net: it opens in a spreadsheet, it survives this app being gone,
 //     and it is what a small business actually reaches for.
 
-const QUERIES: Record<string, (companies: string) => ReturnType<typeof db.execute>> = {
+const QUERIES: Record<string, (companies: SQL) => ReturnType<typeof db.execute>> = {
   products: (c) => db.execute(sql`
     SELECT i.sku, i.name, i.urdu_name AS urdu_name, co.name AS company, cat.name AS category, b.name AS brand, i.taxable, i.is_active
       FROM items i JOIN companies co ON co.id = i.company_id
       LEFT JOIN categories cat ON cat.id = i.category_id
       LEFT JOIN brands b ON b.id = i.brand_id
-     WHERE i.company_id IN (${sql.raw(c)}) ORDER BY i.name`),
+     WHERE i.company_id IN (${c}) ORDER BY i.name`),
 
   contacts: (c) => db.execute(sql`
     SELECT ct.display_name, ct.company_name, ct.phone, ct.email, ct.city, ct.tax_number, ct.credit_limit, ct.is_active, co.name AS company
       FROM contacts ct LEFT JOIN companies co ON co.id = ct.company_id
-     WHERE ct.company_id IS NULL OR ct.company_id IN (${sql.raw(c)}) ORDER BY ct.display_name`),
+     WHERE ct.company_id IS NULL OR ct.company_id IN (${c}) ORDER BY ct.display_name`),
 
   stock: (c) => db.execute(sql`
     SELECT i.sku, i.name AS item, coalesce(l.name, 'Unassigned') AS location, u.name AS unit,
@@ -44,7 +44,7 @@ const QUERIES: Record<string, (companies: string) => ReturnType<typeof db.execut
       JOIN items i ON i.id = dl.item_id
       LEFT JOIN locations l ON l.id = dl.location_id
       LEFT JOIN units u ON u.id = dl.unit_id
-     WHERE it.company_id IN (${sql.raw(c)})
+     WHERE it.company_id IN (${c})
      GROUP BY i.sku, i.name, l.name, u.name
     HAVING sum(it.movement * it.base_quantity) <> 0
      ORDER BY i.name`),
@@ -63,7 +63,7 @@ const QUERIES: Record<string, (companies: string) => ReturnType<typeof db.execut
       LEFT JOIN contacts ct ON ct.id = d.contact_id
       LEFT JOIN bank_accounts ba ON ba.id = d.bank_account_id
       LEFT JOIN cash_accounts ca ON ca.id = d.cash_account_id
-     WHERE dt.code IN ('PAYMENT_MADE', 'PAYMENT_RECEIVED') AND d.company_id IN (${sql.raw(c)})
+     WHERE dt.code IN ('PAYMENT_MADE', 'PAYMENT_RECEIVED') AND d.company_id IN (${c})
      ORDER BY d.document_date DESC`),
 
   expenses: (c) => db.execute(sql`
@@ -71,7 +71,7 @@ const QUERIES: Record<string, (companies: string) => ReturnType<typeof db.execut
       FROM expenses e
       JOIN expense_categories ec ON ec.id = e.expense_category_id
       JOIN companies co ON co.id = e.company_id
-     WHERE e.company_id IN (${sql.raw(c)}) ORDER BY e.expense_date DESC`),
+     WHERE e.company_id IN (${c}) ORDER BY e.expense_date DESC`),
 
   ledger: (c) => db.execute(sql`
     SELECT d.document_date, d.number, co.name AS company, ct.display_name AS contact, le.debit, le.credit
@@ -79,7 +79,7 @@ const QUERIES: Record<string, (companies: string) => ReturnType<typeof db.execut
       JOIN documents d ON d.id = le.document_id
       JOIN companies co ON co.id = le.company_id
       LEFT JOIN contacts ct ON ct.id = d.contact_id
-     WHERE le.company_id IN (${sql.raw(c)}) ORDER BY d.document_date DESC`),
+     WHERE le.company_id IN (${c}) ORDER BY d.document_date DESC`),
 };
 
 // Dispatching a workflow affects the whole production database, so a role that
@@ -124,7 +124,7 @@ export async function dispatchBackupWorkflow(kind: string): Promise<ActionResult
   });
 }
 
-function documentHeaders(companies: string, code: string) {
+function documentHeaders(companies: SQL, code: string) {
   return db.execute(sql`
     SELECT d.number, d.document_date, co.name AS company, ct.display_name AS contact,
            d.subtotal, d.discount_total, d.tax_total, d.shipping_total, d.grand_total, d.paid_amount, d.is_paid
@@ -132,11 +132,11 @@ function documentHeaders(companies: string, code: string) {
       JOIN document_types dt ON dt.id = d.document_type_id
       JOIN companies co ON co.id = d.company_id
       LEFT JOIN contacts ct ON ct.id = d.contact_id
-     WHERE dt.code = ${code} AND d.company_id IN (${sql.raw(companies)})
+     WHERE dt.code = ${code} AND d.company_id IN (${companies})
      ORDER BY d.document_date DESC`);
 }
 
-function documentLineRows(companies: string, code: string) {
+function documentLineRows(companies: SQL, code: string) {
   return db.execute(sql`
     SELECT d.number, d.document_date, i.sku, i.name AS item, u.name AS unit,
            dl.quantity, dl.unit_price, dl.line_total, coalesce(l.name, 'Unassigned') AS location
@@ -146,7 +146,7 @@ function documentLineRows(companies: string, code: string) {
       LEFT JOIN items i ON i.id = dl.item_id
       LEFT JOIN units u ON u.id = dl.unit_id
       LEFT JOIN locations l ON l.id = dl.location_id
-     WHERE dt.code = ${code} AND d.company_id IN (${sql.raw(companies)})
+     WHERE dt.code = ${code} AND d.company_id IN (${companies})
      ORDER BY d.document_date DESC, dl.line_no`);
 }
 
@@ -166,9 +166,9 @@ export async function exportSnapshot(key: string): Promise<{ error?: string; row
     (companyId) => session.globalPermissions.has("backups.create") || session.permissionsByCompany.get(companyId)?.has("backups.create"),
   );
   if (ids.length === 0) return { error: "You don't have access to any company." };
-  // Interpolated as literals rather than parameters because it sits inside an
-  // IN list built with sql.raw; the ids come from the session, never from input.
-  const companyList = ids.map((id) => `'${id}'::uuid`).join(", ");
+  // Keep each id parameterized even though it came from the trusted session.
+  // This export path should remain safe if its source changes in the future.
+  const companyList = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
 
   const rows = (await query(companyList)) as unknown as Record<string, unknown>[];
   await recordAudit({ action: "import", entity: "data export", summary: `${SNAPSHOT_TABLES.find((t) => t.key === key)?.label ?? key} exported`, detail: `${rows.length} row(s)` });

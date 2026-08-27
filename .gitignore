@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# generated code-graph analysis (reports and caches are reproducible)
+/graphify-out/
+/docs/graphify-out/
+
 # next.js
 /.next/
 /out/

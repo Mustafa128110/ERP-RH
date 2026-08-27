@@ -16,10 +16,22 @@ requires("lib/actions/payments.ts", ["nextDocumentNumberRange", "resolveContactI
 requires("lib/actions/expenses.ts", ["resolveExpenseCategoryIds", "adjustSettlementBalancesBatch"]);
 requires("lib/actions/sales.ts", ["resolveItemIds", "resolveUnitIds"]);
 requires("lib/actions/purchases.ts", ["resolveItemIds", "resolveUnitIds"]);
+requires("lib/actions/quotations.ts", [
+  ".groupBy(documents.id, companies.shortName, companies.name, contacts.displayName)",
+]);
 requires("lib/actions/stock-transfers.ts", ["resolveItemIds", "resolveUnitIds", "averageCosts"]);
 requires("lib/actions/stock-adjustments.ts", ["resolveItemIds", "resolveUnitIds", "averageCosts"]);
 requires("lib/actions/inter-company.ts", ["mirrorItemsToBuyer", "resolveItemIds", "resolveUnitIds"]);
-requires("lib/actions/products.ts", ["groupBy(documentLines.itemId, documentLines.unitId)", "Promise.all([...groups.values()]", "onHandByItemUnit"]);
+requires("lib/actions/products.ts", [
+  "groupBy(documentLines.itemId, documentLines.unitId)",
+  "Promise.all([...groups.values()]",
+  "onHandByItemUnit",
+  "resolveProductReferences",
+  "UPDATE items",
+  "FROM (VALUES",
+  "nextSequenceRange",
+]);
+assert.ok(!source("lib/actions/products.ts").includes("saveProductRow"), "product batches must not restore a per-row database write helper");
 requires("lib/queries/lookups.ts", ["scopedLookup(CACHE.items, items.companyId, queryItemOptions)"]);
 requires("components/layout/Sidebar.tsx", ["function IntentLink", "onPointerEnter", "onFocus", "onTouchStart"]);
 

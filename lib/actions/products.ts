@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -20,11 +20,10 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
-import { SKU_SCOPE, formatSku, nextSequenceRange, nextSequenceValue, peekSequenceValue } from "@/lib/db/sequences";
+import { SKU_SCOPE, formatSku, nextSequenceRange, peekSequenceValue } from "@/lib/db/sequences";
 import { ensureDocumentType } from "@/lib/actions/document-numbering";
 import { createStockPurchase } from "@/lib/actions/purchases";
 import { createStockAdjustment } from "@/lib/actions/stock-adjustments";
-import { resolveBrandId, resolveCategoryId, resolveUnitId } from "@/lib/actions/resolve-refs";
 import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-constants";
 import { locationIdOrNull } from "@/lib/location-constants";
 import { purchaseRowError, recordsQty, writesDocument } from "@/lib/product-edit-rules";
@@ -80,6 +79,91 @@ export interface ProductBatchRow {
   isActive: boolean;
 }
 
+interface ProductReferenceInput {
+  categoryId: string;
+  categoryName?: string | null;
+  brandId: string;
+  brandName?: string | null;
+  unitId?: string;
+  unitName?: string | null;
+}
+
+// Resolve every free-typed catalogue reference in a bounded number of queries.
+// Product imports and the edit grid both use this path, so neither can regress
+// into one remote database round trip per pasted row.
+async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
+  const categoryNames = [
+    ...new Set(
+      rows
+        .filter((row) => !row.categoryId)
+        .map((row) => row.categoryName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const brandNames = [
+    ...new Set(
+      rows
+        .filter((row) => !row.brandId)
+        .map((row) => row.brandName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const unitNames = [
+    ...new Set(
+      rows
+        .filter((row) => !row.unitId)
+        .map((row) => row.unitName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+
+  const [knownCategories, knownBrands, knownUnits] = await Promise.all([
+    categoryNames.length
+      ? tx.select({ id: categories.id, name: categories.name }).from(categories).where(inArray(categories.name, categoryNames))
+      : Promise.resolve([]),
+    brandNames.length
+      ? tx.select({ id: brands.id, name: brands.name }).from(brands).where(inArray(brands.name, brandNames))
+      : Promise.resolve([]),
+    unitNames.length
+      ? tx.select({ id: units.id, name: units.name }).from(units).where(inArray(units.name, unitNames))
+      : Promise.resolve([]),
+  ]);
+  const categoryByName = new Map(knownCategories.map((row) => [row.name, row.id]));
+  const brandByName = new Map(knownBrands.map((row) => [row.name, row.id]));
+  const unitByName = new Map(knownUnits.map((row) => [row.name, row.id]));
+  const missingCategories = categoryNames.filter((name) => !categoryByName.has(name));
+  const missingBrands = brandNames.filter((name) => !brandByName.has(name));
+  const missingUnits = unitNames.filter((name) => !unitByName.has(name));
+
+  const [insertedCategories, insertedBrands, insertedUnits] = await Promise.all([
+    // Category names are not unique because two branches may legitimately use
+    // the same label. We deduplicate this submission, but do not invent a
+    // database uniqueness rule that would make the category tree less useful.
+    missingCategories.length
+      ? tx.insert(categories).values(missingCategories.map((name) => ({ name }))).returning({ id: categories.id, name: categories.name })
+      : Promise.resolve([]),
+    missingBrands.length
+      ? tx
+          .insert(brands)
+          .values(missingBrands.map((name) => ({ name })))
+          .onConflictDoUpdate({ target: brands.name, set: { name: sql`excluded.name` } })
+          .returning({ id: brands.id, name: brands.name })
+      : Promise.resolve([]),
+    missingUnits.length
+      ? tx.insert(units).values(missingUnits.map((name) => ({ name }))).returning({ id: units.id, name: units.name })
+      : Promise.resolve([]),
+  ]);
+  for (const row of insertedCategories) categoryByName.set(row.name, row.id);
+  for (const row of insertedBrands) brandByName.set(row.name, row.id);
+  for (const row of insertedUnits) unitByName.set(row.name, row.id);
+
+  return rows.map((row) => ({
+    categoryId: row.categoryId || categoryByName.get(row.categoryName?.trim() ?? "") || null,
+    brandId: row.brandId || brandByName.get(row.brandName?.trim() ?? "") || null,
+    unitId: row.unitId || unitByName.get(row.unitName?.trim() ?? "") || null,
+  }));
+}
+
 // Returns what it created so a quick-add from a sale or purchase line can drop
 // the new product straight into the line the user was editing.
 export async function createProductsBatch(
@@ -103,37 +187,21 @@ export async function createProductsBatch(
       }
 
       const created = await db.transaction(async (tx) => {
-        // Resolve every distinct typed category/brand and reserve every blank
-        // SKU in a fixed number of statements. A 400-row paste now has the same
-        // round-trip count as a two-row batch.
-        const categoryNames = [...new Set(valid.filter((row) => !row.categoryId).map((row) => row.categoryName?.trim()).filter((name): name is string => Boolean(name)))];
-        const brandNames = [...new Set(valid.filter((row) => !row.brandId).map((row) => row.brandName?.trim()).filter((name): name is string => Boolean(name)))];
         const blankSkuCount = valid.filter((row) => !row.sku.trim()).length;
-        const [knownCategories, knownBrands, skuValues] = await Promise.all([
-          categoryNames.length ? tx.select({ id: categories.id, name: categories.name }).from(categories).where(inArray(categories.name, categoryNames)) : Promise.resolve([]),
-          brandNames.length ? tx.select({ id: brands.id, name: brands.name }).from(brands).where(inArray(brands.name, brandNames)) : Promise.resolve([]),
+        const [references, skuValues] = await Promise.all([
+          resolveProductReferences(tx, valid.map((row) => ({ ...row, categoryId: row.categoryId ?? "", brandId: row.brandId ?? "" }))),
           nextSequenceRange(SKU_SCOPE, blankSkuCount, tx),
         ]);
-        const categoryByName = new Map(knownCategories.map((row) => [row.name, row.id]));
-        const brandByName = new Map(knownBrands.map((row) => [row.name, row.id]));
-        const missingCategories = categoryNames.filter((name) => !categoryByName.has(name));
-        const missingBrands = brandNames.filter((name) => !brandByName.has(name));
-        const [insertedCategories, insertedBrands] = await Promise.all([
-          missingCategories.length
-            ? tx.insert(categories).values(missingCategories.map((name) => ({ name }))).onConflictDoUpdate({ target: categories.name, set: { name: sql`excluded.name` } }).returning({ id: categories.id, name: categories.name })
-            : Promise.resolve([]),
-          missingBrands.length
-            ? tx.insert(brands).values(missingBrands.map((name) => ({ name }))).onConflictDoUpdate({ target: brands.name, set: { name: sql`excluded.name` } }).returning({ id: brands.id, name: brands.name })
-            : Promise.resolve([]),
-        ]);
-        for (const row of insertedCategories) categoryByName.set(row.name, row.id);
-        for (const row of insertedBrands) brandByName.set(row.name, row.id);
         let skuIndex = 0;
-        const withSkus = valid.map(({ categoryName, brandName, ...fields }) => ({
-          ...fields,
-          categoryId: fields.categoryId ?? categoryByName.get(categoryName?.trim() ?? "") ?? null,
-          brandId: fields.brandId ?? brandByName.get(brandName?.trim() ?? "") ?? null,
-          sku: fields.sku.trim() || formatSku(skuValues[skuIndex++]),
+        const withSkus = valid.map((row, index) => ({
+          companyId: row.companyId,
+          name: row.name,
+          urduName: row.urduName,
+          categoryId: references[index]!.categoryId,
+          brandId: references[index]!.brandId,
+          taxable: row.taxable,
+          isActive: row.isActive,
+          sku: row.sku.trim() || formatSku(skuValues[skuIndex++]),
         }));
         return tx.insert(items).values(withSkus).returning({ id: items.id, name: items.name, sku: items.sku, companyId: items.companyId });
       });
@@ -424,6 +492,12 @@ export async function updateProductsBatch(
 
     if (rows.length === 0) return { error: "Nothing selected to edit." };
 
+    const submittedIds = new Set<string>();
+    for (const [i, row] of rows.entries()) {
+      if (row.id && submittedIds.has(row.id)) return { error: `Row ${i + 1}: the same product was submitted more than once.` };
+      if (row.id) submittedIds.add(row.id);
+    }
+
     // Every row is checked before any row is written. A batch that fails on row
     // seven having already saved rows one to six is the worst outcome here — the
     // user can't tell what landed without re-reading the list.
@@ -464,29 +538,106 @@ export async function updateProductsBatch(
       }
 
       // Rows added in the dialog create products — products.create in each new
-      // product's company. Existing rows are already covered: saveProductRow
-      // updates only rows inside the user's company scope.
+      // product's company. Existing rows are checked against the user's live
+      // company scope together inside the catalogue transaction.
       for (const companyId of new Set(rows.filter((r) => !r.id).map((r) => r.companyId).filter(Boolean))) {
         requirePermission(session, "products", "create", { companyId });
       }
 
-    // The catalogue half, all rows in one transaction. Each row used to save in
-    // two transactions of its own, which broke the promise made four paragraphs
-    // up: a batch that failed on row seven had already committed rows one to six,
-    // and the user had no way to tell which. One transaction means the grid either
-    // lands whole or not at all, and the twenty rows cost one commit instead of
-    // forty.
+    // The catalogue half lands atomically and uses a bounded statement count:
+    // references are resolved in batches, existing products update through one
+    // UPDATE ... FROM (VALUES ...), and new products use one multi-row INSERT.
     const scope = await companyInPermissionScope(items.companyId, session, "products", "edit");
-    const saved: SavedProductRow[] = [];
+    let saved: SavedProductRow[] = [];
     const rowFailure = await db
       .transaction(async (tx) => {
-        for (const [i, row] of rows.entries()) {
-          const result = await saveProductRow(tx, row, scope);
-          // Thrown, not returned: throwing is what rolls the transaction back, so
-          // the rows before this one don't commit either.
-          if ("error" in result) throw new RowError(`Row ${i + 1} (${row.name.trim()}): ${result.error}`);
-          saved.push({ ...result, row, index: i });
+        const existingInputs = rows.map((row, index) => ({ row, index })).filter(({ row }) => Boolean(row.id));
+        const existing = existingInputs.length
+          ? await tx
+              .select({ id: items.id, companyId: items.companyId })
+              .from(items)
+              .where(and(inArray(items.id, existingInputs.map(({ row }) => row.id)), scope))
+          : [];
+        const existingById = new Map(existing.map((row) => [row.id, row.companyId]));
+        const missing = existingInputs.find(({ row }) => !existingById.has(row.id));
+        if (missing) {
+          throw new RowError(`Row ${missing.index + 1} (${missing.row.name.trim()}): this product no longer exists, or isn't in your company scope.`);
         }
+
+        const blankNewSkuCount = rows.filter((row) => !row.id && !row.sku.trim()).length;
+        const [references, skuValues] = await Promise.all([
+          resolveProductReferences(tx, rows),
+          nextSequenceRange(SKU_SCOPE, blankNewSkuCount, tx),
+        ]);
+        let skuIndex = 0;
+        const prepared = rows.map((row, index) => ({
+          row,
+          index,
+          categoryId: references[index]!.categoryId,
+          brandId: references[index]!.brandId,
+          unitId: references[index]!.unitId,
+          sku: row.sku.trim() || formatSku(skuValues[skuIndex++]),
+        }));
+        const updates = prepared.filter(({ row }) => Boolean(row.id));
+        const creates = prepared.filter(({ row }) => !row.id);
+
+        const updated = updates.length
+          ? await tx.execute<{ id: string; company_id: string }>(sql`
+              UPDATE items
+              SET name = source.name,
+                  urdu_name = source.urdu_name,
+                  category_id = source.category_id,
+                  brand_id = source.brand_id,
+                  taxable = source.taxable,
+                  is_active = source.is_active,
+                  base_unit_id = source.base_unit_id,
+                  sku = source.sku
+              FROM (VALUES ${sql.join(
+                updates.map(({ row, categoryId, brandId, unitId, sku }) => sql`(
+                  ${row.id}::uuid,
+                  ${row.name.trim()}::text,
+                  ${row.urduName.trim() || null}::text,
+                  ${categoryId}::uuid,
+                  ${brandId}::uuid,
+                  ${row.taxable}::boolean,
+                  ${row.isActive}::boolean,
+                  ${unitId}::uuid,
+                  ${sku}::text
+                )`),
+                sql`, `,
+              )}) AS source(id, name, urdu_name, category_id, brand_id, taxable, is_active, base_unit_id, sku)
+              WHERE items.id = source.id
+              RETURNING items.id, items.company_id`)
+          : [];
+        if (updated.length !== updates.length) throw new RowError("One or more products changed while this batch was being saved. Reload and try again.");
+
+        const created = creates.length
+          ? await tx
+              .insert(items)
+              .values(
+                creates.map(({ row, categoryId, brandId, unitId, sku }) => ({
+                  companyId: row.companyId,
+                  name: row.name.trim(),
+                  urduName: row.urduName.trim() || null,
+                  categoryId,
+                  brandId,
+                  taxable: row.taxable,
+                  isActive: row.isActive,
+                  baseUnitId: unitId,
+                  sku,
+                })),
+              )
+              .returning({ id: items.id, companyId: items.companyId, sku: items.sku })
+          : [];
+        const updatedById = new Map(updated.map((row) => [row.id, row.company_id]));
+        const createdByKey = new Map(created.map((row) => [`${row.companyId}::${row.sku}`, row]));
+        saved = prepared.map(({ row, index, unitId, sku }) => {
+          const createdRow = createdByKey.get(`${row.companyId}::${sku}`);
+          const itemId = row.id || createdRow?.id;
+          const companyId = row.id ? updatedById.get(row.id) : createdRow?.companyId;
+          if (!itemId || !companyId) throw new RowError(`Row ${index + 1} (${row.name.trim()}): the product could not be saved.`);
+          return { row, index, itemId, companyId, unitId };
+        });
         await rebuildItemBaseQuantities(tx, saved.map((row) => row.itemId));
         return null;
       })
@@ -520,8 +671,8 @@ export async function updateProductsBatch(
   });
 }
 
-// Carries a row-specific message out of the batch transaction. Throwing is what
-// makes the rollback happen; the message is what the user reads.
+// Carries a row-specific message out of the batch transaction. The outer guard
+// still guarantees that no mutation exception reaches the form boundary.
 class RowError extends Error {}
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -534,56 +685,6 @@ interface SavedProductRow {
   itemId: string;
   companyId: string;
   unitId: string | null;
-}
-
-// One row's catalogue record: the references it names, then the product itself.
-// Split out so updateProductsBatch reads as "check everything, save everything,
-// then file the paperwork" rather than one function doing all three.
-async function saveProductRow(
-  tx: Tx,
-  row: ProductEditInput,
-  scope: SQL | undefined,
-): Promise<{ error: string } | Omit<SavedProductRow, "row" | "index">> {
-  // A name that didn't match anything in the dropdown becomes the record — the
-  // same rule the sale and purchase grids follow, which is how half-filled items
-  // get created in the first place.
-  const refs = {
-    categoryId: await resolveCategoryId(tx, row.categoryId || null, row.categoryName),
-    brandId: await resolveBrandId(tx, row.brandId || null, row.brandName),
-    // Resolved here rather than left to the document actions because the
-    // "set stock level" delta has to measure against this exact unit.
-    unitId: await resolveUnitId(tx, row.unitId || null, row.unitName || null),
-  };
-
-  const fields = {
-    name: row.name.trim(),
-    urduName: row.urduName.trim() || null,
-    categoryId: refs.categoryId,
-    brandId: refs.brandId,
-    taxable: row.taxable,
-    isActive: row.isActive,
-    baseUnitId: refs.unitId,
-  };
-
-  const result = row.id
-    ? await tx
-        .update(items)
-        .set({ ...fields, sku: row.sku.trim() })
-        .where(and(eq(items.id, row.id), scope))
-        .returning({ id: items.id, companyId: items.companyId })
-    : // A blank SKU takes the next RH- number, allocated inside the transaction
-      // so a failed insert gives it back — same rule as createProductsBatch.
-      await (async () => {
-        const sku = row.sku.trim() || formatSku(await nextSequenceValue(SKU_SCOPE, tx));
-        return tx
-          .insert(items)
-          .values({ ...fields, sku, companyId: row.companyId })
-          .returning({ id: items.id, companyId: items.companyId });
-      })();
-
-  if (result.length === 0) return { error: "this product no longer exists, or isn't in your company scope." };
-
-  return { itemId: result[0].id, companyId: result[0].companyId, unitId: refs.unitId };
 }
 
 // A purchase invoice has one supplier and belongs to one company, so that pair is

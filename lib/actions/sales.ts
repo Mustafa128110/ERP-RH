@@ -26,7 +26,7 @@ import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/
 import { CACHE, getAvailableCheques, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
-import { financialDocumentError } from "@/lib/financial-input";
+import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
 import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment-allocation";
 import { changeSummary } from "@/lib/audit-constants";
@@ -428,9 +428,7 @@ function readLines(formData: FormData): SaleLineInput[] {
   } catch {
     return [];
   }
-  // A line counts if it has a picked item or a typed item name (created on save)
-  // and a quantity.
-  return lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
+  return itemBearingLines(lines);
 }
 
 type SaleTx = Parameters<Parameters<typeof db.transaction>[0]>[0];

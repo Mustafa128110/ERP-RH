@@ -50,7 +50,7 @@ import { inCompany } from "@/lib/contact-scope";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
 import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
-import { financialDocumentError } from "@/lib/financial-input";
+import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
 import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
@@ -406,7 +406,8 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // complete statement on its own — those keep priced lines with no quantity,
   // which is what puts the price in rate_list without moving stock.
   const ratesOnly = !documentType.affectsPayable;
-  const validLines = lines.filter(
+  const enteredLines = itemBearingLines(lines);
+  const validLines = enteredLines.filter(
     (l) => (l.itemId || l.itemName?.trim()) && (Number(l.quantity) > 0 || (ratesOnly && Number(l.unitPrice) > 0)),
   );
   if (validLines.length === 0) return { error: "Add at least one item." };
@@ -425,7 +426,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   const discountTotal = num(formData, "discountTotal", "0");
   const shippingTotal = num(formData, "shippingTotal", "0");
   const financialError = financialDocumentError(
-    validLines,
+    enteredLines,
     [
       { label: "Discount", value: discountTotal },
       { label: "Shipping", value: shippingTotal },
@@ -675,7 +676,7 @@ export async function updateStockPurchase(
   } catch (e) {
     return { error: describeDbError(e, "Invalid line items.") };
   }
-  const validLines = lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
+  const validLines = itemBearingLines(lines);
   if (validLines.length === 0) return { error: "Add at least one item." };
   // Purchased goods arrive somewhere. Left blank the line books stock that is
   // on hand but nowhere, which the Stock page can only show as Unassigned and

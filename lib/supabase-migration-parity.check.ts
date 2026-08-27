@@ -20,9 +20,10 @@ function normalizeSql(sql: string) {
 }
 
 async function main() {
-  const [drizzleFiles, supabaseFiles] = await Promise.all([
+  const [drizzleFiles, supabaseFiles, journalText] = await Promise.all([
     readdir(drizzleDirectory),
     readdir(supabaseDirectory),
+    readFile(path.join(drizzleDirectory, "meta", "_journal.json"), "utf8"),
   ]);
 
   const drizzleByNumber = new Map(
@@ -40,6 +41,15 @@ async function main() {
     [...supabaseByNumber.keys()].sort(),
     [...drizzleByNumber.keys()].sort(),
     "Supabase and Drizzle migration numbers must match exactly",
+  );
+
+  const journal = JSON.parse(journalText) as { entries?: { tag?: string }[] };
+  const journalTags = (journal.entries ?? []).map((entry) => entry.tag).filter((tag): tag is string => Boolean(tag)).sort();
+  const migrationTags = [...drizzleByNumber.values()].map((fileName) => fileName.replace(/\.sql$/, "")).sort();
+  assert.deepEqual(
+    journalTags,
+    migrationTags,
+    "Every Drizzle SQL migration must be registered in drizzle/meta/_journal.json; unjournaled files are silently skipped by drizzle-kit migrate",
   );
 
   await Promise.all(

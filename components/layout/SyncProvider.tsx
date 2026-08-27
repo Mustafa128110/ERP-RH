@@ -205,7 +205,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const browserOnline = useSyncExternalStore(subscribeOnline, getOnlineSnapshot, getOnlineServerSnapshot);
   const detectedOffline = useOffline();
   const online = browserOnline && !detectedOffline;
-  const [_, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [entries, setEntries] = useState<OutboxEntry[]>([]);
   const [cancelled, setCancelled] = useState<CancelledEntry[]>([]);
   const [syncing, setSyncing] = useState(false);

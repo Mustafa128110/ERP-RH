@@ -296,12 +296,16 @@ export const locations = pgTable("locations", {
 });
 
 // Global — a tax rate is defined once and used everywhere.
-export const taxes = pgTable("taxes", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 100 }).notNull(),
-  rate: numeric("rate", { precision: 8, scale: 4 }).notNull().default("0"),
-  isActive: boolean("is_active").notNull().default(true),
-});
+export const taxes = pgTable(
+  "taxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 100 }).notNull(),
+    rate: numeric("rate", { precision: 8, scale: 4 }).notNull().default("0"),
+    isActive: boolean("is_active").notNull().default(true),
+  },
+  (table) => [check("taxes_rate_check", sql`${table.rate} BETWEEN 0 AND 100`)],
+);
 
 export const expenseCategories = pgTable(
   "expense_categories",

@@ -23,6 +23,7 @@ import { resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
 import { averageCosts } from "@/lib/queries/stock-cost";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { UNASSIGNED_LABEL, locationFormValue, locationIdOrNull } from "@/lib/location-constants";
+import { itemBearingLines } from "@/lib/financial-input";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
@@ -169,7 +170,7 @@ function readLines(formData: FormData): TransferLineInput[] {
   } catch {
     return [];
   }
-  return lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
+  return itemBearingLines(lines);
 }
 
 // Fixed document type, same as sales invoices — never user-configured.
@@ -200,6 +201,7 @@ function readHeader(formData: FormData) {
   const fromRaw = String(formData.get("fromLocationId") ?? "");
   const toRaw = String(formData.get("toLocationId") ?? "");
   const lines = readLines(formData);
+  const invalidLine = lines.findIndex((line) => !Number.isFinite(Number(line.quantity)) || Number(line.quantity) <= 0);
 
   const error = !companyId
     ? "Company is required."
@@ -211,7 +213,9 @@ function readHeader(formData: FormData) {
           ? "Source and destination must be different locations."
           : lines.length === 0
             ? "Add at least one item."
-            : null;
+            : invalidLine >= 0
+              ? `Line ${invalidLine + 1}: quantity must be greater than zero.`
+              : null;
 
   return { companyId, documentDate, fromLocationId: locationIdOrNull(fromRaw), toLocationId: locationIdOrNull(toRaw), lines, error };
 }

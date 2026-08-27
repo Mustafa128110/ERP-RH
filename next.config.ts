@@ -1,7 +1,30 @@
 import type { NextConfig } from "next";
 
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self'",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "form-action 'self'",
+  ...(process.env.NODE_ENV === "production" ? ["upgrade-insecure-requests"] : []),
+].join("; ");
+
 const nextConfig: NextConfig = {
+  // Keep the framework default explicit. A batch grid must fit comfortably,
+  // but an authenticated caller must not be able to hand the server an
+  // unbounded JSON payload and turn one action into a memory/SQL denial of
+  // service. Next also performs its Origin-vs-Host CSRF check for these calls.
   experimental: {
+    serverActions: {
+      bodySizeLimit: "1mb",
+    },
     // Keeps Turbopack's compiler artifacts on disk between dev server restarts,
     // so a restart doesn't recompile all 54 routes from cold.
     turbopackFileSystemCacheForDev: true,
@@ -42,7 +65,9 @@ const nextConfig: NextConfig = {
       {
         source: "/(.*)",
         headers: [
-          { key: "Content-Security-Policy", value: "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'" },
+          { key: "Content-Security-Policy", value: contentSecurityPolicy },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },

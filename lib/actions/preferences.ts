@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { getSession, invalidateSessions } from "@/lib/auth/session";
+import { getLiveSession, invalidateSessions } from "@/lib/auth/session";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { isTheme, nearestStep, type ThemePreference } from "@/lib/preference-constants";
@@ -20,7 +20,7 @@ import { invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 // session rather than from anything the browser sent.
 
 async function writePrefs(patch: { uiTheme?: ThemePreference; uiScale?: number }, summary: string): Promise<ActionResult> {
-  const session = await getSession();
+  const session = await getLiveSession();
   if (!session) return { error: "You're signed out. Sign in again to change this." };
 
   await db.update(users).set(patch).where(eq(users.id, session.userId));

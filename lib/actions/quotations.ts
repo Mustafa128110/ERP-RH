@@ -15,7 +15,7 @@ import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { createSale } from "@/lib/actions/sales";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
-import { financialDocumentError } from "@/lib/financial-input";
+import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax } from "@/lib/queries/document-tax";
 
@@ -130,7 +130,7 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
     .leftJoin(documentLines, eq(documentLines.documentId, documents.id))
     .leftJoin(items, eq(items.id, documentLines.itemId))
     .where(and(eq(documentTypes.code, "QUOTATION"), scope))
-    .groupBy(documents.id, companies.name, contacts.displayName)
+    .groupBy(documents.id, companies.shortName, companies.name, contacts.displayName)
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
   return rows.map((r) => ({
@@ -232,7 +232,7 @@ function readForm(formData: FormData) {
     // A malformed payload is an empty quotation, which the check below rejects
     // with a sentence rather than a crash.
   }
-  const validLines = lines.filter((l) => (l.itemId || l.itemName?.trim()) && Number(l.quantity) > 0);
+  const validLines = itemBearingLines(lines);
 
   const financialError = financialDocumentError(validLines, [
     { label: "Discount", value: discountTotal },

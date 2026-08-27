@@ -216,7 +216,6 @@ const NO_DOMAIN: Record<string, string> = {
   roles: "permission names, not list data",
   rolePermissions: "as above",
   whatsappMessages: "read directly by the messaging log, never through a cached page-read model",
-  SCOPE_COOKIE: "not a table — cookies().delete(), which the write regex can't tell apart",
 };
 
 function tableToDomains(): Map<string, Set<ReadDomain>> {
