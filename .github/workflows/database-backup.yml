@@ -39,13 +39,13 @@ jobs:
             test -n "${!key}" || { echo "Missing required backup secret: $key"; exit 1; }
           done
 
-      - name: Install PostgreSQL 17 client and archive utility
+      - name: Install archive utility and verify PostgreSQL 17 tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes postgresql-client-17 p7zip-full
-          /usr/lib/postgresql/17/bin/pg_dump --version
+          sudo apt-get install --yes p7zip-full
+          docker run --rm postgres:17 pg_dump --version
 
       - name: Create verified encrypted backup
         id: archive
@@ -56,19 +56,22 @@ jobs:
           trap 'rm -rf "$workdir"' EXIT
           cd "$workdir"
           backup_id="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA::12}"
-          pg_dump_17=/usr/lib/postgresql/17/bin/pg_dump
+          pg_dump_17() {
+            docker run --rm --env DATABASE_URL_DIRECT --volume "$workdir:/backup" postgres:17 \
+              pg_dump "$DATABASE_URL_DIRECT" "$@"
+          }
 
           # These are ERP access roles, not PostgreSQL server roles. Hosted
           # Supabase does not grant the application account permission to dump
           # server-global roles; ERP roles/permissions are what restores access.
-          "$pg_dump_17" "$DATABASE_URL_DIRECT" --data-only --no-owner --no-privileges \
+          pg_dump_17 --data-only --no-owner --no-privileges \
             --table=public.roles --table=public.permissions --table=public.role_permissions \
-            --table=public.user_roles --file=roles.sql
-          "$pg_dump_17" "$DATABASE_URL_DIRECT" --schema-only --no-owner --no-privileges --file=schema.sql
-          "$pg_dump_17" "$DATABASE_URL_DIRECT" --data-only --no-owner --no-privileges \
+            --table=public.user_roles --file=/backup/roles.sql
+          pg_dump_17 --schema-only --no-owner --no-privileges --file=/backup/schema.sql
+          pg_dump_17 --data-only --no-owner --no-privileges \
             --exclude-table-data=public.roles --exclude-table-data=public.permissions \
             --exclude-table-data=public.role_permissions --exclude-table-data=public.user_roles \
-            --file=data.sql
+            --file=/backup/data.sql
 
           test -s roles.sql && test -s schema.sql && test -s data.sql
           roles_sha="$(sha256sum roles.sql | awk '{print $1}')"
