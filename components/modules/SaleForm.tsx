@@ -536,7 +536,7 @@ export function SaleFormPage({
 
   return (
     <>
-      <form ref={formRef} action={action} className="flex flex-col gap-5">
+      <form ref={formRef} action={action} className="sale-form flex min-w-0 flex-col gap-5">
         <input type="hidden" name="operationId" value={operationId} />
         <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
         <input
@@ -581,7 +581,7 @@ export function SaleFormPage({
         <div className="flex flex-col gap-3">
           <span className={sectionTitleClass}>Document</span>
           <div className="flex flex-wrap gap-3">
-            <label className={`${labelClass} w-56`}>
+            <label className={`${labelClass} w-full sm:w-56`}>
               <span className={labelTextClass}>Company</span>
               <select name="companyId" required value={companyId} onChange={(e) => changeCompany(e.target.value)} className={fieldClass}>
                 <option value="" disabled>
@@ -594,7 +594,7 @@ export function SaleFormPage({
                 ))}
               </select>
             </label>
-            <label className={`${labelClass} w-56`}>
+            <label className={`${labelClass} w-full sm:w-56`}>
               <span className={labelTextClass}>Customer</span>
               <ComboBox
                 value={customerText}
@@ -610,11 +610,11 @@ export function SaleFormPage({
               <input type="hidden" name="contactId" value={contactId} />
               <input type="hidden" name="contactName" value={customerText} />
             </label>
-            <label className={`${labelClass} w-40`}>
+            <label className={`${labelClass} w-full sm:w-40`}>
               <span className={labelTextClass}>Document Date</span>
               <DateField name="documentDate" required defaultValue={defaults?.documentDate ?? todayISO()} className={fieldClass} />
             </label>
-            <label className={`${labelClass} w-44`}>
+            <label className={`${labelClass} w-full sm:w-44`}>
               <span className={labelTextClass}>Type</span>
               {/* Counter is preselected rather than left blank: it's what nearly
                   every sale is, and the other two exist to be told apart from it
@@ -631,7 +631,7 @@ export function SaleFormPage({
                 block is below the fold on a long sale — so they're repeated here
                 at the end of the header row, styled exactly as they are down
                 there. */}
-            <div className="ml-auto flex flex-col items-end justify-end gap-0.5 text-sm text-ink">{totalsBlock}</div>
+            <div className="flex w-full flex-col items-end justify-end gap-0.5 text-sm text-ink sm:ml-auto sm:w-auto">{totalsBlock}</div>
           </div>
         </div>
 
@@ -639,8 +639,8 @@ export function SaleFormPage({
             it isn't shown here; the server stamps it on save. --- */}
         <div className="flex flex-col gap-2">
           <span className={sectionTitleClass}>Items</span>
-          <div className="overflow-x-auto rounded border border-sand">
-            <table className="w-full border-collapse text-sm">
+          <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
+            <table className="sale-items-grid w-full border-collapse text-sm">
               <thead>
                 <tr>
                   <th className={`${thClass} w-10 text-right`}>#</th>
@@ -660,8 +660,8 @@ export function SaleFormPage({
                 {lines.map((line, r) => (
                   <tr key={r}>
                     {/* Row number: the line's position, not something typed into. */}
-                    <td className="border border-sand px-2 text-right text-xs tabular-nums text-steel">{r + 1}</td>
-                    <td className={tdClass}>
+                    <td className="sale-line-number border border-sand px-2 text-right text-xs tabular-nums text-steel">{r + 1}</td>
+                    <td className={`${tdClass} sale-line-item`}>
                       <ComboBox
                         value={line.itemText}
                         options={visibleItems}
@@ -669,27 +669,28 @@ export function SaleFormPage({
                         className={cellInput}
                         // data-shortcut="i" marks the first line's item box so
                         // Ctrl+I can jump to it from anywhere in the form.
-                        inputProps={{ "data-cell": `${r}-0`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
+                        inputProps={{ "data-cell": `${r}-0`, "aria-label": `Item for line ${r + 1}`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                         onChange={(name) => pickItem(r, name)}
                       />
                     </td>
-                    <td className={tdClass}>
+                    <td data-label="Unit" className={`${tdClass} sale-line-unit`}>
                       <ComboBox
                         value={line.unitText}
                         options={unitsForLine(line)}
                         placeholder="Unit"
                         className={cellInput}
-                        inputProps={{ "data-cell": `${r}-1` }}
+                        inputProps={{ "data-cell": `${r}-1`, "aria-label": `Unit for line ${r + 1}` }}
                         onChange={(name) => pickUnit(r, name)}
                       />
                     </td>
-                    <td className={tdClass}>
+                    <td data-label="Quantity" className={`${tdClass} sale-line-quantity`}>
                       <input
                         data-cell={`${r}-2`}
                         type="number"
                         min="0"
                         step="0.01"
                         placeholder="Qty"
+                        aria-label={`Quantity for line ${r + 1}`}
                         value={line.quantity}
                         onChange={(e) => updateLine(r, { quantity: e.target.value })}
                         className={`${cellInput} text-right`}
@@ -698,36 +699,38 @@ export function SaleFormPage({
                     {/* Cost rate: prefilled from the rate list when the item has
                         purchase history, typed in when it doesn't (a new item has
                         no history, and this is where its first rate comes from). */}
-                    <td className={tdClass}>
+                    <td data-label="Rate list" className={`${tdClass} sale-line-rate`}>
                       <input
                         data-cell={`${r}-3`}
                         type="number"
                         min="0"
                         step="0.1"
                         placeholder="Rate"
+                        aria-label={`Rate list for line ${r + 1}`}
                         value={line.listPrice}
                         onChange={(e) => updateLine(r, { listPrice: e.target.value })}
                         className={`${cellInput} text-right text-steel`}
                       />
                     </td>
-                    <td className={tdClass}>
+                    <td data-label="Unit price" className={`${tdClass} sale-line-price`}>
                       <input
                         data-cell={`${r}-4`}
                         type="number"
                         min="0"
                         step="0.1"
                         placeholder="Price"
+                        aria-label={`Unit price for line ${r + 1}`}
                         value={line.unitPrice}
                         onChange={(e) => updateLine(r, { unitPrice: e.target.value })}
                         className={`${cellInput} text-right`}
                       />
                     </td>
-                    <td className="border border-sand px-2 text-right tabular-nums text-steel">
+                    <td className="sale-line-total border border-sand px-2 text-right tabular-nums text-steel">
                       {/* Blank on an untouched row rather than 0.00 — the empty
                           rows are just spare space to type into. */}
-                      {line.quantity && line.unitPrice ? money((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) : ""}
+                      <span className="numeric-contain" aria-label={`Line ${r + 1} total`}>{line.quantity && line.unitPrice ? money((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) : ""}</span>
                     </td>
-                    <td className="border border-sand text-center">
+                    <td data-label="Market buy" className="sale-line-market border border-sand text-center">
                       <input
                         type="checkbox"
                         checked={Boolean(line.marketPurchase)}
@@ -736,7 +739,7 @@ export function SaleFormPage({
                         className="h-4 w-4 accent-navy-800"
                       />
                     </td>
-                    <td className="border border-sand text-center">
+                    <td className="sale-line-remove border border-sand text-center">
                       <button
                         type="button"
                         onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== r) : prev))}
@@ -759,7 +762,7 @@ export function SaleFormPage({
           <div className="flex flex-wrap gap-3">
             {/* Text, not number: "5%" has to be typeable. What goes to the
                 server is still the resolved amount in the hidden field. */}
-            <label className={`${labelClass} w-40`}>
+            <label className={`${labelClass} w-full sm:w-40`}>
               <span className={labelTextClass}>Discount</span>
               <input
                 type="text"
@@ -772,7 +775,7 @@ export function SaleFormPage({
               />
               <input type="hidden" name="discountTotal" value={discountAmount.toFixed(2)} />
             </label>
-            <label className={`${labelClass} w-56`}>
+            <label className={`${labelClass} w-full sm:w-56`}>
               <span className={labelTextClass}>Tax</span>
               <select name="taxId" data-shortcut="t" value={taxId} onChange={(event) => setTaxId(event.target.value)} className={fieldClass}>
                 <option value="">No tax</option>
@@ -780,7 +783,7 @@ export function SaleFormPage({
               </select>
               {selectedTax && <span className="text-xs text-steel">{taxInclusive ? "Included in taxable prices" : "Added to taxable products"}</span>}
             </label>
-            <label className={`${labelClass} w-40`}>
+            <label className={`${labelClass} w-full sm:w-40`}>
               <span className={labelTextClass}>Shipping Total</span>
               <input
                 name="shippingTotal"
@@ -802,7 +805,7 @@ export function SaleFormPage({
         </div>
 
         <div className="flex flex-wrap items-start gap-3">
-          <label className={`${labelClass} w-52`}>
+          <label className={`${labelClass} w-full sm:w-52`}>
             <span className={labelTextClass}>Paid?</span>
             <select name="isPaid" value={isPaid} onChange={(e) => setIsPaid(e.target.value as PaidMode)} className={fieldClass}>
               <option value="no">No</option>
@@ -811,7 +814,7 @@ export function SaleFormPage({
             </select>
           </label>
           {isPaid === "partial" && (
-            <label className={`${labelClass} w-40`}>
+            <label className={`${labelClass} w-full sm:w-40`}>
               <span className={labelTextClass}>Amount Paid</span>
               <input
                 type="number"
@@ -839,7 +842,7 @@ export function SaleFormPage({
         {isPaid !== "no" && (
           <div className="flex flex-col gap-3 rounded border border-sand p-3">
             <span className={sectionTitleClass}>Payment</span>
-            <div className={`${labelClass} w-72`}>
+            <div className={`${labelClass} w-full sm:w-72`}>
               <span className={labelTextClass}>Settle via</span>
               <div className="flex gap-2">
                 {SETTLEMENT_TYPES.map((t) => (
@@ -857,7 +860,7 @@ export function SaleFormPage({
               </div>
             </div>
             <input type="hidden" name="settlementType" value={settlementType} />
-            <label className={`${labelClass} w-56`}>
+            <label className={`${labelClass} w-full sm:w-56`}>
               <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
               {/* Keyed on the company too: switching it changes both the option
                   list and which drawer is the default. */}
@@ -876,13 +879,13 @@ export function SaleFormPage({
         )}
 
         {state?.error && (
-          <p className={state.needsConfirmation ? confirmNoticeClass : errorTextClass}>{state.error}</p>
+          <p role={state.needsConfirmation ? "status" : "alert"} aria-live="polite" className={state.needsConfirmation ? confirmNoticeClass : errorTextClass}>{state.error}</p>
         )}
         {state?.success &&
           (isEdit ? (
-            <p className={successTextClass}>Saved.</p>
+            <p role="status" aria-live="polite" className={successTextClass}>Saved.</p>
           ) : (
-            <p className={successTextClass}>
+            <p role="status" aria-live="polite" className={successTextClass}>
               Sale created — form cleared for the next one.{" "}
               {state.id && (
                 <Link href={`/sales/${state.id}`} className="underline">
@@ -891,11 +894,11 @@ export function SaleFormPage({
               )}
             </p>
           ))}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
           <button
             type="submit"
             disabled={pending}
-            className={`h-12 w-fit rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40${confirming ? " ring-2 ring-warning" : ""}`}
+            className={`h-12 w-full rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40 sm:w-fit${confirming ? " ring-2 ring-warning" : ""}`}
           >
             {pending ? (isEdit ? "Saving…" : "Creating…") : confirming ? "Confirm & Save" : isEdit ? "Save" : "Create Sale"}
           </button>

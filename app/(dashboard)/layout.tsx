@@ -8,6 +8,7 @@ import { SessionSeed } from "@/components/layout/SessionSeed";
 import { SyncProvider } from "@/components/layout/SyncProvider";
 import { OfflineNotice } from "@/components/layout/OfflineNotice";
 import { OfflineReadiness } from "@/components/layout/OfflineReadiness";
+import { ExportShareProvider } from "@/components/ui/ExportShareSheet";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
@@ -25,31 +26,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* Who this browser is, for the user-scoped local persistence. */}
       <SessionSeed userId={session.userId} />
       <SyncProvider>
-      {/* Seeds the client reference cache with the offline workflows' minimum
-          data after login — renders nothing. */}
-      <OfflineReadiness />
-      <KeyboardShortcuts />
-      <div className="contents print:hidden">
-        <Sidebar permissions={[...permissions]} />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:block print:overflow-visible">
-        <div className="print:hidden">
-          <Topbar username={session.name} companies={companies} selected={selected} />
-        </div>
-        {/* Sits above the scroll container, not inside it, so the sentence stays
-            put while a long list scrolls under it. Renders nothing when online. */}
-        <OfflineNotice />
-        {/* Tighter gutters on a phone — 24px each side of a 360px screen is a
-            sixth of it. pb picks up the home-indicator inset on iOS, which
-            otherwise sits over the last row of a list. */}
-        {/* Gutters tightened from p-3/4/6: the list underneath is the reason
-            the screen exists, and a 24px frame on a 1080p monitor was costing
-            it two rows. pb picks up the home-indicator inset on iOS, which
-            otherwise sits over the last row of a list. */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4 print:overflow-visible print:bg-white print:p-0">
-          {children}
-        </main>
-      </div>
+        <ExportShareProvider>
+          {/* Seeds the client reference cache with the offline workflows' minimum
+              data after login — renders nothing. */}
+          <OfflineReadiness />
+          <KeyboardShortcuts />
+          <div className="contents print:hidden">
+            <Sidebar permissions={[...permissions]} />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:block print:overflow-visible">
+            <div className="print:hidden">
+              <Topbar username={session.name} companies={companies} selected={selected} />
+            </div>
+            {/* Sits above the scroll container, not inside it, so the sentence stays
+                put while a long list scrolls under it. Renders nothing when online. */}
+            <OfflineNotice />
+            {/* Gutters are deliberately tight: a 24px frame consumes a sixth of a
+                360px screen. The bottom inset clears the iOS home indicator. */}
+            <main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4 print:overflow-visible print:bg-white print:p-0">
+              {children}
+            </main>
+          </div>
+        </ExportShareProvider>
       </SyncProvider>
     </div>
   );

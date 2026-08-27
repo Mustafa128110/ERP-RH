@@ -305,7 +305,7 @@ function CostSheet() {
             + Add Row
           </button>
         </div>
-        <div className="overflow-x-auto rounded border border-sand">
+        <div className="matrix-scroll overflow-x-auto rounded border border-sand">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-sand bg-ivory text-left text-[10px] uppercase tracking-wide text-steel">
@@ -407,7 +407,7 @@ function CostSheet() {
             + Add Row
           </button>
         </div>
-        <div className="overflow-x-auto rounded border border-sand">
+        <div className="matrix-scroll overflow-x-auto rounded border border-sand">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-sand bg-ivory text-left text-[10px] uppercase tracking-wide text-steel">
@@ -730,7 +730,7 @@ function TaxSheet() {
             + Add Row
           </button>
         </div>
-        <div className="overflow-x-auto rounded border border-sand">
+        <div className="matrix-scroll overflow-x-auto rounded border border-sand">
           <table className="w-full text-[10px]">
             <thead>
               <tr className="border-b border-sand bg-ivory text-left uppercase tracking-wide text-steel">
@@ -870,7 +870,7 @@ function TaxSheet() {
             + Add
           </button>
         </div>
-        <div className="overflow-x-auto rounded border border-sand">
+        <div className="matrix-scroll overflow-x-auto rounded border border-sand">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-sand bg-ivory text-left text-[10px] uppercase tracking-wide text-steel">

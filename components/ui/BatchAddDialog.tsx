@@ -265,7 +265,7 @@ export function BatchAddDialog<T, C = unknown>({
 
       {/* Blank rows are ignored by the server actions, so leaving spares at the
           bottom is harmless — the header stays put while the rows scroll. */}
-      <div className="scroll-thin overflow-auto rounded border border-sand">
+      <div className="matrix-scroll scroll-thin overflow-auto rounded border border-sand">
         <table className="w-full min-w-max border-collapse text-sm">
           <thead>
             <tr className="sticky top-0 z-10 bg-ivory">

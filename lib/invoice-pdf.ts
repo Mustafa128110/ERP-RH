@@ -5,6 +5,7 @@
 // should not pay for the printer on the way in.
 import type { jsPDF } from "jspdf";
 import { formatDate, money, qty } from "@/lib/format";
+import { downloadExportFile, type ExportFile } from "@/lib/node-download";
 
 // What an invoice looks like once it's for reading rather than editing: names,
 // not ids. getInvoice() returns this plus a few internals (id, status, code)
@@ -220,6 +221,12 @@ export async function buildInvoicePdf(invoice: Invoice): Promise<jsPDF> {
 }
 
 // One click, no dialog: this writes the file and returns.
-export async function downloadInvoicePdf(invoice: Invoice) {
-  (await buildInvoicePdf(invoice)).save(invoiceFileName(invoice));
+export async function downloadInvoicePdf(invoice: Invoice): Promise<ExportFile> {
+  const file = {
+    blob: (await buildInvoicePdf(invoice)).output("blob"),
+    filename: invoiceFileName(invoice),
+    mimeType: "application/pdf",
+  };
+  downloadExportFile(file);
+  return file;
 }

@@ -201,7 +201,7 @@ export function InterCompanyFormPage({
   const total = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.rate) || 0), 0);
 
   return (
-    <form ref={formRef} action={action} className="flex flex-col gap-5">
+    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -300,8 +300,8 @@ export function InterCompanyFormPage({
 
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
-        <div className="overflow-x-auto rounded border border-sand">
-          <table className="w-full border-collapse text-sm">
+        <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
+          <table className="document-lines-grid w-full border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>
@@ -316,8 +316,8 @@ export function InterCompanyFormPage({
             <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>
               {lines.map((line, r) => (
                 <tr key={r}>
-                  <td className="border border-sand px-2 text-right text-xs tabular-nums text-steel">{r + 1}</td>
-                  <td className={tdClass}>
+                  <td className="document-line-number border border-sand px-2 text-right text-xs tabular-nums text-steel">{r + 1}</td>
+                  <td data-label="Item" className={`${tdClass} document-line-item`}>
                     <ComboBox
                       value={line.itemText}
                       options={sellerItems}
@@ -327,48 +327,50 @@ export function InterCompanyFormPage({
                       // Ctrl+I can jump to it from anywhere in the form. An
                       // inter-company sale has no discount/tax/shipping, so
                       // only this one jump exists here.
-                      inputProps={{ "data-cell": `${r}-0`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
+                      inputProps={{ "data-cell": `${r}-0`, "aria-label": `Item for line ${r + 1}`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                       onChange={(name) => pickItem(r, name)}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Unit" className={`${tdClass} document-line-fact`}>
                     <ComboBox
                       value={line.unitText}
                       options={unitOptions}
                       placeholder="Unit"
                       className={cellInput}
-                      inputProps={{ "data-cell": `${r}-1` }}
+                      inputProps={{ "data-cell": `${r}-1`, "aria-label": `Unit for line ${r + 1}` }}
                       onChange={(name) => updateLine(r, { unitText: name, unitId: unitOptions.find((u) => u.name === name)?.id ?? "" })}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Qty" className={`${tdClass} document-line-fact`}>
                     <input
                       data-cell={`${r}-2`}
                       type="number"
                       min="0"
                       step="0.01"
                       placeholder="Qty"
+                      aria-label={`Quantity for line ${r + 1}`}
                       value={line.quantity}
                       onChange={(e) => updateLine(r, { quantity: e.target.value })}
                       className={`${cellInput} text-right`}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Rate" className={`${tdClass} document-line-fact`}>
                     <input
                       data-cell={`${r}-3`}
                       type="number"
                       min="0"
                       step="0.1"
                       placeholder="Rate"
+                      aria-label={`Rate for line ${r + 1}`}
                       value={line.rate}
                       onChange={(e) => updateLine(r, { rate: e.target.value })}
                       className={`${cellInput} text-right`}
                     />
                   </td>
-                  <td className="border border-sand px-2 text-right tabular-nums text-steel">
-                    {line.quantity && line.rate ? money((Number(line.quantity) || 0) * (Number(line.rate) || 0)) : ""}
+                  <td data-label="Total" className="document-line-fact border border-sand px-2 text-right tabular-nums text-steel">
+                    <span className="numeric-contain">{line.quantity && line.rate ? money((Number(line.quantity) || 0) * (Number(line.rate) || 0)) : ""}</span>
                   </td>
-                  <td className="border border-sand text-center">
+                  <td data-label="Remove" className="document-line-action border border-sand text-center">
                     <button
                       type="button"
                       onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== r) : prev))}
@@ -394,7 +396,7 @@ export function InterCompanyFormPage({
           : "Creates a sales invoice in the seller and a purchase invoice in the buyer, both unpaid — the seller is owed, the buyer owes. Settle either one from its own page."}
       </p>
 
-      {state?.error && <p className={errorTextClass}>{state.error}</p>}
+      {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
       {state?.success &&
         (isEdit ? (
           <p className={successTextClass}>Saved — both documents re-posted to match.</p>

@@ -6,7 +6,7 @@ import type { ReportResult } from "@/lib/queries/reports";
 import type { ReportSlug } from "@/lib/report-constants";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { iconButtonClass } from "@/components/ui/form-styles";
+import { errorTextClass, iconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import { money, qty } from "@/lib/format";
 import type { ColumnDef, Row } from "@/lib/table";
@@ -100,7 +100,7 @@ export function ReportView({
       </PageHeader>
 
       {report.note && <p className="shrink-0 rounded border border-sand bg-ivory p-3 text-sm text-steel">{report.note}</p>}
-      {error && <p className="shrink-0 text-sm text-error">{error}</p>}
+      {error && <p role="alert" className={`${errorTextClass} shrink-0`}>{error}</p>}
 
       <DataTable
         columns={columns}
@@ -111,13 +111,13 @@ export function ReportView({
       />
 
       {report.totals && (
-        <dl className="flex shrink-0 flex-wrap justify-end gap-6 rounded-lg border border-sand bg-white px-4 py-3">
+        <dl className="flex shrink-0 flex-col gap-3 rounded-lg border border-sand bg-white px-4 py-3 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-6">
           {report.columns
             .filter((c) => c.money || c.qty)
             .map((c) => (
-              <div key={c.key} className="flex items-baseline gap-2">
+              <div key={c.key} className="flex min-w-0 items-baseline justify-between gap-2 sm:justify-start">
                 <dt className="text-xs uppercase tracking-wide text-steel">{c.label}</dt>
-                <dd className="text-base font-semibold tabular-nums text-navy-800">{format(c, report.totals![c.key])}</dd>
+                <dd className="numeric-contain text-right text-base font-semibold tabular-nums text-navy-800">{format(c, report.totals![c.key])}</dd>
               </div>
             ))}
         </dl>

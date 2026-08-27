@@ -183,7 +183,7 @@ export function StockTransferFormPage({
   }
 
   return (
-    <form ref={formRef} action={action} className="flex flex-col gap-5">
+    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -255,8 +255,8 @@ export function StockTransferFormPage({
 
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
-        <div className="overflow-x-auto rounded border border-sand">
-          <table className="w-full border-collapse text-sm">
+        <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
+          <table className="document-lines-grid w-full border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>
@@ -269,8 +269,8 @@ export function StockTransferFormPage({
             <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>
               {lines.map((line, r) => (
                 <tr key={r}>
-                  <td className="border border-sand px-2 text-right text-xs tabular-nums text-steel">{r + 1}</td>
-                  <td className={tdClass}>
+                  <td className="document-line-number border border-sand px-2 text-right text-xs tabular-nums text-steel">{r + 1}</td>
+                  <td data-label="Item" className={`${tdClass} document-line-item`}>
                     <ComboBox
                       value={line.itemText}
                       options={visibleItems}
@@ -280,33 +280,34 @@ export function StockTransferFormPage({
                       // Ctrl+I can jump to it from anywhere in the form. A
                       // transfer has no discount/tax/shipping, so only this
                       // one jump exists here.
-                      inputProps={{ "data-cell": `${r}-0`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
+                      inputProps={{ "data-cell": `${r}-0`, "aria-label": `Item for line ${r + 1}`, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                       onChange={(name) => updateLine(r, { itemText: name, itemId: visibleItems.find((it) => it.name === name)?.id ?? "" })}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Unit" className={`${tdClass} document-line-fact`}>
                     <ComboBox
                       value={line.unitText}
                       options={unitOptions}
                       placeholder="Unit"
                       className={cellInput}
-                      inputProps={{ "data-cell": `${r}-1` }}
+                      inputProps={{ "data-cell": `${r}-1`, "aria-label": `Unit for line ${r + 1}` }}
                       onChange={(name) => updateLine(r, { unitText: name, unitId: unitOptions.find((u) => u.name === name)?.id ?? "" })}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Qty" className={`${tdClass} document-line-fact`}>
                     <input
                       data-cell={`${r}-2`}
                       type="number"
                       min="0"
                       step="0.01"
-                      placeholder="Qty"
+                    placeholder="Qty"
+                    aria-label={`Quantity for line ${r + 1}`}
                       value={line.quantity}
                       onChange={(e) => updateLine(r, { quantity: e.target.value })}
                       className={`${cellInput} text-right`}
                     />
                   </td>
-                  <td className="border border-sand text-center">
+                  <td data-label="Remove" className="document-line-action border border-sand text-center">
                     <button
                       type="button"
                       onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== r) : prev))}
@@ -323,7 +324,7 @@ export function StockTransferFormPage({
         </div>
       </div>
 
-      {state?.error && <p className={errorTextClass}>{state.error}</p>}
+      {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
       {state?.success &&
         (isEdit ? (
           <p className={successTextClass}>Saved — stock re-posted to match.</p>

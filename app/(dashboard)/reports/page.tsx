@@ -14,9 +14,9 @@ export default function Page() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {REPORT_TYPES.map((r) => (
-          <Link key={r.slug} href={`/reports/${r.slug}`} className="rounded-lg border border-sand bg-white p-4 hover:border-navy-800">
-            <p className="text-sm font-semibold text-navy-800">{r.label}</p>
-            <p className="mt-1 text-xs text-steel">{r.desc}</p>
+          <Link key={r.slug} href={`/reports/${r.slug}`} className="min-w-0 rounded-lg border border-sand bg-white p-4 hover:border-navy-800">
+            <p className="safe-wrap text-sm font-semibold text-navy-800">{r.label}</p>
+            <p className="safe-wrap mt-1 text-xs text-steel">{r.desc}</p>
           </Link>
         ))}
       </div>

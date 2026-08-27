@@ -452,16 +452,482 @@ tr[data-pending] {
 }
 
 /*
- * Phone layout for the list tables.
- *
- * The tables stay tables on every screen size: rows keep their columns and the
- * header stays put, and the horizontal overflow just scrolls inside the same
- * container it does on a desktop. A row that has to become a card to fit loses
- * the at-a-glance column reading that is the whole point of a data table, so
- * there is no card conversion below the md breakpoint.
+ * Desktop layout for list tables. The compact tabular reading model remains at
+ * md and up; the explicit mobile card transformation below keeps every fact
+ * readable rather than requiring a 360px screen to pan across a desktop grid.
  */
 table[data-responsive] {
   min-width: max-content;
+}
+
+/* Mobile lists keep the one shared DataTable component and its keyboard model,
+ * but stop asking a 360px screen to impersonate a desktop spreadsheet. The
+ * existing cells become labelled facts; no information is dropped and a
+ * user-entered name or large amount has a real wrapping boundary. */
+@media (max-width: 767px) {
+  .mobile-data-list {
+    overflow-x: hidden;
+  }
+  table[data-responsive],
+  table[data-responsive] tbody {
+    display: block;
+    width: 100%;
+  }
+  table[data-responsive] {
+    min-width: 0;
+  }
+  table[data-responsive] td.hidden {
+    display: none;
+  }
+  table[data-responsive] thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  table[data-responsive] tbody {
+    padding: 0.5rem;
+  }
+  table[data-responsive] tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: relative;
+    width: 100%;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+    border: 1px solid var(--color-sand);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+  }
+  table[data-responsive] tr:last-child {
+    margin-bottom: 0;
+  }
+  table[data-responsive] td,
+  table[data-responsive] td.p-0 {
+    display: flex;
+    width: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.3rem;
+    min-width: 0;
+    padding: 0.625rem 0.75rem !important;
+    border: 0;
+    border-bottom: 1px solid var(--color-sand);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  table[data-responsive] td:last-child {
+    border-bottom: 0;
+  }
+  table[data-responsive] td::before {
+    content: attr(data-label);
+    min-width: 0;
+    color: var(--color-steel);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+  }
+  table[data-responsive] td[data-label=""] {
+    min-height: 3.25rem;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  table[data-responsive] td[data-label=""]::before {
+    display: none;
+  }
+  table[data-responsive] td > *,
+  table[data-responsive] td a,
+  table[data-responsive] td span {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  table[data-responsive] td a {
+    padding: 0 !important;
+    white-space: normal;
+  }
+  table[data-responsive] .truncate {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+  }
+}
+
+/* Compact fact containers used outside DataTable must carry the same containment
+ * promise. They are intentionally small utilities, not a second card system. */
+.safe-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.numeric-contain {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 639px) {
+  .document-form [class~="w-40"],
+  .document-form [class~="w-44"],
+  .document-form [class~="w-48"],
+  .document-form [class~="w-52"],
+  .document-form [class~="w-56"],
+  .document-form [class~="w-64"],
+  .document-form [class~="w-72"] {
+    width: 100%;
+    min-width: 0;
+  }
+  .document-form > .flex > .h-12.w-fit,
+  .document-form > .flex button[type="submit"] {
+    width: 100%;
+  }
+}
+
+/* Sale lines are a fast desktop grid. On phones the exact same inputs become a
+ * two-level card: item owns the full first row; its commercial facts sit below.
+ * The source order remains logical for screen readers and keyboard grid keys. */
+@media (max-width: 767px) {
+  .sale-items-grid,
+  .sale-items-grid tbody,
+  .sale-items-grid tr {
+    display: block;
+    width: 100%;
+  }
+  .sale-items-grid thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .sale-items-grid tbody {
+    padding: 0.5rem;
+  }
+  .sale-items-grid tr {
+    display: grid;
+    grid-template-columns: 1.05fr 0.8fr 0.95fr 0.95fr 1.85fr;
+    position: relative;
+    margin-bottom: 0.625rem;
+    overflow: hidden;
+    border: 1px solid var(--color-sand);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+  }
+  .sale-items-grid td {
+    min-width: 0;
+    border: 0 !important;
+    border-bottom: 1px solid var(--color-sand) !important;
+  }
+  .sale-items-grid .sale-line-number {
+    position: absolute;
+    z-index: 1;
+    top: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    border: 0 !important;
+    pointer-events: none;
+  }
+  .sale-items-grid .sale-line-item {
+    grid-column: 1 / -1;
+    padding-left: 2.5rem;
+  }
+  .sale-items-grid .sale-line-unit,
+  .sale-items-grid .sale-line-quantity,
+  .sale-items-grid .sale-line-rate,
+  .sale-items-grid .sale-line-price,
+  .sale-items-grid .sale-line-total {
+    display: flex;
+    min-width: 0;
+    min-height: 4.5rem;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 0.2rem;
+    padding: 0.4rem 0.2rem;
+  }
+  .sale-items-grid .sale-line-total {
+    justify-content: flex-end;
+    font-size: 0.66rem;
+    line-height: 1.2;
+    text-align: right;
+    font-weight: 600;
+  }
+  .sale-items-grid .sale-line-total::before {
+    content: "Total";
+    color: var(--color-steel);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+  }
+  .sale-items-grid .sale-line-market,
+  .sale-items-grid .sale-line-remove {
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 0 !important;
+  }
+  .sale-items-grid .sale-line-market { grid-column: 1 / span 2; }
+  .sale-items-grid .sale-line-remove { grid-column: 3 / -1; }
+  .sale-items-grid .sale-line-remove {
+    justify-content: flex-end;
+  }
+  .sale-items-grid .sale-line-remove button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+  .sale-items-grid .sale-line-unit::before,
+  .sale-items-grid .sale-line-quantity::before,
+  .sale-items-grid .sale-line-rate::before,
+  .sale-items-grid .sale-line-price::before,
+  .sale-items-grid .sale-line-market::before {
+    content: attr(data-label);
+    color: var(--color-steel);
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+  .sale-items-grid .sale-line-quantity::before { content: "Qty"; }
+  .sale-items-grid .sale-line-rate::before { content: "Rate"; }
+  .sale-items-grid .sale-line-price::before { content: "Price"; }
+  .sale-items-grid .sale-line-total::before {
+    align-self: flex-start;
+    font-size: 0.625rem;
+    letter-spacing: 0;
+  }
+  .sale-items-grid input,
+  .sale-items-grid [role="combobox"] {
+    min-width: 0;
+  }
+  .sale-items-grid .sale-line-unit input,
+  .sale-items-grid .sale-line-quantity input,
+  .sale-items-grid .sale-line-rate input,
+  .sale-items-grid .sale-line-price input {
+    padding-inline: 0.15rem;
+    font-size: 0.75rem;
+  }
+
+  .invoice-lines table,
+  .invoice-lines tbody,
+  .invoice-lines tr,
+  .invoice-lines td {
+    display: block;
+    width: 100%;
+  }
+  .invoice-lines table {
+    min-width: 0;
+  }
+  .invoice-lines thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .invoice-lines tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+    border: 1px solid var(--color-sand);
+    border-radius: var(--radius-md);
+  }
+  .invoice-lines td {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.625rem 0.75rem;
+    border: 0;
+    border-bottom: 1px solid var(--color-sand);
+    overflow-wrap: anywhere;
+  }
+  .invoice-lines td::before {
+    content: attr(data-label);
+    color: var(--color-steel);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+  }
+  .invoice-lines td:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr);
+    font-weight: 600;
+  }
+  .invoice-lines td:nth-child(2)::before {
+    display: none;
+  }
+  .invoice-lines td:last-child,
+  .invoice-lines td:nth-last-child(2) {
+    border-bottom: 0;
+  }
+
+  /* Other document editors share the sale principle without pretending every
+   * document has the same financial columns. Their item is the first full row;
+   * labelled facts wrap in a compact three-column grid and actions stay below. */
+  .document-lines-grid,
+  .document-lines-grid tbody,
+  .document-lines-grid tr {
+    display: block;
+    width: 100%;
+  }
+  .document-lines-grid {
+    min-width: 0 !important;
+  }
+  .document-lines-grid thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .document-lines-grid tbody { padding: 0.5rem; }
+  .document-lines-grid tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    position: relative;
+    margin-bottom: 0.625rem;
+    overflow: hidden;
+    border: 1px solid var(--color-sand);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+  }
+  .document-lines-grid td {
+    min-width: 0;
+    border: 0 !important;
+    border-bottom: 1px solid var(--color-sand) !important;
+  }
+  .document-lines-grid .document-line-number {
+    position: absolute;
+    z-index: 1;
+    top: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    border: 0 !important;
+    pointer-events: none;
+  }
+  .document-lines-grid .document-line-item {
+    grid-column: 1 / -1;
+    min-height: 3.25rem;
+    padding-left: 2.5rem;
+  }
+  .document-lines-grid .document-line-fact {
+    display: flex;
+    min-width: 0;
+    min-height: 4.25rem;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 0.2rem;
+    padding: 0.4rem;
+    overflow-wrap: anywhere;
+  }
+  .document-lines-grid .document-line-fact::before,
+  .document-lines-grid .document-line-action::before {
+    content: attr(data-label);
+    color: var(--color-steel);
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+  .document-lines-grid .document-line-action {
+    grid-column: 1 / -1;
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 0 !important;
+  }
+  .document-lines-grid .document-line-action button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+  .document-lines-grid input,
+  .document-lines-grid select,
+  .document-lines-grid [role="combobox"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .detail-lines-grid,
+  .detail-lines-grid tbody,
+  .detail-lines-grid tr,
+  .detail-lines-grid td {
+    display: block;
+    width: 100%;
+  }
+  .detail-lines-grid { min-width: 0 !important; }
+  .detail-lines-grid thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .detail-lines-grid tbody { padding: 0.5rem; }
+  .detail-lines-grid tr {
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+    border: 1px solid var(--color-sand);
+    border-radius: var(--radius-md);
+  }
+  .detail-lines-grid td {
+    display: grid;
+    grid-template-columns: minmax(6rem, 0.8fr) minmax(0, 1.2fr);
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0.625rem 0.75rem;
+    border: 0;
+    border-bottom: 1px solid var(--color-sand);
+    overflow-wrap: anywhere;
+  }
+  .detail-lines-grid td::before {
+    content: attr(data-label);
+    color: var(--color-steel);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+}
+
+/* Wide comparative ledgers, role matrices and paste grids keep their columns;
+ * they must be contained, visibly swipeable, and never widen the page itself. */
+.matrix-scroll {
+  position: relative;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+}
+@media (max-width: 767px) {
+  .matrix-scroll::after {
+    content: "Swipe for more columns";
+    position: sticky;
+    left: 0.5rem;
+    bottom: 0.5rem;
+    display: inline-block;
+    margin: 0.5rem;
+    border-radius: 999px;
+    background: var(--color-navy-800);
+    padding: 0.25rem 0.5rem;
+    color: var(--color-white);
+    font-size: 0.6875rem;
+    pointer-events: none;
+  }
+  .matrix-scroll table th:first-child,
+  .matrix-scroll table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--color-white);
+  }
 }
 
 /*
@@ -484,10 +950,21 @@ table[data-responsive] {
   animation: reveal-right 150ms ease-out;
 }
 
+@keyframes route-in {
+  from { opacity: 0; transform: translateY(0.35rem); }
+  to { opacity: 1; transform: none; }
+}
+.route-transition {
+  animation: route-in 180ms ease-out;
+}
+
 /* Someone who has asked the OS to stop moving things gets the end state
    immediately, not a slower version of the movement. */
 @media (prefers-reduced-motion: reduce) {
   .reveal-right {
+    animation: none;
+  }
+  .route-transition {
     animation: none;
   }
   html {

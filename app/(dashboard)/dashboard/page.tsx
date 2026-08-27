@@ -21,7 +21,7 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="Today's Sales" value={money(data.todaySales)} />
         <StatCard label="Today's Purchases" value={money(data.todayPurchases)} />
         <StatCard label="Today's Expenses" value={money(data.todayExpenses)} />
@@ -41,7 +41,7 @@ export default async function DashboardPage() {
             <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
               {data.topProducts.map((p) => (
                 <li key={p.name} className="flex items-center justify-between gap-4 py-2 text-sm">
-                  <span className="truncate text-zinc-800 dark:text-zinc-200">{p.name}</span>
+                  <span className="safe-wrap min-w-0 text-zinc-800 dark:text-zinc-200">{p.name}</span>
                   <span className="shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">
                     {qty(p.unitsSold)} {p.unit || "units"}
                   </span>
@@ -59,7 +59,7 @@ export default async function DashboardPage() {
             <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
               {data.warehouses.map((w) => (
                 <li key={w.name} className="flex items-center justify-between gap-4 py-2 text-sm">
-                  <span className="truncate text-zinc-800 dark:text-zinc-200">{w.name}</span>
+                  <span className="safe-wrap min-w-0 text-zinc-800 dark:text-zinc-200">{w.name}</span>
                   <div className="flex shrink-0 items-center gap-3">
                     {w.outOfStock > 0 && <span className="text-xs text-zinc-500 dark:text-zinc-400">{w.outOfStock} out</span>}
                     <span className="tabular-nums text-zinc-700 dark:text-zinc-300">{money(w.value)}</span>

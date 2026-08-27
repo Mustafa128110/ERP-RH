@@ -20,17 +20,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0">
           <Link href="/inventory/stock-adjustments" className="text-sm text-steel hover:text-navy-800">
             ← Stock Adjustments
           </Link>
-          <h1 className="mt-1 text-xl text-navy-800">{adjustment.number}</h1>
-          <p className="text-sm text-steel">
+          <h1 className="safe-wrap mt-1 text-xl text-navy-800">{adjustment.number}</h1>
+          <p className="safe-wrap text-sm text-steel">
             {adjustment.location} · {adjustment.reason ?? "No reason recorded"} · {formatDate(adjustment.documentDate)} · {adjustment.status}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {adjustment.status === "pending" && <ApproveStockAdjustmentButton adjustmentId={adjustment.id} />}
           {adjustment.status !== "cancelled" && <DeleteStockAdjustmentButton adjustmentId={adjustment.id} />}
         </div>
@@ -38,8 +38,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
       {/* Read-only: the movements are already posted, so an adjustment is deleted
           and re-entered rather than edited in place. */}
-      <div className="overflow-x-auto rounded-lg border border-sand">
-        <table className="w-full min-w-max border-collapse text-sm">
+      <div className="overflow-x-hidden rounded-lg border border-sand md:overflow-x-auto">
+        <table className="detail-lines-grid w-full min-w-max border-collapse text-sm">
           <thead>
             <tr className="border-b border-sand bg-ivory">
               <th className={`${thClass} text-right`}>#</th>
@@ -51,10 +51,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <tbody>
             {adjustment.lines.map((l, i) => (
               <tr key={i} className="border-b border-sand last:border-0">
-                <td className={`${tdClass} text-right tabular-nums text-steel`}>{i + 1}</td>
-                <td className={tdClass}>{l.sku || "—"}</td>
-                <td className={tdClass}>{l.itemName}</td>
-                <td className={`${tdClass} text-right tabular-nums ${Number(l.quantity) < 0 ? "text-error" : ""}`}>
+                <td data-label="#" className={`${tdClass} text-right tabular-nums text-steel`}>{i + 1}</td>
+                <td data-label="SKU" className={`${tdClass} safe-wrap`}>{l.sku || "—"}</td>
+                <td data-label="Item" className={`${tdClass} safe-wrap`}>{l.itemName}</td>
+                <td data-label="Adjusted by" className={`${tdClass} text-right tabular-nums ${Number(l.quantity) < 0 ? "text-error" : ""}`}>
                   {qty(l.quantity)} {l.unitSymbol ?? ""}
                 </td>
               </tr>

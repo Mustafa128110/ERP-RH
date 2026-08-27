@@ -22,13 +22,13 @@ export default function Loading() {
   const offline = useOffline();
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5" role="status" aria-live="polite" aria-label="Loading workspace">
       {offline && (
-        <p role="status" className="text-xs text-amber-900">
+        <p className="rounded border border-warning/30 bg-warning-tint px-3 py-2 text-sm text-warning">
           Waiting for the connection to load this page. Nothing is lost — it opens as soon as you are back.
         </p>
       )}
-      <div className="flex animate-pulse flex-col gap-4">
+      <div className="flex animate-pulse flex-col gap-5 motion-reduce:animate-none">
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-2">
             <div className="h-6 w-48 rounded bg-zinc-200 dark:bg-zinc-800" />
@@ -37,7 +37,10 @@ export default function Loading() {
           <div className="h-9 w-28 rounded-md bg-zinc-200 dark:bg-zinc-800" />
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => <div key={i} className="h-28 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"><div className="h-3 w-24 rounded bg-zinc-100 dark:bg-zinc-800" /><div className="mt-4 h-7 w-36 rounded bg-zinc-200 dark:bg-zinc-800" /></div>)}
+        </div>
+        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
           <div className="h-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60" />
           {Array.from({ length: 8 }, (_, i) => (
             <div key={i} className="flex items-center gap-4 border-b border-zinc-100 px-4 py-3 last:border-0 dark:border-zinc-800/60">

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { formatDate, money, qty } from "@/lib/format";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
+import { useExportShare } from "@/components/ui/ExportShareSheet";
+import { errorTextClass } from "@/components/ui/form-styles";
 
 export type { Invoice };
 
@@ -25,14 +27,21 @@ const DOCUMENT_ATTRIBUTE = "data-invoice-document";
 // Same generator the invoice list's row button uses, so there is one way to
 // produce a PDF rather than a print dialog here and a real file there.
 export function DownloadInvoiceButton({ invoice }: { invoice: Invoice }) {
+  const { presentExport } = useExportShare();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return (
-    <button
-      type="button"
-      onClick={() => downloadInvoicePdf(invoice)}
-      className="h-11 rounded bg-navy-800 px-5 text-sm font-semibold text-white hover:bg-navy-700 print:hidden"
-    >
-      Download PDF
-    </button>
+    <div className="flex flex-col items-stretch gap-1 print:hidden">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void (async () => { setBusy(true); setError(null); try { presentExport(await downloadInvoicePdf(invoice)); } catch { setError("Couldn't build the PDF. Try again — nothing was changed."); } finally { setBusy(false); } })()}
+        className="h-11 rounded bg-navy-800 px-5 text-sm font-semibold text-white hover:bg-navy-700 disabled:opacity-40"
+      >
+        {busy ? "Building…" : "Download PDF"}
+      </button>
+      {error && <p role="alert" className={errorTextClass}>{error}</p>}
+    </div>
   );
 }
 
@@ -44,7 +53,7 @@ export function DownloadInvoiceButton({ invoice }: { invoice: Invoice }) {
 export async function downloadInvoiceImage(invoice: Invoice) {
   const onScreen = document.querySelector<HTMLElement>(`[${DOCUMENT_ATTRIBUTE}]`);
   if (!onScreen) throw new Error("There is no invoice on screen to photograph.");
-  await downloadInvoicePng(onScreen, invoice);
+  return downloadInvoicePng(onScreen, invoice);
 }
 
 // A real invoice, rendered where nobody can see it, so a list row can be turned
@@ -93,6 +102,7 @@ export function InvoiceImageRenderer({ invoice, onReady }: { invoice: Invoice; o
 // Sits next to the PDF button because which one is wanted depends on where it's
 // going: a file for the customer's records, a picture for a chat.
 export function DownloadInvoiceImageButton({ invoice }: { invoice: Invoice }) {
+  const { presentExport } = useExportShare();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,7 +110,7 @@ export function DownloadInvoiceImageButton({ invoice }: { invoice: Invoice }) {
     setBusy(true);
     setError(null);
     try {
-      await downloadInvoiceImage(invoice);
+      presentExport(await downloadInvoiceImage(invoice));
     } catch {
       // Rasterising is the browser's job and it can decline — an image this big
       // can run the tab out of memory. Say so rather than leaving a dead button.
@@ -120,7 +130,7 @@ export function DownloadInvoiceImageButton({ invoice }: { invoice: Invoice }) {
       >
         {busy ? "Building…" : "Download Image"}
       </button>
-      {error && <p className="max-w-56 text-right text-xs text-error">{error}</p>}
+      {error && <p role="alert" className={errorTextClass}>{error}</p>}
     </div>
   );
 }
@@ -135,18 +145,18 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
   return (
     <div
       {...{ [DOCUMENT_ATTRIBUTE]: "" }}
-      className="mx-auto w-full max-w-3xl rounded-lg border border-sand bg-white p-8 text-ink print:max-w-none print:rounded-none print:border-0 print:p-0"
+      className="mx-auto w-full max-w-3xl rounded-lg border border-sand bg-white p-4 text-ink sm:p-8 print:max-w-none print:rounded-none print:border-0 print:p-0"
     >
-      <div className="flex flex-wrap items-start justify-between gap-6 border-b border-sand pb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-navy-800">{displayName}</h1>
-          {invoice.companyAddress && <p className="mt-1 whitespace-pre-line text-sm text-steel">{invoice.companyAddress}</p>}
-          <p className="mt-1 text-sm text-steel">
+      <div className="flex flex-col items-start justify-between gap-4 border-b border-sand pb-4 sm:flex-row sm:gap-6 sm:pb-6">
+        <div className="min-w-0">
+          <h1 className="safe-wrap text-2xl font-semibold text-navy-800">{displayName}</h1>
+          {invoice.companyAddress && <p className="safe-wrap mt-1 whitespace-pre-line text-sm text-steel">{invoice.companyAddress}</p>}
+          <p className="safe-wrap mt-1 text-sm text-steel">
             {[invoice.companyPhone, invoice.companyEmail].filter(Boolean).join(" · ")}
           </p>
           {invoice.companyTaxNumber && <p className="text-sm text-steel">NTN: {invoice.companyTaxNumber}</p>}
         </div>
-        <div className="text-right">
+        <div className="w-full min-w-0 text-left sm:w-auto sm:text-right">
           <p className="text-xs font-semibold uppercase tracking-wide text-steel">Invoice</p>
           <p className="text-xl font-semibold text-navy-800">{invoice.number}</p>
           <p className="mt-1 text-sm text-steel">{formatDate(invoice.documentDate)}</p>
@@ -158,12 +168,12 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
 
       <div className="py-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-steel">Billed to</p>
-        <p className="mt-1 text-base font-medium text-ink">{invoice.customerName ?? "—"}</p>
-        {invoice.customerAddress && <p className="whitespace-pre-line text-sm text-steel">{invoice.customerAddress}</p>}
-        <p className="text-sm text-steel">{[invoice.customerCity, invoice.customerPhone].filter(Boolean).join(" · ")}</p>
+        <p className="safe-wrap mt-1 text-base font-medium text-ink">{invoice.customerName ?? "—"}</p>
+        {invoice.customerAddress && <p className="safe-wrap whitespace-pre-line text-sm text-steel">{invoice.customerAddress}</p>}
+        <p className="safe-wrap text-sm text-steel">{[invoice.customerCity, invoice.customerPhone].filter(Boolean).join(" · ")}</p>
       </div>
 
-      <div className="scroll-thin overflow-x-auto print:overflow-visible">
+      <div className="invoice-lines scroll-thin overflow-x-hidden md:overflow-x-auto print:overflow-visible">
         <table className="w-full min-w-[30rem] border-collapse text-sm print:min-w-0">
         <thead>
           <tr className="border-y border-sand">
@@ -177,13 +187,13 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
         <tbody>
           {invoice.lines.map((l, i) => (
             <tr key={i} className="border-b border-sand">
-              <td className="py-2 text-center tabular-nums">{i + 1}</td>
-              <td className="py-2">{l.itemName ?? "—"}</td>
-              <td className="py-2 text-right tabular-nums">
+              <td data-label="#" className="py-2 text-center tabular-nums">{i + 1}</td>
+              <td data-label="Item" className="safe-wrap py-2">{l.itemName ?? "—"}</td>
+              <td data-label="Qty" className="py-2 text-right tabular-nums">
                 {qty(l.quantity)} {l.unitSymbol ?? ""}
               </td>
-              <td className="py-2 text-right tabular-nums">{money(l.unitPrice)}</td>
-              <td className="py-2 text-right tabular-nums">{money(l.lineTotal)}</td>
+              <td data-label="Rate" className="py-2 text-right tabular-nums">{money(l.unitPrice)}</td>
+              <td data-label="Amount" className="py-2 text-right tabular-nums">{money(l.lineTotal)}</td>
             </tr>
           ))}
         </tbody>
@@ -193,7 +203,7 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
       {/* Discount, tax and shipping only appear when they're not zero — an
           invoice with none of them shouldn't carry three rows of "0.00". */}
       <div className="mt-6 flex justify-end">
-        <dl className="grid w-72 grid-cols-[1fr_auto] gap-y-1 text-sm">
+        <dl className="grid w-full max-w-72 grid-cols-[minmax(0,1fr)_auto] gap-y-1 text-sm">
           <dt className="text-steel">Subtotal</dt>
           <dd className="text-right tabular-nums">{money(invoice.subtotal)}</dd>
           {discount > 0 && (

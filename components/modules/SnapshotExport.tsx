@@ -46,10 +46,10 @@ export function SnapshotExport({ tables, sizes }: { tables: SnapshotTable[]; siz
 
   return (
     <div className="flex flex-col gap-3">
-      {message && <p className="rounded border border-sand bg-ivory p-3 text-sm text-ink">{message}</p>}
+      {message && <p role="status" aria-live="polite" className="rounded border border-sand bg-ivory p-3 text-sm text-ink">{message}</p>}
       <ul className="flex flex-col divide-y divide-sand">
         {tables.map((t) => (
-          <li key={t.key} className="flex items-center justify-between gap-4 py-3">
+          <li key={t.key} className="flex flex-col items-stretch justify-between gap-3 py-3 sm:flex-row sm:items-center sm:gap-4">
             <div className="min-w-0">
               <p className="text-sm font-medium text-ink">
                 {t.label}
@@ -57,7 +57,7 @@ export function SnapshotExport({ tables, sizes }: { tables: SnapshotTable[]; siz
               </p>
               <p className="text-xs text-steel">{t.description}</p>
             </div>
-            <button type="button" onClick={() => void run(t.key, t.label)} disabled={busy !== null} className={secondaryActionClass}>
+            <button type="button" onClick={() => void run(t.key, t.label)} disabled={busy !== null} className={`${secondaryActionClass} w-full sm:w-auto`}>
               {busy === t.key ? "Building…" : "Download CSV"}
             </button>
           </li>

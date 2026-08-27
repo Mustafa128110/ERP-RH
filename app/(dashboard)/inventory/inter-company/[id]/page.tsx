@@ -19,15 +19,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0">
           <Link href="/inventory/inter-company" className="text-sm text-steel hover:text-navy-800">
             ← Inter-Company Sales
           </Link>
-          <h1 className="mt-1 text-xl text-navy-800">
+          <h1 className="safe-wrap mt-1 text-xl text-navy-800">
             {sale.saleNumber} / {sale.purchaseNumber}
           </h1>
-          <p className="text-sm text-steel">
+          <p className="safe-wrap text-sm text-steel">
             {formatDate(sale.documentDate)} · {sale.sellerName} → {sale.buyerName} · {sale.status}
           </p>
         </div>

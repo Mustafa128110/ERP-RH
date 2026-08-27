@@ -295,7 +295,7 @@ export function QuotationForm({
   };
 
   return (
-    <form action={action} className="flex h-full min-h-0 flex-col gap-4">
+    <form action={action} className="document-form flex h-full min-h-0 flex-col gap-4">
       <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="companyId" value={companyId} />
       <input type="hidden" name="contactId" value={contactId} />
@@ -375,8 +375,8 @@ export function QuotationForm({
         </label>
       </div>
 
-      <div className="scroll-thin min-h-0 flex-1 overflow-auto rounded border border-sand">
-        <table className="w-full min-w-max border-collapse">
+      <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded border border-sand md:overflow-auto">
+        <table className="document-lines-grid w-full min-w-max border-collapse">
           <thead>
             <tr className="sticky top-0 z-10 bg-ivory">
               <th className={`${thClass} w-10 text-right`}>#</th>
@@ -391,8 +391,8 @@ export function QuotationForm({
           <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>
             {lines.map((line, r) => (
               <tr key={r}>
-                <td className="border border-sand px-2 py-1 text-right text-xs tabular-nums text-steel">{r + 1}</td>
-                <td className={tdClass}>
+                <td className="document-line-number border border-sand px-2 py-1 text-right text-xs tabular-nums text-steel">{r + 1}</td>
+                <td data-label="Item" className={`${tdClass} document-line-item`}>
                   <ComboBox
                     value={line.itemText}
                     onChange={(name) => pickItem(r, name)}
@@ -400,47 +400,49 @@ export function QuotationForm({
                     className={cellInput}
                     // data-shortcut="i" marks the first line's item box so
                     // Ctrl+I can jump to it from anywhere in the form.
-                    inputProps={{ "data-cell": `${r}-0`, disabled: locked, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
+                    inputProps={{ "data-cell": `${r}-0`, "aria-label": `Item for line ${r + 1}`, disabled: locked, ...(r === 0 ? { "data-shortcut": "i" } : {}) }}
                   />
                 </td>
-                <td className={tdClass}>
+                <td data-label="Unit" className={`${tdClass} document-line-fact`}>
                   <ComboBox
                     value={line.unitText}
                     onChange={(name) => pickUnit(r, name)}
                     options={unitOptions}
                     className={cellInput}
-                    inputProps={{ "data-cell": `${r}-1`, disabled: locked }}
+                    inputProps={{ "data-cell": `${r}-1`, "aria-label": `Unit for line ${r + 1}`, disabled: locked }}
                   />
                 </td>
-                <td className={tdClass}>
+                <td data-label="Qty" className={`${tdClass} document-line-fact`}>
                   <input
                     data-cell={`${r}-2`}
                     type="number"
                     step="0.01"
                     min="0"
+                    aria-label={`Quantity for line ${r + 1}`}
                     value={line.quantity}
                     onChange={(e) => update(r, { quantity: e.target.value })}
                     disabled={locked}
                     className={`${cellInput} text-right tabular-nums`}
                   />
                 </td>
-                <td className={tdClass}>
+                <td data-label="Rate" className={`${tdClass} document-line-fact`}>
                   <input
                     data-cell={`${r}-3`}
                     type="number"
                     step="0.1"
                     min="0"
+                    aria-label={`Rate for line ${r + 1}`}
                     value={line.unitPrice}
                     onChange={(e) => update(r, { unitPrice: e.target.value })}
                     disabled={locked}
                     className={`${cellInput} text-right tabular-nums`}
                   />
                 </td>
-                <td className="border border-sand px-2 py-1 text-right text-sm tabular-nums text-ink">
+                <td data-label="Total" className="document-line-fact border border-sand px-2 py-1 text-right text-sm tabular-nums text-ink">
                   {line.quantity && line.unitPrice ? money(round1(Number(line.quantity) * Number(line.unitPrice))) : ""}
                 </td>
                 {locked && (
-                  <td className="border border-sand px-2 py-1 text-right text-sm tabular-nums text-steel">
+                  <td data-label="Invoiced" className="document-line-fact border border-sand px-2 py-1 text-right text-sm tabular-nums text-steel">
                     {Number(line.convertedQuantity) > 0 ? line.convertedQuantity : ""}
                   </td>
                 )}
@@ -482,8 +484,8 @@ export function QuotationForm({
           </dl>
 
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            {state?.error && <p className={errorTextClass}>{state.error}</p>}
-            {queueError && <p className={errorTextClass}>{queueError}</p>}
+            {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
+            {queueError && <p role="alert" className={errorTextClass}>{queueError}</p>}
             {isEdit && !locked && <DeleteQuotationButton quotationId={quotationId} />}
             {/* New quotations only: queueing an edit would send a copy of a
                 saved document, and a sync replay of that is a second quotation

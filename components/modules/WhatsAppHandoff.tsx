@@ -24,23 +24,23 @@ export function WhatsAppHandoff({ recipients, companies, messages }: { recipient
         <p className="mt-1 text-sm text-steel">The message opens in your own WhatsApp. It is logged as a handoff, not a confirmed send.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-sm text-ink">Company
-            <select name="companyId" value={companyId} onChange={(event) => { setCompanyId(event.target.value); setContactId(""); }} className="mt-1 w-full rounded border border-sand bg-white px-3 py-2">
+            <select name="companyId" value={companyId} onChange={(event) => { setCompanyId(event.target.value); setContactId(""); }} className="mt-1 h-12 w-full rounded border border-sand bg-white px-3 text-base sm:text-sm">
               <option value="">Choose company</option>
               {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
             </select>
           </label>
           <label className="text-sm text-ink">Contact
-            <select name="contactId" value={contactId} onChange={(event) => setContactId(event.target.value)} className="mt-1 w-full rounded border border-sand bg-white px-3 py-2">
+            <select name="contactId" value={contactId} onChange={(event) => setContactId(event.target.value)} className="mt-1 h-12 w-full rounded border border-sand bg-white px-3 text-base sm:text-sm">
               <option value="">Choose contact</option>
               {availableContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phone ? ` · ${contact.phone}` : " · no phone"}</option>)}
             </select>
           </label>
         </div>
         <label className="mt-3 block text-sm text-ink">Message
-          <textarea name="body" required rows={5} maxLength={4000} className="mt-1 w-full rounded border border-sand bg-white px-3 py-2" placeholder="Write the message to open in WhatsApp…" />
+          <textarea name="body" required rows={5} maxLength={4000} className="mt-1 w-full rounded border border-sand bg-white px-3 py-2 text-base sm:text-sm" placeholder="Write the message to open in WhatsApp…" />
         </label>
-        {state.error && <p className="mt-3 rounded border border-error/30 bg-error-tint p-3 text-sm text-error">{state.error}</p>}
-        <button type="submit" disabled={pending} className="mt-4 rounded bg-navy-800 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{pending ? "Preparing…" : "Open WhatsApp"}</button>
+        {state.error && <p role="alert" className="mt-3 rounded border border-error/30 bg-error-tint p-3 text-sm text-error">{state.error}</p>}
+        <button type="submit" disabled={pending} className="mt-4 h-12 w-full rounded bg-navy-800 px-4 text-base font-medium text-white disabled:opacity-60 sm:w-auto sm:text-sm">{pending ? "Preparing…" : "Open WhatsApp"}</button>
       </form>
       <div className="rounded-lg border border-sand bg-white p-5">
         <h2 className="text-sm font-semibold text-navy-800">Recent message handoffs</h2>

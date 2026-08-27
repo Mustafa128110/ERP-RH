@@ -9,5 +9,5 @@ import { downloadNodeAsPng } from "@/lib/node-download";
 // InvoiceDocument.tsx and the PDF in invoice-pdf.ts); a canvas renderer would be
 // a third, and the one nobody would remember to update.
 export async function downloadInvoicePng(node: HTMLElement, invoice: Invoice) {
-  await downloadNodeAsPng(node, invoiceFileName(invoice, "png"));
+  return downloadNodeAsPng(node, invoiceFileName(invoice, "png"));
 }

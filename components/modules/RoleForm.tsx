@@ -32,7 +32,7 @@ function PermissionGrid({
   const label = (s: string) => s.replace(/_/g, " ");
 
   return (
-    <div className="scroll-thin overflow-auto rounded border border-sand">
+    <div className="matrix-scroll scroll-thin overflow-auto rounded border border-sand">
       <table className="w-full min-w-max border-collapse text-sm">
         <thead>
           <tr className="sticky top-0 z-10 border-b border-sand bg-ivory">

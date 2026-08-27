@@ -428,7 +428,7 @@ export function StockPurchaseCreateForm({
 
   return (
     <>
-    <form ref={formRef} action={action} className="flex flex-col gap-5">
+    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <input
@@ -561,8 +561,8 @@ export function StockPurchaseCreateForm({
       {/* --- document_lines: single-row grid with shared borders --- */}
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
-        <div className="overflow-x-auto rounded border border-sand">
-          <table className="w-full min-w-[1060px] border-collapse text-sm">
+        <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
+          <table className="document-lines-grid w-full min-w-[1060px] border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>
@@ -580,8 +580,8 @@ export function StockPurchaseCreateForm({
             <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>
               {lines.map((line, i) => (
                 <tr key={i}>
-                  <td className="border border-sand px-2 text-right text-xs tabular-nums text-steel">{i + 1}</td>
-                  <td className={tdClass}>
+                  <td className="document-line-number border border-sand px-2 text-right text-xs tabular-nums text-steel">{i + 1}</td>
+                  <td data-label="Item" className={`${tdClass} document-line-item`}>
                     <ComboBox
                       value={line.itemText}
                       options={visibleItems}
@@ -590,20 +590,21 @@ export function StockPurchaseCreateForm({
                       // data-shortcut="i" marks the first line's item box so
                       // Alt+I can jump to it from anywhere in this popup — the
                       // purchase popup's jumps are Alt, not Ctrl.
-                      inputProps={i === 0 ? { "data-shortcut": "i" } : undefined}
+                      inputProps={{ "aria-label": `Item for line ${i + 1}`, ...(i === 0 ? { "data-shortcut": "i" } : {}) }}
                       onChange={(name) => pickItem(i, name)}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Unit" className={`${tdClass} document-line-fact`}>
                     <ComboBox
                       value={line.unitText}
                       options={unitOpts}
                       placeholder="Unit"
+                      inputProps={{ "aria-label": `Unit for line ${i + 1}` }}
                       className={cellInput}
                       onChange={(name) => pickUnit(i, name)}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Qty" className={`${tdClass} document-line-fact`}>
                     <input
                       type="number"
                       min="0"
@@ -611,10 +612,11 @@ export function StockPurchaseCreateForm({
                       value={line.quantity}
                       onChange={(e) => updateLine(i, { quantity: e.target.value })}
                       placeholder="Qty"
+                      aria-label={`Quantity for line ${i + 1}`}
                       className={`${cellInput} text-right`}
                     />
                   </td>
-                  <td className={tdClass}>
+                  <td data-label="Price" className={`${tdClass} document-line-fact`}>
                     <input
                       type="number"
                       min="0"
@@ -622,18 +624,19 @@ export function StockPurchaseCreateForm({
                       value={line.unitPrice}
                       onChange={(e) => updateLine(i, { unitPrice: e.target.value })}
                       placeholder="Rate"
+                      aria-label={`Unit price for line ${i + 1}`}
                       className={`${cellInput} text-right`}
                     />
                   </td>
                   {/* Blank rather than a shipping-only figure on an empty row —
                       a line with no quantity bought nothing to carry. */}
-                  <td className="border border-sand px-2 text-right tabular-nums text-steel">
+                  <td data-label="Cost" className="document-line-fact border border-sand px-2 text-right tabular-nums text-steel">
                     {Number(line.quantity) > 0 ? money(landedUnitCost(Number(line.unitPrice) || 0, adjustmentPerUnit)) : ""}
                   </td>
-                  <td className="border border-sand px-2 text-right tabular-nums text-steel">
+                  <td data-label="Total" className="document-line-fact border border-sand px-2 text-right tabular-nums text-steel">
                     {money((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
                   </td>
-                  <td className="border border-sand text-center">
+                  <td data-label="Remove" className="document-line-action border border-sand text-center">
                     <button
                       type="button"
                       onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev))}

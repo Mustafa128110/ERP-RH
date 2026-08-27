@@ -24,15 +24,21 @@ async function rasterize(node: HTMLElement): Promise<HTMLCanvasElement> {
   });
 }
 
+export type ExportFile = {
+  blob: Blob;
+  filename: string;
+  mimeType: string;
+};
+
 // In the document and revoked on a later tick, both deliberately: a detached
 // anchor doesn't reliably start a download in Chrome, and revoking on the line
 // after click() cancels the download that was about to read it — which looks
 // exactly like a button that does nothing.
-function saveBlob(blob: Blob, fileName: string) {
+export function downloadExportFile({ blob, filename }: ExportFile) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = fileName;
+  link.download = filename;
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
@@ -40,14 +46,13 @@ function saveBlob(blob: Blob, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export async function downloadNodeAsPng(node: HTMLElement, fileName: string) {
-  console.log('[downloadNodeAsPng] Starting PNG download:', fileName);
+export async function downloadNodeAsPng(node: HTMLElement, fileName: string): Promise<ExportFile> {
   const canvas = await rasterize(node);
-  console.log('[downloadNodeAsPng] Canvas received, creating blob');
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("The browser could not turn this into an image.");
-  console.log('[downloadNodeAsPng] Blob created, size:', blob.size);
-  saveBlob(blob, fileName);
+  const file = { blob, filename: fileName, mimeType: "image/png" };
+  downloadExportFile(file);
+  return file;
 }
 
 // The same picture, cut into A4 pages.
@@ -55,7 +60,7 @@ export async function downloadNodeAsPng(node: HTMLElement, fileName: string) {
 // One tall image on one long page would print as a single unreadable strip, so
 // the canvas is sliced: each page takes the next band of pixels, drawn through a
 // scratch canvas because jsPDF places whole images and cannot crop.
-export async function downloadNodeAsPdf(node: HTMLElement, fileName: string) {
+export async function downloadNodeAsPdf(node: HTMLElement, fileName: string): Promise<ExportFile> {
   const canvas = await rasterize(node);
   // jsPDF is the other heavy dependency (with html2canvas it makes up the
   // ~400KB print chunk) — loaded on the click that asks for a file, same as
@@ -87,5 +92,7 @@ export async function downloadNodeAsPdf(node: HTMLElement, fileName: string) {
     doc.addImage(slice.toDataURL("image/png"), "PNG", margin, margin, pageWidth, (height * pageWidth) / canvas.width);
   }
 
-  doc.save(fileName);
+  const file = { blob: doc.output("blob"), filename: fileName, mimeType: "application/pdf" };
+  downloadExportFile(file);
+  return file;
 }

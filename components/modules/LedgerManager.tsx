@@ -15,6 +15,7 @@ import { money, todayISO } from "@/lib/format";
 import { downloadNodeAsPdf, downloadNodeAsPng } from "@/lib/node-download";
 import { ContactStatementDocument, SheetRenderer, type Letterhead } from "@/components/modules/LedgerSheet";
 import { PartyLedgerDialog, PartyLedgerPrintDocument } from "@/components/modules/PartyLedgerDialog";
+import { useExportShare } from "@/components/ui/ExportShareSheet";
 import { inCompany } from "@/lib/contact-scope";
 import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/actions/ledger";
 import { MANUAL_JOURNAL_COUNTERPARTS } from "@/lib/manual-journal-constants";
@@ -79,6 +80,7 @@ export function LedgerManager({
   // filtering happens up there rather than over the rows already handed down.
   filter?: React.ReactNode;
 }) {
+  const { presentExport } = useExportShare();
   const [modal, setModal] = useState<ModalState>(null);
   const [partyLedger, setPartyLedger] = useState<{ contactId: string; contactName: string; companyId: string } | null>(null);
   // Party ledger export state — lifted here so the SheetRenderer renders outside any Dialog.
@@ -101,8 +103,8 @@ export function LedgerManager({
     const who = snap.data.displayName.replace(/[^a-zA-Z0-9._-]+/g, "-");
     const fileName = `${who}-ledger-${todayISO()}.${fmt}`;
     try {
-      if (fmt === "pdf") await downloadNodeAsPdf(node, fileName);
-      else await downloadNodeAsPng(node, fileName);
+      if (fmt === "pdf") presentExport(await downloadNodeAsPdf(node, fileName));
+      else presentExport(await downloadNodeAsPng(node, fileName));
     } catch {
       setPartyExportError("Couldn't build that file. Try again, or use the browser's print dialog.");
     } finally {
@@ -128,8 +130,8 @@ export function LedgerManager({
     const who = sheet.contact.displayName.replace(/[^a-zA-Z0-9._-]+/g, "-");
     const fileName = `${who}-statement-${todayISO()}.${sheet.format}`;
     try {
-      if (sheet.format === "pdf") await downloadNodeAsPdf(node, fileName);
-      else await downloadNodeAsPng(node, fileName);
+      if (sheet.format === "pdf") presentExport(await downloadNodeAsPdf(node, fileName));
+      else presentExport(await downloadNodeAsPng(node, fileName));
     } catch {
       // Drawing the page into an image is the browser's job and it can decline.
       // Said out loud rather than swallowed: a button that quietly does nothing
@@ -205,8 +207,8 @@ export function LedgerManager({
         </button>
       </PageHeader>
 
-      {sheetError && <p className="shrink-0 text-sm text-error">{sheetError}</p>}
-      {partyExportError && <p className="shrink-0 text-sm text-error">{partyExportError}</p>}
+      {sheetError && <p role="alert" className={`${errorTextClass} shrink-0`}>{sheetError}</p>}
+      {partyExportError && <p role="alert" className={`${errorTextClass} shrink-0`}>{partyExportError}</p>}
 
       {sheet && (
         <SheetRenderer onReady={(node) => void captureSheet(node)}>

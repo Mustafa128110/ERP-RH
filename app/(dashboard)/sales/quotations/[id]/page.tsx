@@ -20,16 +20,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex shrink-0 items-start justify-between gap-4">
-        <div>
+      <div className="flex shrink-0 flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
+        <div className="min-w-0">
           <Link href="/sales/quotations" className="text-sm text-steel hover:text-navy-800">
             ← Quotations
           </Link>
-          <div className="mt-1 flex items-center gap-2">
-            <h1 className="text-xl text-navy-800">{quotation.number}</h1>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="safe-wrap text-xl text-navy-800">{quotation.number}</h1>
             <StatusPill value={quotation.status} />
           </div>
-          <p className="text-sm text-steel">
+          <p className="safe-wrap text-sm text-steel">
             {formatDate(quotation.documentDate)}
             {quotation.validUntil && ` · valid until ${formatDate(quotation.validUntil)}`} · {money(quotation.grandTotal)}
           </p>
@@ -65,12 +65,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <h2 className="mb-2 text-sm font-semibold text-navy-800">Invoices raised from this quotation</h2>
           <ul className="flex flex-col divide-y divide-sand">
             {conversions.map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-4 py-2 text-sm">
-                <Link href={`/sales/invoices/${c.id}`} className="font-medium text-navy-800 hover:underline">
+              <li key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-sm">
+                <Link href={`/sales/invoices/${c.id}`} className="safe-wrap min-w-0 font-medium text-navy-800 hover:underline">
                   {c.number}
                 </Link>
                 <span className="text-steel">{formatDate(c.documentDate)}</span>
-                <span className="tabular-nums text-ink">{money(c.grandTotal)}</span>
+                <span className="numeric-contain tabular-nums text-ink">{money(c.grandTotal)}</span>
               </li>
             ))}
           </ul>

@@ -62,8 +62,8 @@ export const quickAddInlineClass =
   "flex h-10 w-8 shrink-0 items-center justify-center rounded border border-sand text-navy-800 hover:bg-ivory";
 
 // --- Inline messages ---------------------------------------------------------
-export const errorTextClass = "text-sm text-error";
-export const successTextClass = "text-sm text-success";
+export const errorTextClass = "rounded border border-error/35 bg-error-tint px-3 py-2 text-sm text-error";
+export const successTextClass = "rounded border border-success/35 bg-success-tint px-3 py-2 text-sm text-success";
 
 // A refusal that is a question rather than a fault. Some writes are legal but
 // move money another document is already settled against — reducing an invoice

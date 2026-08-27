@@ -30,11 +30,11 @@ export function SettingsForm({
         <label key={def.key} className={labelClass}>
           <span className={labelTextClass}>{def.label}</span>
           <span className="text-xs text-steel">{def.help}</span>
-          <span className="flex items-center gap-2">
+          <span className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {def.kind === "text" ? (
               <textarea name={def.key} defaultValue={values[def.key]} rows={2} className="w-full rounded border border-sand p-3 text-sm text-ink focus:border-navy-800" />
             ) : def.kind === "tax" ? (
-              <select name={def.key} defaultValue={values[def.key]} className={`${inputClass} w-72`}>
+              <select name={def.key} defaultValue={values[def.key]} className={`${inputClass} w-full sm:w-72`}>
                 <option value="">No default tax</option>
                 {taxOptions.map((tax) => (
                   <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>
@@ -43,17 +43,17 @@ export function SettingsForm({
             ) : def.kind === "boolean" ? (
               <input name={def.key} type="checkbox" defaultChecked={values[def.key] === "true"} className="h-5 w-5 rounded border-sand" />
             ) : def.kind === "date" ? (
-              <input name={def.key} type="date" defaultValue={values[def.key]} className={`${inputClass} w-48`} />
+              <input name={def.key} type="date" defaultValue={values[def.key]} className={`${inputClass} w-full sm:w-48`} />
             ) : (
-              <input name={def.key} type="number" step="any" min="0" defaultValue={values[def.key]} className={`${inputClass} w-40`} />
+              <input name={def.key} type="number" step="any" min="0" defaultValue={values[def.key]} className={`${inputClass} w-full sm:w-40`} />
             )}
             {def.suffix && <span className="text-sm text-steel">{def.suffix}</span>}
           </span>
         </label>
       ))}
 
-      {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
+      {state?.success && <p role="status" aria-live="polite" className={successTextClass}>Saved.</p>}
 
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save Settings"}

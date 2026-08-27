@@ -760,7 +760,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               </p>
             </div>
           ) : (
-            <div className="scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
+            <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
               <table className="w-full min-w-[76rem] border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">

@@ -12,6 +12,7 @@ import { money, todayISO } from "@/lib/format";
 import { cancelSalesReturn, createSalesReturn, getReturnableSale } from "@/lib/actions/returns";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
+import { useExportShare } from "@/components/ui/ExportShareSheet";
 import { InvoiceImageRenderer } from "@/components/modules/InvoiceDocument";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
@@ -79,6 +80,7 @@ export function InvoiceManager({
   formOptions: SaleFormOptions;
   itemsBySaleId?: Map<string, InvoiceItem[]>;
 }) {
+  const { presentExport } = useExportShare();
   const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<SaleDetail | null>(null);
   const [chequeOptions, setChequeOptions] = useState(formOptions.chequeOptions);
@@ -163,7 +165,7 @@ export function InvoiceManager({
       const invoice = await getInvoice(id);
       if (!invoice) return;
       if (format === "pdf") {
-        downloadInvoicePdf(invoice);
+        presentExport(await downloadInvoicePdf(invoice));
         return;
       }
       // The picture is taken off a rendered invoice, and there isn't one in a
@@ -236,7 +238,7 @@ export function InvoiceManager({
     if (!imaging || capturing.current) return;
     capturing.current = true;
     try {
-      await downloadInvoicePng(node, imaging);
+      presentExport(await downloadInvoicePng(node, imaging));
     } finally {
       capturing.current = false;
       setImaging(null);
