@@ -1,7 +1,10 @@
-import { type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 export async function proxy(request: NextRequest) {
+  // Meta cannot carry an ERP browser session when it verifies or posts an
+  // event. The webhook authenticates itself with its verify token/signature.
+  if (request.nextUrl.pathname === "/api/whatsapp/webhook") return NextResponse.next();
   return updateSession(request);
 }
 
