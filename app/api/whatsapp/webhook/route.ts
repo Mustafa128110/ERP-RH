@@ -14,14 +14,25 @@ function textResponse(body: string, status: number) {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const challenge = searchParams.get("hub.challenge");
+  const mode = searchParams.get("hub.mode");
+  const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
 
   if (isWhatsAppWebhookVerification({
-    mode: searchParams.get("hub.mode"),
+    mode,
     token: searchParams.get("hub.verify_token"),
     challenge,
-    expectedToken: process.env.WHATSAPP_VERIFY_TOKEN,
+    expectedToken,
   })) {
     return textResponse(challenge!, 200);
+  }
+
+  // Safe operational signal for Vercel logs. It never records the callback
+  // token, challenge, request body, sender, or message content.
+  if (mode === "subscribe") {
+    console.warn("WhatsApp webhook verification rejected.", {
+      hasChallenge: Boolean(challenge),
+      verifyTokenConfigured: Boolean(expectedToken?.trim()),
+    });
   }
 
   return textResponse("Forbidden", 403);

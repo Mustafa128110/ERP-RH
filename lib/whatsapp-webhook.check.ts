@@ -10,6 +10,7 @@ const body = JSON.stringify({ object: "whatsapp_business_account", entry: [] });
 const signature = `sha256=${createHmac("sha256", appSecret).update(body).digest("hex")}`;
 
 assert.equal(isWhatsAppWebhookVerification({ mode: "subscribe", token: verifyToken, challenge: "challenge", expectedToken: verifyToken }), true);
+assert.equal(isWhatsAppWebhookVerification({ mode: "subscribe", token: verifyToken, challenge: "challenge", expectedToken: ` ${verifyToken}\n` }), true);
 assert.equal(isWhatsAppWebhookVerification({ mode: "subscribe", token: "wrong", challenge: "challenge", expectedToken: verifyToken }), false);
 assert.equal(isWhatsAppWebhookVerification({ mode: "unsubscribe", token: verifyToken, challenge: "challenge", expectedToken: verifyToken }), false);
 assert.equal(hasValidWhatsAppSignature(body, signature, appSecret), true);

@@ -14,12 +14,13 @@ export function isWhatsAppWebhookVerification(values: {
   challenge: string | null;
   expectedToken: string | undefined;
 }) {
+  const expectedToken = values.expectedToken?.trim();
   return Boolean(
     values.challenge
       && values.mode === "subscribe"
       && values.token
-      && values.expectedToken
-      && sameSecret(values.token, values.expectedToken),
+      && expectedToken
+      && sameSecret(values.token, expectedToken),
   );
 }
 
