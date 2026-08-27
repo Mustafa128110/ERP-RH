@@ -28,6 +28,7 @@ import { bankAccountLabel } from "@/lib/account-label";
 import { CACHE } from "@/lib/cache-keys";
 import { settingsForCompanies } from "@/lib/queries/settings";
 import { queryItemOptions } from "@/lib/queries/item-options";
+import { unitPickerLabel } from "@/lib/unit-picker-label";
 export { CACHE, READ_DOMAIN } from "@/lib/cache-keys";
 
 // Dropdown option lists. Nearly forty near-identical copies of these were spread
@@ -285,7 +286,7 @@ export async function getSaleFormOptions(documentId?: string) {
     companyOptions,
     customerOptions: customers.map(labelled.contact),
     itemOptions: itemRows.map(labelled.item),
-    unitOptions: unitRows.map(labelled.unit),
+    unitOptions: unitRows.map((unit) => ({ id: unit.id, name: unitPickerLabel(unit) })),
     bankAccountOptions,
     cashAccountOptions,
     chequeOptions,
@@ -324,7 +325,7 @@ export async function getPurchaseFormOptions(documentId?: string) {
     itemOptions: itemRows.map(labelled.item),
     documentTypeOptions,
     locationOptions,
-    unitOptions: unitRows.map(labelled.unit),
+    unitOptions: unitRows.map((unit) => ({ id: unit.id, name: unitPickerLabel(unit) })),
     bankAccountOptions,
     cashAccountOptions,
     chequeOptions,
