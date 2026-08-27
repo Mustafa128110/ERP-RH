@@ -190,6 +190,8 @@ const REQUIRED = [
   ["payments.ts", "export async function updatePayment", "await getLiveSession()"],
   ["payments.ts", "export async function deletePayment", "await getLiveSession()"],
   ["backups.ts", "export async function exportSnapshot", "await getLiveSession()"],
+  ["backups.ts", "export async function dispatchBackupWorkflow", "await getLiveSession()"],
+  ["backups.ts", "export async function dispatchBackupWorkflow", 'requireGlobalPermission(session, "backups", "create")'],
   ["reports.ts", "export async function exportReportCsv", "await getLiveSession()"],
   ["whatsapp.ts", "export async function createWhatsAppHandoff", "await getLiveSession()"],
 ] as const;

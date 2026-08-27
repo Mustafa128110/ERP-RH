@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { snapshotSizes } from "@/lib/actions/backups";
+import { getSession } from "@/lib/auth/session";
 import { SNAPSHOT_TABLES } from "@/lib/backup-constants";
+import { BackupWorkflowControls } from "@/components/modules/BackupWorkflowControls";
 import { SnapshotExport } from "@/components/modules/SnapshotExport";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const sizes = await snapshotSizes();
+  const [sizes, session] = await Promise.all([snapshotSizes(), getSession()]);
+  const canDispatch = session?.globalPermissions.has("backups.create") ?? false;
 
   return (
     <div className="flex flex-col gap-6">
@@ -28,6 +31,7 @@ export default async function Page() {
           Only one archive is retained. The previous archive is replaced only after the new archive is uploaded and verified. Restore testing is not automatic;
           an administrator must explicitly request a test, which must run against a disposable database rather than production.
         </p>
+        <BackupWorkflowControls canDispatch={canDispatch} />
       </div>
 
       <div className="rounded-lg border border-sand bg-white p-5">

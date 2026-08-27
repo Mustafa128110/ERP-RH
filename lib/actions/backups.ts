@@ -3,18 +3,21 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { recordAudit } from "@/lib/actions/audit";
 import { SNAPSHOT_TABLES } from "@/lib/backup-constants";
+import { BACKUP_WORKFLOWS, backupWorkflowDispatchUrl, isBackupWorkflowKind } from "@/lib/backup-dispatch";
+import { guard, type ActionResult } from "@/lib/actions/guard";
 
 // The old Backups screen listed three invented backup files and a disabled "Run
-// Backup Now" button. This is what a web app can honestly offer instead:
+// Backup Now" button. This page now starts the real checked-in GitHub Actions
+// workflows, while it can also offer an honest data export:
 //
-//   * a plain statement of where real backups come from — the database host, not
-//     this process. Nothing running inside a Next server can take a consistent
-//     dump of the database it is connected to, and pretending otherwise is how
-//     people discover they had no backups on the day they needed one.
+//   * a plain statement of where real backups come from — a dedicated workflow,
+//     not this process. The app only asks GitHub to run the same PostgreSQL 17
+//     workflow that is scheduled twice a day; it never claims to dump the live
+//     database itself.
 //   * an export of the data that matters, as CSV, on demand. That is a real
 //     safety net: it opens in a spreadsheet, it survives this app being gone,
 //     and it is what a small business actually reaches for.
@@ -78,6 +81,48 @@ const QUERIES: Record<string, (companies: string) => ReturnType<typeof db.execut
       LEFT JOIN contacts ct ON ct.id = d.contact_id
      WHERE le.company_id IN (${sql.raw(c)}) ORDER BY d.document_date DESC`),
 };
+
+// Dispatching a workflow affects the whole production database, so a role that
+// happens to have backup access in one company is deliberately insufficient.
+// The token is read only on the server and is never returned to the browser.
+export async function dispatchBackupWorkflow(kind: string): Promise<ActionResult> {
+  return guard("Couldn't start the backup workflow.", async () => {
+    const session = await getLiveSession();
+    requireGlobalPermission(session, "backups", "create");
+
+    if (!isBackupWorkflowKind(kind)) return { error: "Unknown backup operation." };
+    const token = process.env.GITHUB_BACKUP_DISPATCH_TOKEN?.trim();
+    if (!token) return { error: "Backup controls need GITHUB_BACKUP_DISPATCH_TOKEN configured in the app server environment." };
+
+    const url = backupWorkflowDispatchUrl(kind);
+    if (!url) return { error: "GITHUB_BACKUP_REPOSITORY must be written as owner/repository." };
+
+    const response = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ref: "main" }),
+    });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return { error: "GitHub rejected the backup dispatch token. Give it Actions write access to this repository, then try again." };
+      if (response.status === 404) return { error: "GitHub could not find the configured repository or workflow. Check GITHUB_BACKUP_REPOSITORY and the workflow files." };
+      return { error: "GitHub could not start the workflow. Nothing was restored or changed; try again in a moment." };
+    }
+
+    await recordAudit({
+      action: "create",
+      entity: "database backup workflow",
+      summary: BACKUP_WORKFLOWS[kind].auditSummary,
+      detail: `GitHub workflow ${BACKUP_WORKFLOWS[kind].file} dispatched on main`,
+    });
+    return { success: true };
+  });
+}
 
 function documentHeaders(companies: string, code: string) {
   return db.execute(sql`
