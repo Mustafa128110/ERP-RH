@@ -37,6 +37,14 @@ export function sessionQuery(authId: string) {
   return sessionRows(sql`u.supabase_auth_id = ${authId}`);
 }
 
+// The WhatsApp agent authenticates a message by matching the sender number to
+// this deliberately identical session projection.  It is an authentication
+// bridge only: roles, company access and warehouse access remain the normal ERP
+// authorization model.
+export function sessionByWhatsAppNumber(phone: string) {
+  return sessionRows(sql`u.whatsapp_number = ${phone}`);
+}
+
 function sessionRows(match: ReturnType<typeof sql>) {
   return withConnectRetry(() =>
     db.execute<SessionRow>(sql`

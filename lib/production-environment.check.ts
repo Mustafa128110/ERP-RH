@@ -18,5 +18,16 @@ assert.match(productionEnvironmentError({ ...valid, DATABASE_URL_DIRECT: "https:
 assert.match(productionEnvironmentError({ ...valid, UPSTASH_REDIS_REST_URL: "https://example.com" }) ?? "", /both UPSTASH/);
 assert.match(productionEnvironmentError({ ...valid, UPSTASH_REDIS_REST_URL: "http://example.com", UPSTASH_REDIS_REST_TOKEN: "secret" }) ?? "", /https:\/\//);
 assert.equal(productionEnvironmentError({ ...valid, UPSTASH_REDIS_REST_URL: "https://cache.example.com", UPSTASH_REDIS_REST_TOKEN: "secret" }), null);
+const whatsapp = {
+  WHATSAPP_VERIFY_TOKEN: "verify-token",
+  WHATSAPP_APP_SECRET: "app-secret",
+  WHATSAPP_PHONE_NUMBER_ID: "123456",
+  WHATSAPP_ACCESS_TOKEN: "access-token",
+  GEMINI_API_KEY: "gemini-key",
+  UPSTASH_REDIS_REST_URL: "https://cache.example.com",
+  UPSTASH_REDIS_REST_TOKEN: "redis-token",
+};
+assert.equal(productionEnvironmentError({ ...valid, ...whatsapp }), null);
+assert.match(productionEnvironmentError({ ...valid, WHATSAPP_VERIFY_TOKEN: "verify-token" }) ?? "", /WHATSAPP_APP_SECRET/);
 
 console.log("production environment checks passed");

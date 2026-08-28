@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { sessionQuery, type SessionRow } from "@/lib/db/session-query";
 import { createClient } from "@/lib/supabase/server";
 import { cached, invalidate, MINUTE } from "@/lib/cache";
+import { agentSession } from "@/lib/whatsapp-agent/context";
 
 export interface AuthSession {
   userId: string;
@@ -81,7 +82,9 @@ function shapeSession(row: SessionRow): AuthSession {
 // per-login — so a permission change takes effect on the user's next request,
 // not their next login (docs/phase-8-authentication.md §3).
 export async function getSession(): Promise<AuthSession | null> {
-  return getCookieSession();
+  // Must sit outside React's per-request memo.  A single webhook can carry
+  // messages from different authorised numbers, each with different roles.
+  return agentSession() ?? getCookieSession();
 }
 
 const getCookieSession = cache(async (): Promise<AuthSession | null> => {
@@ -124,7 +127,9 @@ const getCookieSession = cache(async (): Promise<AuthSession | null> => {
 // renders) keep getSession() — a stale company list on screen is a display
 // issue; a stale authorization on a write is a breach.
 export async function getLiveSession(): Promise<AuthSession | null> {
-  return getLiveCookieSession();
+  // Server Actions invoked by the agent still need the current resolved ERP
+  // user, without falling back to a non-existent Meta browser cookie.
+  return agentSession() ?? getLiveCookieSession();
 }
 
 const getLiveCookieSession = cache(async (): Promise<AuthSession | null> => {

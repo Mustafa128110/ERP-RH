@@ -57,6 +57,29 @@ export function productionEnvironmentError(environment: NodeJS.ProcessEnv = proc
     }
   }
 
+  // The assistant is opt-in, but a partly configured public webhook is worse
+  // than disabled: it appears live while it cannot authenticate, deduplicate or
+  // reply safely. Once any assistant credential is present, require the whole
+  // server-only set.
+  const whatsappNames = [
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_APP_SECRET",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_ACCESS_TOKEN",
+    "GEMINI_API_KEY",
+  ];
+  const whatsappDependencies = [
+    ...whatsappNames,
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+  ];
+  if (whatsappNames.some((name) => Boolean(environment[name]?.trim()))) {
+    for (const name of whatsappDependencies) {
+      const error = required(environment, name);
+      if (error) return error;
+    }
+  }
+
   return null;
 }
 

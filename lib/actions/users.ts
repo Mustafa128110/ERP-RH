@@ -15,9 +15,10 @@ import {
 import { getLiveSession, getSession, invalidateSessions } from "@/lib/auth/session";
 import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
+import { DUPLICATE, guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
+import { normalizeWhatsAppNumber, maskedWhatsAppNumber } from "@/lib/whatsapp-agent/phone";
 
 export interface UserListItem {
   id: string;
@@ -57,7 +58,7 @@ export async function getUserDetail(userId: string) {
 
   const [[user], assignments] = await Promise.all([
     db
-      .select({ id: users.id, name: users.name, email: users.email, status: users.status })
+      .select({ id: users.id, name: users.name, email: users.email, status: users.status, whatsappNumber: users.whatsappNumber })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1),
@@ -198,18 +199,21 @@ export async function updateUser(userId: string, _prevState: ActionResult | unde
 
     const name = String(formData.get("name") ?? "").trim();
     const status = String(formData.get("status") ?? "active") as "active" | "inactive" | "locked";
+    const rawWhatsAppNumber = String(formData.get("whatsappNumber") ?? "").trim();
+    const whatsappNumber = rawWhatsAppNumber ? normalizeWhatsAppNumber(rawWhatsAppNumber) : null;
     if (!name) return { error: "Name is required." };
+    if (rawWhatsAppNumber && !whatsappNumber) return { error: "Enter a valid WhatsApp number with country code." };
 
-    await db.update(users).set({ name, status }).where(eq(users.id, userId));
+    await db.update(users).set({ name, status, whatsappNumber }).where(eq(users.id, userId));
     // Status is what getSession() gates on, so a deactivation has to drop the
     // cached session rather than wait out its TTL.
     await invalidateSessions();
     // The expense list names whoever entered each row, joined from this table.
     await invalidateReads(READ_DOMAIN.expenses);
     revalidatePath("/users");
-    await recordAudit({ action: "update", entity: "user", entityId: userId, summary: name, detail: `Status ${status}` });
+    await recordAudit({ action: "update", entity: "user", entityId: userId, summary: name, detail: `Status ${status}; WhatsApp ${maskedWhatsAppNumber(whatsappNumber) || "not assigned"}` });
     return { success: true };
-  });
+  }, { [DUPLICATE]: "That WhatsApp number is already assigned to another user." });
 }
 
 export async function addUserRole(userId: string, _prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {

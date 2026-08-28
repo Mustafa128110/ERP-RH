@@ -17,11 +17,13 @@ export function UserEditForm({
   name,
   email,
   status,
+  whatsappNumber,
 }: {
   userId: string;
   name: string;
   email: string;
   status: string;
+  whatsappNumber: string | null;
 }) {
   const [state, action, pending] = useActionState(updateUser.bind(null, userId), undefined);
   return (
@@ -34,6 +36,12 @@ export function UserEditForm({
       <label className={labelClass}>
         <span className={labelTextClass}>Email</span>
         <input type="email" value={email} disabled className={`${inputClass} bg-ivory text-steel`} />
+      </label>
+
+      <label className={labelClass}>
+        <span className={labelTextClass}>WhatsApp number</span>
+        <input name="whatsappNumber" type="tel" inputMode="tel" defaultValue={whatsappNumber ?? ""} placeholder="923001234567" className={inputClass} />
+        <span className="text-xs text-steel">Only this number can use the ERP assistant for this user.</span>
       </label>
 
       <label className={labelClass}>

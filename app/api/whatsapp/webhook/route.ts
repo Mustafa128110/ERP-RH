@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { hasValidWhatsAppSignature, isWhatsAppWebhookVerification, isWebhookPayload } from "@/lib/whatsapp-webhook";
+import { handleInboundMessage } from "@/lib/whatsapp-agent/agent";
+import { sendWhatsAppText } from "@/lib/whatsapp";
+import { hasValidWhatsAppSignature, isWhatsAppWebhookVerification, isWebhookPayload, parseWhatsAppWebhook } from "@/lib/whatsapp-webhook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,11 +52,17 @@ export async function POST(request: NextRequest) {
       return textResponse("Unauthorized", 401);
     }
 
-    if (!isWebhookPayload(JSON.parse(body))) return textResponse("Invalid payload", 400);
-
-    // This endpoint deliberately only authenticates and acknowledges provider
-    // events. Inbound command handling must go through the existing confirmed,
-    // audited ERP action flow rather than becoming a second write path here.
+    const payload = JSON.parse(body);
+    if (!isWebhookPayload(payload)) return textResponse("Invalid payload", 400);
+    const { inbound } = parseWhatsAppWebhook(payload);
+    const configuredPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+    const messages = configuredPhoneId ? inbound.filter((message) => message.phoneNumberId === configuredPhoneId) : [];
+    const results = await Promise.all(messages.map(async (message) => {
+      const outcome = await handleInboundMessage(message);
+      if (outcome.reply) await sendWhatsAppText(message.from, outcome.reply);
+      return outcome;
+    }));
+    if (results.some((result) => result.retry)) return textResponse("Service unavailable", 503);
     return NextResponse.json({ received: true }, { headers: noStore });
   } catch {
     return textResponse("Invalid payload", 400);

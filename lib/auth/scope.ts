@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { and, isNull, inArray, or, type Column, type SQL } from "drizzle-orm";
 import { getSession } from "./session";
 import type { AuthSession } from "./session";
+import { agentSession } from "@/lib/whatsapp-agent/context";
 
 // The company scope decides what data is on screen. It's the Topbar selector:
 // pick a company and you see that company's rows plus everything global; pick
@@ -18,7 +19,13 @@ export const SCOPE_COOKIE = "scope_company";
 
 // The company ids currently in view. A single selected company, or every
 // accessible one. Cached per request so the cookie/session are read once.
-export const getScopeCompanyIds = cache(async (): Promise<string[]> => {
+export async function getScopeCompanyIds(): Promise<string[]> {
+  const agent = agentSession();
+  if (agent) return agent.companyIds;
+  return getCookieScopeCompanyIds();
+}
+
+const getCookieScopeCompanyIds = cache(async (): Promise<string[]> => {
   const session = await getSession();
   if (!session) return [];
   const selected = (await cookies()).get(SCOPE_COOKIE)?.value;

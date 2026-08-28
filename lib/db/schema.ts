@@ -132,10 +132,9 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 150 }).notNull().unique(),
   status: userStatusEnum("status").notNull().default("active"),
-  // Retained from the removed WhatsApp assistant: the phone this person used to
-  // message the ERP from, full international form with no punctuation
-  // (923001234567). No application code reads or writes it any more, but the
-  // column stays — the database is untouched, and existing rows are history.
+  // The phone this person uses to message the ERP assistant, full international
+  // form with no punctuation (923001234567). It is unique so an inbound number
+  // can establish exactly one ERP permission scope.
   whatsappNumber: varchar("whatsapp_number", { length: 20 }).unique(),
   // --- Display preferences -------------------------------------------------
   // These two ride along on the users row rather than living in a preferences
@@ -843,10 +842,7 @@ export const settings = pgTable(
 
 // --- WhatsApp ---
 
-// Retained from the removed WhatsApp feature (the app no longer sends or
-// receives messages — the tab in the sidebar is a placeholder). The table and
-// its enum stay exactly as the database has them: rows here are history, and no
-// application code reads or writes them any more.
+// Customer WhatsApp handoffs and provider sends use the same historical log.
 export const whatsappStatusEnum = pgEnum("whatsapp_status", ["queued", "sent", "delivered", "read", "failed", "handoff"]);
 
 export const whatsappMessages = pgTable(
