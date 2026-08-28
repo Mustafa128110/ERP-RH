@@ -4,6 +4,7 @@ export type Command =
   | { kind: "cancel" }
   | { kind: "rate"; query: string }
   | { kind: "stock"; query: string }
+  | { kind: "items"; query: string }
   | { kind: "balance"; query: string }
   | { kind: "due" }
   | { kind: "sales"; when: "today" | "yesterday" | "month" | { date: string } }
@@ -45,6 +46,9 @@ export function parseCommand(raw: string): Command {
   if (rate) return subject(rate[1]) ? { kind: "rate", query: subject(rate[1]) } : { kind: "help" };
   const stock = /^(?:stock|inventory|qty|quantity|available|maal)\b(.*)$/i.exec(cleaned);
   if (stock) return subject(stock[1]) ? { kind: "stock", query: subject(stock[1]) } : { kind: "help" };
+  const itemList = /^(?:a\s+)?(?:list|items?|products?|catalog(?:ue)?)\b(?:\s+(?:of|for|matching|containing|with))?\s*(.*)$/i.exec(cleaned)
+    ?? /^(.+?)\s+(?:items?|products?)$/i.exec(cleaned);
+  if (itemList && subject(itemList[1])) return { kind: "items", query: subject(itemList[1]) };
   const balance = /^(?:balance|bal|owes?|khata|hisaab|hisab|ledger)\b(.*)$/i.exec(cleaned);
   if (balance) return subject(balance[1]) ? { kind: "balance", query: subject(balance[1]) } : { kind: "help" };
 
@@ -72,6 +76,7 @@ export const HELP_TEXT = [
   "",
   "• rate cement",
   "• stock cement",
+  "• list shovel items",
   "• balance Ahmed",
   "• due",
   "• sales / sales yesterday",

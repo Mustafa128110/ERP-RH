@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { HELP_TEXT, parseCommand } from "./commands";
 import { sessionForWhatsAppNumber, runAsWhatsAppUser } from "./identity";
 import { geminiConfigured, selectTool } from "./gemini";
-import { clearPending, finishInbound, hasPending, releaseInbound, savePending, takePending, type InboundClaim, claimInbound } from "./state";
+import { appendConversation, clearConversation, clearPending, finishInbound, getConversation, hasPending, releaseInbound, savePending, takePending, type InboundClaim, claimInbound } from "./state";
 import { commitDraft, runTool, type ToolResult } from "./tools";
 import { normalizeWhatsAppNumber } from "./phone";
 import { todayISO } from "@/lib/format";
@@ -54,14 +54,18 @@ export async function handleInboundMessage(message: { id: string; from: string; 
           const draft = await takePending(phone);
           if (!draft) return "Nothing waiting to be confirmed.";
           if (draft.userId !== session.userId || draft.phone !== phone) return "That draft is no longer available.";
-          return commitDraft(draft);
+          const committed = await commitDraft(draft);
+          await clearConversation(phone);
+          return committed;
         }
         case "cancel":
           if (!(await hasPending(phone))) return "Nothing to cancel.";
           await clearPending(phone);
+          await clearConversation(phone);
           return "Cancelled — nothing was saved.";
         case "rate": return replyForTool(phone, session.userId, message.id, await runTool("item_rates", { item: command.query }));
         case "stock": return replyForTool(phone, session.userId, message.id, await runTool("item_stock", { item: command.query }));
+        case "items": return replyForTool(phone, session.userId, message.id, await runTool("search_items", { query: command.query }));
         case "balance": return replyForTool(phone, session.userId, message.id, await runTool("contact_balance", { contact: command.query }));
         case "due": return replyForTool(phone, session.userId, message.id, await runTool("outstanding_dues", {}));
         case "sales": {
@@ -71,12 +75,16 @@ export async function handleInboundMessage(message: { id: string; from: string; 
         case "invoice": return replyForTool(phone, session.userId, message.id, await runTool("invoice_summary", { number: command.number }));
         case "agent": {
           if (!geminiConfigured()) return `I can handle the commands below while the AI assistant is unavailable.\n\n${HELP_TEXT}`;
-          const selection = await selectTool(command.text);
+          const selection = await selectTool(command.text, await getConversation(phone));
           if (!selection) return "I could not understand that just now. Send *help* to see what I can do.";
           return replyForTool(phone, session.userId, message.id, await runTool(selection.name, selection.args));
         }
       }
     });
+    const exact = message.text.trim().toLowerCase().replace(/[.!?]+$/g, "");
+    if (exact !== "yes" && !/^(?:n|no|cancel|stop|nahi|nai|nahin|rehne|chor)$/.test(exact)) {
+      await appendConversation(phone, [{ role: "user", text: message.text }, { role: "assistant", text: reply }]);
+    }
     await finishInbound(message.id);
     return { reply, retry: false };
   } catch (error) {

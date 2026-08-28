@@ -13,7 +13,7 @@ import { isReportSlug, REPORT_TYPES, type ReportSlug } from "@/lib/report-consta
 import { queryProductRates } from "@/lib/queries/products";
 import { resolveDocumentTax } from "@/lib/queries/document-tax";
 import { getBankAccountOptions, getCashAccountOptions, getCompanies, getContactOptions, getDocumentTypes, getExpenseCategories, getItemOptions, getLocations } from "@/lib/queries/lookups";
-import { bestMatches, chooseFrom } from "./match";
+import { bestMatches, chooseFrom, rankedMatches } from "./match";
 import type { PendingDraft } from "./state";
 import { OPERATION_ID_FIELD } from "@/lib/operation-constants";
 
@@ -27,6 +27,7 @@ export type ToolDeclaration = {
 };
 
 type Tool = ToolDeclaration & { run: (args: ToolArgs) => Promise<ToolResult> };
+const LIST_LIMIT = 8;
 const str = (description: string) => ({ type: "string", description });
 const dateOf = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayISO();
 const text = (args: ToolArgs, name: string) => typeof args[name] === "string" ? args[name].trim() : "";
@@ -61,17 +62,18 @@ async function resolveContact(companyId: string, name: string) {
 type AgentLine = { item: string; quantity: number; unitPrice: number };
 function readLines(args: ToolArgs): AgentLine[] {
   const value = args.lines;
-  if (!Array.isArray(value)) ask("List the items, quantity and price.");
-  const lines = value.flatMap((row) => {
-    if (!row || typeof row !== "object") return [];
+  if (!Array.isArray(value) || value.length === 0) ask("Items? Send: quantity, item, price.");
+  return value.map((row) => {
+    if (!row || typeof row !== "object") ask("Items? Send: quantity, item, price.");
     const candidate = row as Record<string, unknown>;
     const item = typeof candidate.item === "string" ? candidate.item.trim() : "";
     const quantity = Number(candidate.quantity);
     const unitPrice = Number(candidate.unitPrice);
-    return item && Number.isFinite(quantity) && quantity > 0 && Number.isFinite(unitPrice) && unitPrice >= 0 ? [{ item, quantity, unitPrice }] : [];
+    if (!item) ask("Which item?");
+    if (!Number.isFinite(quantity) || quantity <= 0) ask(`Quantity for ${item}?`);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) ask(`Price for ${item}?`);
+    return { item, quantity, unitPrice };
   });
-  if (lines.length === 0) ask("List the items, quantity and price.");
-  return lines;
 }
 
 async function resolveLines(companyId: string, lines: AgentLine[]) {
@@ -105,28 +107,42 @@ async function resolveSettlement(companyId: string, raw: string, required: boole
 
 async function itemRates(query: string): Promise<ToolResult> {
   const rows = await queryProductRates(await getScopeCompanyIds());
-  const hits = bestMatches(query, rows, (row) => row.name);
-  if (hits.length === 0) return { reply: `Nothing in the catalogue matches "${query}".` };
-  if (hits.length > 1) return { reply: chooseFrom("item", hits.map((row) => row.name)) };
+  const hits = rankedMatches(query, rows, (row) => row.name);
+  if (hits.length === 0) return { reply: `Nothing matches "${query}".` };
+  if (hits.length > 1) {
+    const shown = hits.slice(0, LIST_LIMIT);
+    return { reply: [
+      `*${hits.length} items*`,
+      ...shown.map((item) => `• ${item.name} — Sale ${item.salesRate ? money(item.salesRate) : "—"} · Buy ${item.purchaseRate1 ? money(item.purchaseRate1) : "—"} · Stock ${qty(item.onHand ?? 0)}`),
+      ...(hits.length > shown.length ? [`+${hits.length - shown.length} more. Narrow the name.`] : []),
+    ].join("\n") };
+  }
   const item = hits[0];
   const purchase = [item.purchaseRate1, item.purchaseRate2, item.purchaseRate3].filter(Boolean).map((value) => money(value!));
-  return { reply: [`*${item.name}*`, purchase.length ? `Purchase: ${purchase.join(" / ")}` : "Purchase: no history", `Last sold: ${item.salesRate ? money(item.salesRate) : "never sold"}`, `On hand: ${item.onHand ? qty(item.onHand) : "0"}`].join("\n") };
+  return { reply: [`*${item.name}*`, `Sale ${item.salesRate ? money(item.salesRate) : "—"} · Buy ${purchase[0] ?? "—"} · Stock ${qty(item.onHand ?? 0)}`].join("\n") };
 }
 
 async function itemStock(query: string): Promise<ToolResult> {
   const rows = await listStockLevels();
-  const hits = bestMatches(query, rows, (row) => row.itemName);
+  const hits = rankedMatches(query, rows, (row) => row.itemName);
   if (hits.length === 0) return { reply: `Nothing in stock matches "${query}".` };
-  if (hits.length > 1) return { reply: chooseFrom("item", hits.map((row) => row.itemName)) };
+  if (hits.length > 1) {
+    const shown = hits.slice(0, LIST_LIMIT);
+    return { reply: [
+      `*${hits.length} items*`,
+      ...shown.map((item) => `• ${item.itemName} — ${item.unitTotals.map((unit) => `${qty(unit.onHand)} ${unit.unit}`).join(", ") || "0"}`),
+      ...(hits.length > shown.length ? [`+${hits.length - shown.length} more. Narrow the name.`] : []),
+    ].join("\n") };
+  }
   const item = hits[0];
-  return { reply: [`*${item.itemName}*`, `On hand: ${item.unitTotals.map((unit) => `${qty(unit.onHand)} ${unit.unit}`).join(", ") || "0"}`, ...item.breakdown.map((row) => `• ${row.location}: ${qty(row.onHand)} ${row.unit}`)].join("\n") };
+  return { reply: [`*${item.itemName}* — ${item.unitTotals.map((unit) => `${qty(unit.onHand)} ${unit.unit}`).join(", ") || "0"}`, ...item.breakdown.slice(0, 4).map((row) => `• ${row.location}: ${qty(row.onHand)} ${row.unit}`)].join("\n") };
 }
 
 async function balance(query: string): Promise<ToolResult> {
   const rows = await listLedgerBalances();
-  const hits = bestMatches(query, rows, (row) => row.displayName);
+  const hits = rankedMatches(query, rows, (row) => row.displayName);
   if (hits.length === 0) return { reply: `No balance matches "${query}".` };
-  if (hits.length > 1) return { reply: chooseFrom("contact", hits.map((row) => row.displayName)) };
+  if (hits.length > 1) return { reply: hits.slice(0, LIST_LIMIT).map((row) => `• ${row.displayName} — ${row.balance < 0 ? `owes us ${money(-row.balance)}` : row.balance > 0 ? `we owe ${money(row.balance)}` : "settled"}`).join("\n") };
   const row = hits[0];
   const statement = row.balance > 0 ? `We owe them ${money(row.balance)}` : row.balance < 0 ? `They owe us ${money(-row.balance)}` : "Settled — nothing outstanding";
   return { reply: `*${row.displayName}* (${row.company})\n${statement}` };
@@ -182,6 +198,7 @@ async function draftPayment(direction: "received" | "made", args: ToolArgs): Pro
 async function draftExpense(args: ToolArgs): Promise<ToolResult> {
   const company = await resolveCompany(text(args, "company"));
   const categoryName = text(args, "category");
+  if (!categoryName) ask("Which expense category?");
   const categories = (await getExpenseCategories()).filter((row) => row.companyId === company.id);
   const hits = bestMatches(categoryName, categories, (row) => row.name);
   if (hits.length === 0) ask(`No existing expense category matches "${categoryName}".`);
@@ -212,18 +229,19 @@ async function draftPurchase(args: ToolArgs): Promise<ToolResult> {
 }
 
 const tools: Tool[] = [
-  { name: "item_rates", description: "Purchase and sale rates for one product.", parameters: { type: "object", properties: { item: str("Product name") }, required: ["item"] }, run: (args) => itemRates(text(args, "item")) },
-  { name: "item_stock", description: "Stock on hand for one product.", parameters: { type: "object", properties: { item: str("Product name") }, required: ["item"] }, run: (args) => itemStock(text(args, "item")) },
+  { name: "search_items", description: "List catalogue products matching a broad, partial, plural or category-like phrase, with short rates and stock. Use for requests like list shovel items or products containing wire.", parameters: { type: "object", properties: { query: str("Meaningful product words only") }, required: ["query"] }, run: (args) => itemRates(text(args, "query")) },
+  { name: "item_rates", description: "Rates and stock for all products matching a partial item phrase; words can occur anywhere and may be plural.", parameters: { type: "object", properties: { item: str("Meaningful product words only") }, required: ["item"] }, run: (args) => itemRates(text(args, "item")) },
+  { name: "item_stock", description: "Stock for all products matching a partial item phrase; words can occur anywhere and may be plural.", parameters: { type: "object", properties: { item: str("Meaningful product words only") }, required: ["item"] }, run: (args) => itemStock(text(args, "item")) },
   { name: "contact_balance", description: "Balance for a customer or supplier.", parameters: { type: "object", properties: { contact: str("Contact name") }, required: ["contact"] }, run: (args) => balance(text(args, "contact")) },
   { name: "outstanding_dues", description: "Outstanding customer receivables.", parameters: { type: "object", properties: {} }, run: () => dues() },
   { name: "sales_summary", description: "Sales total for a date range.", parameters: { type: "object", properties: { from: str("Start YYYY-MM-DD"), to: str("End YYYY-MM-DD") }, required: ["from", "to"] }, run: (args) => { const from = dateOf(text(args, "from")); const to = dateOf(text(args, "to") || from); return salesSummary(from, to, from === to ? `on ${from}` : `${from} to ${to}`); } },
   { name: "invoice_summary", description: "Summary of an invoice by number.", parameters: { type: "object", properties: { number: str("Invoice number") }, required: ["number"] }, run: (args) => invoiceSummary(text(args, "number")) },
-  { name: "run_report", description: `One ERP report: ${REPORT_TYPES.map((row) => row.slug).join(", ")}.`, parameters: { type: "object", properties: { report: str("Report slug"), from: str("Start YYYY-MM-DD"), to: str("End YYYY-MM-DD") }, required: ["report"] }, run: async (args) => { const report = text(args, "report"); if (!isReportSlug(report)) return { reply: "Which report? " + REPORT_TYPES.map((row) => row.slug).join(", ") }; const result = await runReport(report as ReportSlug, { from: text(args, "from") || undefined, to: text(args, "to") || undefined }); return { reply: result.rows.length ? [`*${result.title}*`, ...result.rows.slice(0, 10).map((row) => result.columns.slice(0, 3).map((column) => String(row[column.key] ?? "—")).join(" · "))].join("\n") : "Nothing in that report." }; } },
-  { name: "create_sale", description: "Draft a sale. It is never posted until the user replies with exact yes.", parameters: { type: "object", properties: { customer: str("Existing customer"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item", "quantity", "unitPrice"] } }, payment: str("cash, bank name or credit"), company: str("Company if specified"), date: str("YYYY-MM-DD") }, required: ["customer", "lines"] }, run: draftSale },
-  { name: "record_payment_received", description: "Draft money received from an existing customer.", parameters: { type: "object", properties: { contact: str("Existing contact"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD") }, required: ["contact", "amount"] }, run: (args) => draftPayment("received", args) },
-  { name: "record_payment_made", description: "Draft money paid to an existing supplier.", parameters: { type: "object", properties: { contact: str("Existing contact"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD") }, required: ["contact", "amount"] }, run: (args) => draftPayment("made", args) },
-  { name: "record_expense", description: "Draft an expense under an existing category.", parameters: { type: "object", properties: { category: str("Existing expense category"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD"), notes: str("Optional note") }, required: ["category", "amount"] }, run: draftExpense },
-  { name: "create_stock_purchase", description: "Draft a stock purchase. It is never posted until exact yes.", parameters: { type: "object", properties: { supplier: str("Existing supplier"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item", "quantity", "unitPrice"] } }, location: str("Receiving location"), payment: str("cash, bank name or credit"), company: str("Company"), date: str("YYYY-MM-DD") }, required: ["supplier", "lines", "location"] }, run: draftPurchase },
+  { name: "run_report", description: `One ERP report: ${REPORT_TYPES.map((row) => row.slug).join(", ")}.`, parameters: { type: "object", properties: { report: str("Report slug"), from: str("Start YYYY-MM-DD"), to: str("End YYYY-MM-DD") }, required: ["report"] }, run: async (args) => { const report = text(args, "report"); if (!isReportSlug(report)) return { reply: "Which report? " + REPORT_TYPES.map((row) => row.slug).join(", ") }; const result = await runReport(report as ReportSlug, { from: text(args, "from") || undefined, to: text(args, "to") || undefined }); return { reply: result.rows.length ? [`*${result.title}*`, ...result.rows.slice(0, 6).map((row) => result.columns.slice(0, 3).map((column) => String(row[column.key] ?? "—")).join(" · "))].join("\n") : "Nothing in that report." }; } },
+  { name: "create_sale", description: "Start or continue a sale draft. Call with known details even when incomplete; the tool asks the next question. Never posts until exact yes.", parameters: { type: "object", properties: { customer: str("Existing customer, if known"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item"] } }, payment: str("cash, bank name or credit"), company: str("Company if specified"), date: str("YYYY-MM-DD") } }, run: draftSale },
+  { name: "record_payment_received", description: "Start or continue a customer payment-received draft. Call even when incomplete.", parameters: { type: "object", properties: { contact: str("Existing contact, if known"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD") } }, run: (args) => draftPayment("received", args) },
+  { name: "record_payment_made", description: "Start or continue a supplier payment-made draft. Call even when incomplete.", parameters: { type: "object", properties: { contact: str("Existing contact, if known"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD") } }, run: (args) => draftPayment("made", args) },
+  { name: "record_expense", description: "Start or continue an expense draft. Call even when incomplete.", parameters: { type: "object", properties: { category: str("Existing expense category, if known"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD"), notes: str("Optional note") } }, run: draftExpense },
+  { name: "create_stock_purchase", description: "Start or continue a stock purchase draft. Call with known details even when incomplete; the tool asks the next question. Never posts until exact yes.", parameters: { type: "object", properties: { supplier: str("Existing supplier, if known"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item"] } }, location: str("Receiving location"), payment: str("cash, bank name or credit"), company: str("Company"), date: str("YYYY-MM-DD") } }, run: draftPurchase },
   { name: "unsupported_request", description: "Use when the request is outside the available ERP assistant functions.", parameters: { type: "object", properties: {} }, run: async () => ({ reply: "I can help with rates, stock, balances, dues, sales, invoices, and drafting sales, payments, expenses or stock purchases." }) },
 ];
 

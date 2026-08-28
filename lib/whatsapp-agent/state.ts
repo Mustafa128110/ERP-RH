@@ -5,6 +5,8 @@ const PREFIX = "erp:whatsapp-agent:v1";
 const INBOUND_TTL_SECONDS = 24 * 60 * 60;
 const PROCESSING_TTL_SECONDS = 90;
 const PENDING_TTL_SECONDS = 10 * 60;
+const CONVERSATION_TTL_SECONDS = 30 * 60;
+const CONVERSATION_TURNS = 10;
 
 type Globals = { redis?: Redis | null };
 const globals = globalThis as unknown as Globals;
@@ -19,6 +21,7 @@ function client(): Redis | null {
 
 function inboundKey(messageId: string) { return `${PREFIX}:inbound:${messageId}`; }
 function pendingKey(phone: string) { return `${PREFIX}:pending:${phone}`; }
+function conversationKey(phone: string) { return `${PREFIX}:conversation:${phone}`; }
 
 export type InboundClaim = "claimed" | "done" | "busy" | "unavailable";
 
@@ -91,4 +94,40 @@ export async function clearPending(phone: string): Promise<void> {
   const redis = client();
   if (!redis) return;
   try { await redis.del(pendingKey(phone)); } catch { /* Expiry is safe. */ }
+}
+
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export async function getConversation(phone: string): Promise<ConversationTurn[]> {
+  const redis = client();
+  if (!redis) return [];
+  try {
+    const turns = await redis.get<ConversationTurn[]>(conversationKey(phone));
+    return Array.isArray(turns) ? turns.slice(-CONVERSATION_TURNS) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function appendConversation(phone: string, turns: ConversationTurn[]): Promise<void> {
+  const redis = client();
+  if (!redis) return;
+  try {
+    const current = await getConversation(phone);
+    const next = [...current, ...turns]
+      .map((turn) => ({ ...turn, text: turn.text.slice(0, 1_500) }))
+      .slice(-CONVERSATION_TURNS);
+    await redis.set(conversationKey(phone), next, { ex: CONVERSATION_TTL_SECONDS });
+  } catch {
+    // Conversation memory improves follow-ups but never gates an ERP action.
+  }
+}
+
+export async function clearConversation(phone: string): Promise<void> {
+  const redis = client();
+  if (!redis) return;
+  try { await redis.del(conversationKey(phone)); } catch { /* Expiry is safe. */ }
 }
