@@ -145,6 +145,7 @@ export function PaymentManager({
   cashAccountOptions,
   chequeOptions,
   filters,
+  canHardDelete,
 }: {
   payments: PaymentRow[];
   // Whether any filter is on, so an empty list can say why it's empty.
@@ -157,6 +158,7 @@ export function PaymentManager({
   bankAccountOptions: BankOption[];
   cashAccountOptions: CashOption[];
   chequeOptions: ChequeOption[];
+  canHardDelete: boolean;
   // The filter controls, built by the page — they drive query params, so the
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
@@ -181,7 +183,7 @@ export function PaymentManager({
 
   // The payments this list shows, which is the server's list plus whatever is in
   // flight. Applied to the payments themselves rather than to the grouped rows
-  // below, so an edited amount re-totals its day line and a cancelled payment
+  // below, so an edited amount re-totals its day line and a deleted payment
   // leaves the group — or takes the whole line with it if it was the only one.
   const { records: shown, pending, patch, remove } = useOptimisticRecords(payments, "id");
 
@@ -205,7 +207,7 @@ export function PaymentManager({
     }
   }
 
-  // Called from inside the form's own action when a save or a cancellation
+  // Called from inside the form's own action when a save or a deletion
   // starts, and it is not housekeeping: the warm copy was taken before this
   // write, so handing it to the next open would show the payment as it used to
   // be — worse than the round trip it saves.
@@ -386,7 +388,7 @@ export function PaymentManager({
 
       {editing && (
         // Hidden rather than closed while this payment's write is in the air. The
-        // server may still have something to say — a cancellation that would put
+        // server may still have something to say — a deletion that would put
         // settled invoices back to outstanding is refused once, with the figures —
         // and a hidden popup keeps that question and everything typed standing;
         // a closed one would have thrown both away. `pending` empties when the
@@ -413,16 +415,18 @@ export function PaymentManager({
                 patch(editing.id, typedIntoRow(formData));
               }}
             />
-            <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeletePaymentButton
-                paymentId={editing.id}
-                onDone={close}
-                onDeleting={() => {
-                  forgetWarm(editing.id);
-                  remove(editing.id);
-                }}
-              />
-            </div>
+            {canHardDelete && (
+              <div className="rounded border border-error/30 bg-error-tint p-4">
+                <DeletePaymentButton
+                  paymentId={editing.id}
+                  onDone={close}
+                  onDeleting={() => {
+                    forgetWarm(editing.id);
+                    remove(editing.id);
+                  }}
+                />
+              </div>
+            )}
           </div>
         </Dialog>
       )}

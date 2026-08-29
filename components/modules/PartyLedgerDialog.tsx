@@ -20,7 +20,7 @@ import { getPayment } from "@/lib/actions/payments";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
 import type { AuditRow } from "@/lib/actions/audit";
 import type { PaymentDirection } from "@/lib/actions/payments";
-import { LEDGER_TYPE_LABELS, type SettlementState } from "@/lib/ledger-constants";
+import { closingBalance, LEDGER_TYPE_LABELS, runningBalances, type SettlementState } from "@/lib/ledger-constants";
 import { openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHover } from "@/components/ui/DetailHover";
@@ -250,13 +250,12 @@ function DescriptionCell({ entry }: { entry: PartyLedgerEntry }) {
     );
   }
 
-  // Journal entries: no hover, just plain text
+  // Opening-balance entries: no hover, just plain text.
   return <span>{label}</span>;
 }
 
 /** §2's second invariant, one row at a time: how much of this document FIFO has
- *  settled, and against what. A journal entry never settles anything, so it shows
- *  a dash rather than a misleading "Outstanding". */
+ *  settled, and against what. */
 function SettlementCell({ entry }: { entry: PartyLedgerEntry & { balance: number } }) {
   if (!entry.settlement) return <span className="text-xs text-steel">—</span>;
 
@@ -505,11 +504,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   }, [activeEntries, fromDate]);
 
   const entriesWithBalance = useMemo(() => {
-    let running = effectiveOpening;
-    return processedEntries.map((e) => {
-      running += e.debit - e.credit;
-      return { ...e, balance: running };
-    });
+    return runningBalances(effectiveOpening, processedEntries);
   }, [processedEntries, effectiveOpening]);
 
   const summary = useMemo(() => {
@@ -519,7 +514,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
       opening: effectiveOpening,
       totalDebit: filteredDebit,
       totalCredit: filteredCredit,
-      closing: effectiveOpening + filteredDebit - filteredCredit,
+      closing: closingBalance(effectiveOpening, filteredDebit, filteredCredit),
     };
   }, [processedEntries, effectiveOpening]);
 
@@ -1013,9 +1008,8 @@ function OpeningBalanceDialog({
   companyId: string;
   contactId: string;
   contactName: string;
-  // The stored figure as the statement reads it: positive means the party owes us
-  // (debit - credit). The write path uses the list convention (credit - debit,
-  // positive = we owe), so this dialog negates before sending.
+  // The stored figure and every ledger surface use one sign: positive means the
+  // party owes us (debit - credit), negative means we owe the party.
   current: number;
   onClose: () => void;
   onSaved: () => void | Promise<void>;

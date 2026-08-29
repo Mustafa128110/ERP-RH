@@ -58,8 +58,8 @@ type Row = {
   created_at: string;
   grand_total: number;
   paid_amount: number;
-  opening_debit: number;
-  opening_credit: number;
+  entry_debit: number;
+  entry_credit: number;
   allocated: number;
 };
 
@@ -81,12 +81,16 @@ export async function readPartySettlement(
            d.created_at::text AS created_at,
            d.grand_total::float8 AS grand_total,
            d.paid_amount::float8 AS paid_amount,
-           coalesce(ob.debit, 0)::float8 AS opening_debit,
-           coalesce(ob.credit, 0)::float8 AS opening_credit,
+           coalesce(party_entry.debit, 0)::float8 AS entry_debit,
+           coalesce(party_entry.credit, 0)::float8 AS entry_credit,
            a.amount::float8 AS allocated
     FROM documents d
     JOIN document_types dt ON dt.id = d.document_type_id
-    LEFT JOIN ledger_entries ob ON ob.document_id = d.id AND dt.code = 'OPENING_BALANCE'
+    LEFT JOIN bank_accounts b ON b.id = d.bank_account_id
+    LEFT JOIN cash_accounts c ON c.id = d.cash_account_id
+    LEFT JOIN ledger_entries party_entry
+      ON party_entry.document_id = d.id
+     AND dt.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
     -- Two index lookups rather than one OR: a document is either a payment or an
     -- invoice, never both, so summing across both columns cannot double count.
     LEFT JOIN LATERAL (
@@ -99,7 +103,16 @@ export async function readPartySettlement(
     WHERE d.company_id = ${companyId}::uuid
       AND d.contact_id = ${contactId}::uuid
       AND d.status = 'posted'
-      AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'PAYMENT_RECEIVED', 'PAYMENT_MADE')
+      AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'JOURNAL_ENTRY', 'PAYMENT_RECEIVED', 'PAYMENT_MADE')
+      AND (
+        dt.code NOT IN ('PAYMENT_RECEIVED', 'PAYMENT_MADE')
+        OR (d.bank_account_id IS NOT NULL AND (b.company_id IS NULL OR b.company_id = d.company_id))
+        OR (d.cash_account_id IS NOT NULL AND c.company_id = d.company_id)
+        OR (d.bank_account_id IS NULL AND d.cash_account_id IS NULL AND EXISTS (
+          SELECT 1 FROM cheque_register q
+          WHERE q.document_id = d.id AND q.company_id = d.company_id
+        ))
+      )
     ORDER BY d.document_date, d.created_at, d.id
   `);
 
@@ -138,7 +151,7 @@ export async function readPartySettlement(
       // The sign lives on the ledger row, not on the document, so the figure and
       // its direction cannot drift apart.
       openingDocumentId = row.id;
-      openingSigned = Number(row.opening_debit ?? 0) - Number(row.opening_credit ?? 0);
+      openingSigned = Number(row.entry_debit ?? 0) - Number(row.entry_credit ?? 0);
       const side = openingQueueSide(openingSigned);
       if (side) {
         items.push({
@@ -148,6 +161,21 @@ export async function readPartySettlement(
           date: row.date,
           createdAt: row.created_at,
           isOpening: true,
+        });
+      }
+      continue;
+    }
+
+    if (row.code === "JOURNAL_ENTRY") {
+      const signed = Number(row.entry_debit ?? 0) - Number(row.entry_credit ?? 0);
+      const side = openingQueueSide(signed);
+      if (side) {
+        items.push({
+          id: row.id,
+          side,
+          amount: Math.max(0, grandTotal - tillPaid),
+          date: row.date,
+          createdAt: row.created_at,
         });
       }
       continue;

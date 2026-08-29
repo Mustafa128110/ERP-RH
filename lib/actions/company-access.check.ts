@@ -66,7 +66,7 @@ const REQUIRED = [
   ["expenses.ts", "export async function updateExpense", 'requirePermission(session, "expenses", "edit", { companyId: values.companyId })'],
   ["expenses.ts", "export async function deleteExpense", 'requirePermission(session, "expenses", "delete", { companyId: existing.companyId })'],
   ["payments.ts", "export async function updatePayment", 'requirePermission(session, "payments", "edit", { companyId: existing.companyId })'],
-  ["payments.ts", "export async function deletePayment", 'requirePermission(session, "payments", "delete", { companyId: existing.companyId })'],
+  ["payments.ts", "export async function deletePayment", 'requireGlobalPermission(session, "payments", "delete")'],
 
   // Critical non-queueable creates — membership + per-company permission.
   ["sales.ts", "export async function createSale", 'requirePermission(session, "sales", "create", { companyId })'],
@@ -75,7 +75,7 @@ const REQUIRED = [
   ["stock-adjustments.ts", "export async function createStockAdjustment", 'requirePermission(session, "stock_adjustments", "create", { companyId })'],
   ["returns.ts", "export async function createSalesReturn", 'requirePermission(session, "sales", "create", { companyId: source.companyId })'],
   ["stock-transfers.ts", "export async function createStockTransfer", 'requirePermission(session, "stock_transfers", "create", { companyId: header.companyId })'],
-  ["ledger.ts", "export async function createLedgerEntry", 'requirePermission(session, "accounts", "create", { companyId })'],
+  ["ledger.ts", "export async function createOpeningBalanceEntry", 'requirePermission(session, "accounts", "create", { companyId })'],
   ["ledger.ts", "export async function setContactBalance", 'requirePermission(session, "accounts", "create", { companyId })'],
   ["ledger.ts", "export async function deleteLedgerRow", 'requirePermission(session, "accounts", "delete", { companyId: doc.companyId })'],
   ["accounts.ts", "export async function createCheque", 'requirePermission(session, "cheques", "create", { companyId: values.companyId })'],
@@ -88,7 +88,7 @@ const REQUIRED = [
   // re-checked against the row's own company.
   ["sales.ts", "export async function deleteSale", 'requirePermission(session, "sales", "delete", { companyId: existingDoc.companyId })'],
   ["sales.ts", "export async function deleteSale", "companyInScope(documents.companyId)"],
-  ["purchases.ts", "export async function deleteStockPurchase", 'requirePermission(session, "purchases", "delete", { companyId: existingDoc.companyId })'],
+  ["purchases.ts", "export async function deleteStockPurchase", 'requireGlobalPermission(session, "purchases", "delete")'],
   ["purchases.ts", "export async function deleteStockPurchase", "companyInScope(documents.companyId)"],
   ["stock-transfers.ts", "export async function deleteStockTransfer", "companyInScope(documents.companyId)"],
   ["stock-adjustments.ts", "export async function deleteStockAdjustment", "companyInScope(documents.companyId)"],
@@ -125,7 +125,7 @@ const REQUIRED = [
   ["inter-company.ts", "export async function createInterCompanySale", "await getLiveSession()"],
   ["inter-company.ts", "export async function updateInterCompanySale", "await getLiveSession()"],
   ["inter-company.ts", "export async function deleteInterCompanySale", "await getLiveSession()"],
-  ["ledger.ts", "export async function createLedgerEntry", "await getLiveSession()"],
+  ["ledger.ts", "export async function createOpeningBalanceEntry", "await getLiveSession()"],
   ["ledger.ts", "export async function setContactBalance", "await getLiveSession()"],
   ["ledger.ts", "export async function deleteLedgerRow", "await getLiveSession()"],
   ["accounts.ts", "export async function updateBankAccount", "await getLiveSession()"],

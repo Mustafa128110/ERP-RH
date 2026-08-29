@@ -491,6 +491,27 @@
       "when": 1787790002000,
       "tag": "0069_remove_inherited_public_api_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1788000261844,
+      "tag": "0070_nice_captain_universe",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788000263000,
+      "tag": "0071_party_opening_fifo",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788000264000,
+      "tag": "0072_guard_party_fifo_settlements",
+      "breakpoints": true
     }
   ]
 }

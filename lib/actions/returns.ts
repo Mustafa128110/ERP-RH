@@ -14,7 +14,6 @@ import { recordAudit } from "@/lib/actions/audit";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { round1 } from "@/lib/format";
 import { salesReturnHeaderTotals } from "@/lib/return-constants";
-import { postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
 
 type RequestedLine = { sourceLineId: string; quantity: number };
 function salesReturnType(companyId: string) {
@@ -219,24 +218,6 @@ export async function createSalesReturn(_prevState: (ActionResult & { id?: strin
         // if the original invoice was already paid, the credit remains visible in
         // the party ledger until it is refunded through an ordinary payment-out.
         if (grandTotal > 0) await tx.insert(ledgerEntries).values({ companyId: lockedSource.companyId, documentId: returnDoc.id, credit: String(grandTotal) });
-        const restoredStockCost = round1(selected.reduce((total, line) => {
-          const sourceCost = costByLine.get(line.id) ?? 0;
-          const originalQuantity = Number(sourceLines.find((sourceLine) => sourceLine.id === line.id)?.quantity ?? 0);
-          return total + (originalQuantity > 0 ? sourceCost * line.quantity / originalQuantity : 0);
-        }, 0));
-        await postGeneralLedgerIfCutover(tx, {
-          companyId: lockedSource.companyId,
-          documentId: returnDoc.id,
-          documentDate,
-          lines: [
-            { accountCode: "4010", debit: grandTotal, memo: "Sales return" },
-            { accountCode: "1100", credit: grandTotal, memo: "Customer credit" },
-            ...(restoredStockCost > 0 ? [
-              { accountCode: "1200", debit: restoredStockCost, memo: "Inventory returned" },
-              { accountCode: "5000", credit: restoredStockCost, memo: "Cost of goods returned" },
-            ] : []),
-          ],
-        });
         return returnDoc.id;
       });
     } catch (error) {
@@ -270,7 +251,6 @@ export async function cancelSalesReturn(_prevState: ActionResult | undefined, fo
         FROM inventory_transactions it JOIN document_lines dl ON dl.id = it.document_line_id WHERE dl.document_id = ${documentId}::uuid`);
       await tx.execute(sql`INSERT INTO ledger_entries (company_id, document_id, debit, credit)
         SELECT company_id, document_id, credit, debit FROM ledger_entries WHERE document_id = ${documentId}::uuid`);
-      await reverseGeneralLedger(tx, existing.companyId, documentId, "Sales return cancelled");
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
     });
     if (vanished) return { error: "Sales return not found — it may already have been cancelled." };

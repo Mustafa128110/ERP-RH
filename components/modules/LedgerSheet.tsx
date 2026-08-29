@@ -96,18 +96,18 @@ function Side({ title, rows, amountOf }: { title: string; rows: ContactLedgerBal
 // balance sheet and the next screen that wants one — a report, a month end —
 // should not draw a third version of it.
 export function BalanceSheetDocument({ company, books, rows }: { company: Letterhead; books: string; rows: ContactLedgerBalance[] }) {
-  const receivable = rows.filter((r) => r.balance < 0).sort((a, b) => a.balance - b.balance);
-  const payable = rows.filter((r) => r.balance > 0).sort((a, b) => b.balance - a.balance);
-  const totalReceivable = receivable.reduce((sum, r) => sum - r.balance, 0);
-  const totalPayable = payable.reduce((sum, r) => sum + r.balance, 0);
+  const receivable = rows.filter((r) => r.balance > 0).sort((a, b) => b.balance - a.balance);
+  const payable = rows.filter((r) => r.balance < 0).sort((a, b) => a.balance - b.balance);
+  const totalReceivable = receivable.reduce((sum, r) => sum + r.balance, 0);
+  const totalPayable = payable.reduce((sum, r) => sum - r.balance, 0);
   const net = totalReceivable - totalPayable;
 
   return (
     <div className="force-light w-full bg-white p-10 text-ink">
       <Header company={company} title="Balance Sheet" subtitle={books} />
 
-      <Side title="Receivable (Owes Us)" rows={receivable} amountOf={(r) => -r.balance} />
-      <Side title="Payable (We Owe)" rows={payable} amountOf={(r) => r.balance} />
+      <Side title="Receivable (Owes Us)" rows={receivable} amountOf={(r) => r.balance} />
+      <Side title="Payable (We Owe)" rows={payable} amountOf={(r) => -r.balance} />
 
       {/* The one line the sheet exists for: in the black or in the red, on the
           ledger alone. Stock, cash and the bank are not in this figure. */}
@@ -133,7 +133,7 @@ export function BalanceSheetDocument({ company, books, rows }: { company: Letter
 // what each side has come to, where that leaves the balance, and the payments
 // behind it.
 export function ContactStatementDocument({ company, row }: { company: Letterhead; row: ContactLedgerBalance }) {
-  const owesUs = row.balance < 0;
+  const owesUs = row.balance > 0;
   const outstanding = Math.abs(row.balance);
 
   return (

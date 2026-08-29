@@ -18,6 +18,10 @@ export type QuantityToConvert = {
   itemId: string | null;
   unitId: string | null;
   quantity: number;
+  // A stored purchase may predate explicit conversion rules. Its existing
+  // item/unit pair can retain the historical assume-base interpretation while
+  // newly entered disconnected pairs remain invalid.
+  allowMissing?: boolean;
 };
 
 // A missing conversion is a setup gap, not a reason to stop a customer at the
@@ -61,7 +65,7 @@ export async function resolveBaseQuantities(
     const multiplier = multiplierToBase(line.itemId, line.unitId, baseByItem.get(line.itemId), conversions);
     return multiplier === null ? null : Math.abs(line.quantity) * multiplier;
   });
-  if (onMissing === "throw" && quantities.some((quantity) => quantity === null)) {
+  if (onMissing === "throw" && quantities.some((quantity, index) => quantity === null && !lines[index].allowMissing)) {
     throw new MissingUnitConversionError();
   }
   return quantities.map((quantity, index) => quantity ?? Math.abs(lines[index].quantity));

@@ -52,7 +52,6 @@ export const navSections: NavSection[] = [
     label: "Finance",
     items: [
       { label: "Accounts", href: "/accounts", permission: "accounts.view" },
-      { label: "GL Setup", href: "/accounts/gl", permission: "accounts.view" },
       { label: "Payments", href: "/payments", permission: "payments.view" },
       { label: "Ledger", href: "/ledger", permission: "accounts.view" },
       { label: "Expenses", href: "/expenses", permission: "expenses.view" },

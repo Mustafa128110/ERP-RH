@@ -43,5 +43,12 @@ export default async function Page() {
     _searchContact: p.supplier ?? "",
   }));
 
-  return <StockPurchaseManager rows={rows} {...options} locationOptions={filteredLocationOptions} />;
+  return (
+    <StockPurchaseManager
+      rows={rows}
+      {...options}
+      locationOptions={filteredLocationOptions}
+      canHardDelete={session?.globalPermissions.has("purchases.delete") ?? false}
+    />
+  );
 }

@@ -206,8 +206,6 @@ const NO_DOMAIN: Record<string, string> = {
   documentNumberLedger: "written beside every document, selected by no list",
   marketPurchaseRequests: "the market-purchase screen is not a cachedPageRead",
   contactOpeningBalances: "a pointer at the OPENING_BALANCE document; the ledger reads the document",
-  generalLedgerAccounts: "the cutover account set is resolved only inside document posting; no cached screen reads it yet",
-  generalLedgerEntries: "the cutover journal is write-only until the general-ledger reporting screen is introduced",
   unitConversions: "base quantities are resolved and stored on the line at write time",
   itemImages: "read per item on the detail screen, not in any list",
   taxes: "a document's tax is resolved and stored on it at write time",

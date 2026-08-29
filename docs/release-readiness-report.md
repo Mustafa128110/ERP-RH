@@ -14,12 +14,6 @@ operational gates below are completed.
 - Financial records use lifecycle-safe posting and cancellation flows rather
   than hard deletion for sales, purchases, payments, returns, stock movements,
   manual ledger entries, transfers, market purchases and inter-company flows.
-- The general ledger posts balanced, reversible double-entry journals only on
-  or after each company's configured forward-only cutover date.  Historic
-  documents are deliberately not backfilled.
-- General-ledger source references are constrained to their company at the
-  database level; the system chart, settlement-account mappings, opening
-  journals and account deactivation protections are available in GL Setup.
 - Product unit conversions are reciprocal and composable.  Missing base units
   or rules do not block sales; product indicators make missing setup visible.
 - Inventory value uses FIFO purchase-cost layers.  Stock adjustments present
@@ -40,7 +34,7 @@ operational gates below are completed.
 - `npm run check:offline`
 - All checks within `npm run check:db`, run against the configured database
   (including FIFO, payment allocation, settlement, reports, session scope,
-  operation idempotency and general-ledger constraints).
+  operation idempotency and schema constraints).
 - `npm audit --omit=dev --audit-level=high` — no production vulnerabilities.
 - `next build` — optimized build produced its `BUILD_ID`.
 
@@ -52,14 +46,8 @@ operational gates below are completed.
    and complete a restore drill into a scratch environment.
 3. Apply the reviewed Supabase migration history to the scratch environment,
    then run the source and database suites against that restored database.
-4. Reconcile opening balances for each company, initialize its chart, map cash
-   and bank accounts, create opening journals, and only then set its GL cutover
-   date.
-5. Reconcile the first post-cutover Trial Balance and General Ledger before the
-   next accounting close.
-
-The operational sequence and rollback boundary are defined in
-`docs/production-cutover-runbook.md`.
+4. Reconcile opening customer, supplier, cash, bank, and stock balances for each
+   company before the next accounting close.
 
 ## Test limitation
 

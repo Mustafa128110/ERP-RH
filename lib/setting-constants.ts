@@ -24,13 +24,6 @@ export function isValidIsoDate(value: string): boolean {
 
 export const SETTING_DEFS: SettingDef[] = [
   {
-    key: "gl_cutover_date",
-    label: "General-ledger cutover date",
-    help: "Documents dated on or after this date receive new balanced general-ledger postings. Leave blank until opening balances and account mappings are ready; historic documents are never backfilled.",
-    kind: "date",
-    fallback: "",
-  },
-  {
     key: "dead_stock_days",
     label: "Dead-stock threshold",
     help: "An item with stock and no sale for this long shows up on the Dead / Slow Moving report.",

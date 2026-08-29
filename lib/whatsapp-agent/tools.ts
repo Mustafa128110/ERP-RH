@@ -142,14 +142,14 @@ async function balance(query: string): Promise<ToolResult> {
   const rows = await listLedgerBalances();
   const hits = rankedMatches(query, rows, (row) => row.displayName);
   if (hits.length === 0) return { reply: `No balance matches "${query}".` };
-  if (hits.length > 1) return { reply: hits.slice(0, LIST_LIMIT).map((row) => `• ${row.displayName} — ${row.balance < 0 ? `owes us ${money(-row.balance)}` : row.balance > 0 ? `we owe ${money(row.balance)}` : "settled"}`).join("\n") };
+  if (hits.length > 1) return { reply: hits.slice(0, LIST_LIMIT).map((row) => `• ${row.displayName} — ${row.balance > 0 ? `owes us ${money(row.balance)}` : row.balance < 0 ? `we owe ${money(-row.balance)}` : "settled"}`).join("\n") };
   const row = hits[0];
-  const statement = row.balance > 0 ? `We owe them ${money(row.balance)}` : row.balance < 0 ? `They owe us ${money(-row.balance)}` : "Settled — nothing outstanding";
+  const statement = row.balance > 0 ? `They owe us ${money(row.balance)}` : row.balance < 0 ? `We owe them ${money(-row.balance)}` : "Settled — nothing outstanding";
   return { reply: `*${row.displayName}* (${row.company})\n${statement}` };
 }
 
 async function dues(): Promise<ToolResult> {
-  const rows = (await listLedgerBalances()).filter((row) => row.balance < 0).sort((left, right) => left.balance - right.balance).slice(0, 10);
+  const rows = (await listLedgerBalances()).filter((row) => row.balance > 0).sort((left, right) => right.balance - left.balance).slice(0, 10);
   if (rows.length === 0) return { reply: "Nothing is outstanding." };
   return { reply: ["*Outstanding*", ...rows.map((row) => `• ${row.displayName} — ${money(-row.balance)}`), "", `Total shown: ${money(rows.reduce((sum, row) => sum - row.balance, 0))}`].join("\n") };
 }

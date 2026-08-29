@@ -8,7 +8,7 @@ import type { ClipboardEvent, MouseEvent } from "react";
 // and copy/paste works on their text content.
 //
 // On paste, if the clipboard grid is taller than the remaining rows, new ledger
-// entries are created via createLedgerEntry (journal entries) to fill the gap.
+// opening-balance entries are created to fill the gap.
 
 const SELECTED = "data-cell-selected";
 let anchor: { body: HTMLElement; r: number; c: number } | null = null;

@@ -12,8 +12,9 @@ export function paymentLedgerSide(direction: PaymentDirection, amount: string) {
   return direction === "made" ? ({ debit: amount } as const) : ({ credit: amount } as const);
 }
 
-// What the ledger holds for one contact in one company. balance = credit - debit:
-// positive is a payable ("We Owe"), negative a receivable ("Owes Us").
+// What the ledger holds for one contact in one company. This is the exact same
+// sign as the individual statement's closing balance: debit - credit. Positive
+// is a receivable ("Owes Us"), negative a payable ("We Owe").
 export type ContactBalanceHint = { contactId: string; companyId: string; balance: number };
 
 // Which company a payment belongs in.
@@ -27,11 +28,11 @@ export type ContactBalanceHint = { contactId: string; companyId: string; balance
 // the ledger page.
 //
 // So: the company where this contact's balance is on the side the payment
-// settles. Receiving settles a receivable (balance < 0), paying settles a
-// payable (balance > 0). Only when exactly one company qualifies — a contact who
+// settles. Receiving settles a receivable (balance > 0), paying settles a
+// payable (balance < 0). Only when exactly one company qualifies — a contact who
 // is a customer of one company and a supplier of the other is both, and which
 // one is being settled is a real decision that stays with the person making it.
 export function settlingCompanyId(balances: ContactBalanceHint[], contactId: string, direction: PaymentDirection): string | null {
-  const owing = balances.filter((b) => b.contactId === contactId && (direction === "received" ? b.balance < 0 : b.balance > 0));
+  const owing = balances.filter((b) => b.contactId === contactId && (direction === "received" ? b.balance > 0 : b.balance < 0));
   return owing.length === 1 ? owing[0].companyId : null;
 }

@@ -23,7 +23,6 @@ import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
-import { assertGeneralLedgerDateStaysPostCutover, postExpenseGeneralLedgerBatch, reverseExpenseGeneralLedger } from "@/lib/actions/general-ledger";
 
 export interface ExpenseFilters {
   company?: string;
@@ -174,7 +173,7 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
         })),
       );
 
-      const inserted = await tx.insert(expenses).values(
+      await tx.insert(expenses).values(
         valid.map((r, index) => ({
           companyId: r.companyId,
           expenseCategoryId: categoryIds[index]!,
@@ -186,7 +185,7 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
           notes: r.notes,
           createdBy: session.userId,
         })),
-      ).returning({ id: expenses.id });
+      );
 
       await adjustSettlementBalancesBatch(
         tx,
@@ -198,19 +197,6 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
           chequeId: r.chequeId,
           sign: 1,
           companyId: r.companyId,
-        })),
-      );
-      await postExpenseGeneralLedgerBatch(
-        tx,
-        valid.map((row, index) => ({
-          expenseId: inserted[index]!.id,
-          companyId: row.companyId,
-          expenseDate: row.expenseDate,
-          amount: row.amount,
-          memo: row.notes,
-          bankAccountId: row.bankAccountId,
-          cashAccountId: row.cashAccountId,
-          chequeId: row.chequeId,
         })),
       );
     });
@@ -270,9 +256,8 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
       // First statement: claim the operation id, or abort as a duplicate.
       if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
-      const [expense] = await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId }).returning({ id: expenses.id });
+      await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId });
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
-      await postExpenseGeneralLedgerBatch(tx, [{ expenseId: expense.id, companyId: values.companyId, expenseDate: values.expenseDate, amount: values.amount, memo: values.notes, bankAccountId: values.bankAccountId, cashAccountId: values.cashAccountId, chequeId: values.chequeId }]);
     });
 
     await invalidateLookups(CACHE.expenseCategories, CACHE.cheques);
@@ -329,14 +314,11 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
         return;
       }
 
-      await assertGeneralLedgerDateStaysPostCutover(tx, { companyId: existing.companyId, expenseId: existing.id, documentDate: values.expenseDate });
       // Reverse the old settlement before applying the new one, same as Payments.
       await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
-      await reverseExpenseGeneralLedger(tx, existing.companyId, existing.id, "Reversed before expense correction");
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
       await tx.update(expenses).set({ ...values, expenseCategoryId: categoryId }).where(eq(expenses.id, expenseId));
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
-      await postExpenseGeneralLedgerBatch(tx, [{ expenseId: existing.id, companyId: values.companyId, expenseDate: values.expenseDate, amount: values.amount, memo: values.notes, bankAccountId: values.bankAccountId, cashAccountId: values.cashAccountId, chequeId: values.chequeId }]);
     });
 
     if (missing) return { error: "Expense not found — it may already be cancelled." };
@@ -379,7 +361,6 @@ export async function deleteExpense(_prevState: ActionResult | undefined, formDa
       // when they hold the permission somewhere else.
       requirePermission(session, "expenses", "delete", { companyId: existing.companyId });
       await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
-      await reverseExpenseGeneralLedger(tx, existing.companyId, existing.id, "Expense cancelled");
       await tx.update(expenses).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date() }).where(eq(expenses.id, expenseId));
     });
 

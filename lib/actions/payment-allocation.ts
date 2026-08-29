@@ -29,9 +29,19 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
              dt.code, d.document_date, d.created_at
       FROM documents d
       JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN bank_accounts b ON b.id = d.bank_account_id
+      LEFT JOIN cash_accounts c ON c.id = d.cash_account_id
       WHERE d.id IN (${uuidList(ids)})
         AND dt.code IN ('PAYMENT_RECEIVED', 'PAYMENT_MADE')
         AND d.contact_id IS NOT NULL AND d.status = 'posted'
+        AND (
+          (d.bank_account_id IS NOT NULL AND (b.company_id IS NULL OR b.company_id = d.company_id))
+          OR (d.cash_account_id IS NOT NULL AND c.company_id = d.company_id)
+          OR (d.bank_account_id IS NULL AND d.cash_account_id IS NULL AND EXISTS (
+            SELECT 1 FROM cheque_register q
+            WHERE q.document_id = d.id AND q.company_id = d.company_id
+          ))
+        )
       FOR UPDATE OF d
     ), payment_rows AS (
       SELECT p.*,
@@ -46,16 +56,14 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
              ) AS range_end
       FROM selected_payments p
     ), invoice_locked AS MATERIALIZED (
-      -- The opening balance's direction is the side its single ledger row sits
-      -- on: debit means the party owes us. Read from ledger_entries rather than
-      -- copied onto the document, so the figure and its sign cannot disagree.
-      -- The join is LEFT and predicated on the code, so it costs nothing for the
-      -- invoices, which know their queue from their type.
+      -- Opening-balance and legacy contact-journal direction comes from the
+      -- party ledger row: debit is receivable, credit is payable. These rows are
+      -- real obligations, so payments settle them in the same FIFO as invoices.
       SELECT d.id, d.company_id, d.contact_id,
              (CASE
                 WHEN dt.code = 'SALES_INVOICE' THEN 'PAYMENT_RECEIVED'
                 WHEN dt.code = 'PURCHASE_INVOICE' THEN 'PAYMENT_MADE'
-                WHEN coalesce(ob.debit, 0) > 0 THEN 'PAYMENT_RECEIVED'
+                WHEN coalesce(party_entry.debit, 0) > 0 THEN 'PAYMENT_RECEIVED'
                 ELSE 'PAYMENT_MADE'
               END)::document_type_code AS queue,
              (dt.code = 'OPENING_BALANCE') AS is_opening,
@@ -63,9 +71,11 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
              d.document_date, d.created_at
       FROM documents d
       JOIN document_types dt ON dt.id = d.document_type_id
-      LEFT JOIN ledger_entries ob ON ob.document_id = d.id AND dt.code = 'OPENING_BALANCE'
+      LEFT JOIN ledger_entries party_entry
+        ON party_entry.document_id = d.id
+       AND dt.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
       WHERE d.status = 'posted'
-        AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE')
+        AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'JOURNAL_ENTRY')
         AND d.grand_total > d.paid_amount
         -- Company and contact only: the queue is computed above, so it cannot be
         -- tested here. Locking the party's other side as well is a few extra

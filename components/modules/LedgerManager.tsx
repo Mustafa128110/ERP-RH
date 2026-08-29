@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import { createLedgerEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/actions/ledger";
+import { createOpeningBalanceEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/actions/ledger";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -18,7 +18,6 @@ import { PartyLedgerDialog, PartyLedgerPrintDocument } from "@/components/module
 import { useExportShare } from "@/components/ui/ExportShareSheet";
 import { inCompany } from "@/lib/contact-scope";
 import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/actions/ledger";
-import { MANUAL_JOURNAL_COUNTERPARTS } from "@/lib/manual-journal-constants";
 
 const readOnlyClass = `${fieldClass} flex items-center bg-ivory text-steel`;
 
@@ -184,10 +183,10 @@ export function LedgerManager({
     id: `${b.companyId}:${b.contactId}`,
     displayName: b.displayName,
     company: b.company,
-    // balance > 0: still owed to the contact (unpaid purchase). balance < 0: the
-    // contact owes us — an unpaid or part-paid sale, or an overpayment.
-    creditBalance: b.balance > 0 ? money(b.balance) : "—",
-    debtBalance: b.balance < 0 ? money(-b.balance) : "—",
+    // Exact statement-closing convention: positive is receivable, negative is
+    // payable. The two screens now display the same signed source value.
+    creditBalance: b.balance < 0 ? money(-b.balance) : "—",
+    debtBalance: b.balance > 0 ? money(b.balance) : "—",
   }));
 
   useNewEntry(() => setModal({ kind: "add" }));
@@ -200,8 +199,8 @@ export function LedgerManager({
           type="button"
           onClick={() => setModal({ kind: "add" })}
           className={primaryIconButtonClass}
-          aria-label="Add ledger entry"
-          title="Add ledger entry — Alt+N"
+          aria-label="Add opening balance"
+          title="Add opening balance — Alt+N"
         >
           <Icon name="plus" />
         </button>
@@ -230,7 +229,7 @@ export function LedgerManager({
       />
 
       {modal?.kind === "add" && (
-        <Dialog title="Add Ledger Entry" onClose={() => setModal(null)}>
+        <Dialog title="Add Opening Balance" onClose={() => setModal(null)}>
           <LedgerEntryForm companyOptions={companyOptions} contactOptions={contactOptions} onClose={close} />
         </Dialog>
       )}
@@ -293,7 +292,7 @@ function LedgerEntryForm({
   const [state, action, pending] = useActionState(
     async (prev: { error?: string; success?: boolean; id?: string } | undefined, formData: FormData) => {
       try {
-        return isEdit ? await setContactBalance(balance.companyId, balance.contactId, prev, formData) : await createLedgerEntry(prev, formData);
+        return isEdit ? await setContactBalance(balance.companyId, balance.contactId, prev, formData) : await createOpeningBalanceEntry(prev, formData);
       } catch {
         return { error: TRANSPORT_ERROR_MESSAGE };
       }
@@ -370,24 +369,13 @@ function LedgerEntryForm({
         </div>
       </div>
 
-      <label className={`${labelClass} w-72`}>
-        <span className={labelTextClass}>Counterpart account</span>
-        <select name="counterpartAccountCode" required defaultValue="" className={fieldClass}>
-          <option value="" disabled>Select the other side of the entry</option>
-          {MANUAL_JOURNAL_COUNTERPARTS.map((account) => (
-            <option key={account.code} value={account.code}>{account.code} — {account.name}</option>
-          ))}
-        </select>
-        <span className="text-xs text-steel">The party side posts automatically to Accounts Receivable or Accounts Payable.</span>
-      </label>
-
       <div className="flex flex-wrap gap-3">
         <label className={`${labelClass} w-52`}>
           <span className={labelTextClass}>Direction</span>
           <select
             name="direction"
             required
-            defaultValue={balance ? (balance.balance > 0 ? "we_owe" : "owes_us") : "owes_us"}
+            defaultValue={balance ? (balance.balance > 0 ? "owes_us" : "we_owe") : "owes_us"}
             className={fieldClass}
           >
             <option value="owes_us">Receivable (Owes Us)</option>
@@ -428,7 +416,7 @@ function LedgerEntryForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" disabled={pending} className={primaryActionClass}>
-          {pending ? "Saving…" : isEdit ? "Save Balance" : "Add Entry"}
+          {pending ? "Saving…" : isEdit ? "Save Balance" : "Add Opening Balance"}
         </button>
         <button type="button" onClick={onClose} className="h-11 rounded px-4 text-sm font-medium text-steel hover:bg-ivory">
           Cancel

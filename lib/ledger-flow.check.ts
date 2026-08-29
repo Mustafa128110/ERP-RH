@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   allocationImpact,
+  closingBalance,
   openingQueueSide,
   paymentQueueSide,
   runningBalances,
@@ -31,6 +32,7 @@ function sides() {
   assert.equal(openingQueueSide(5000), "receivable", "positive opening balance is a receivable");
   assert.equal(openingQueueSide(-5000), "payable", "negative opening balance is a payable");
   assert.equal(openingQueueSide(0), null, "a zero opening balance joins no queue");
+  assert.equal(closingBalance(500, 1000, 400), 1100, "list and statement share one debit-minus-credit closing formula");
 }
 
 function oldestFirst() {
@@ -106,6 +108,21 @@ function advanceAbsorbedByTheNextInvoice() {
   assert.equal(after.advance.receivable, 100, "and what still does not fit stays an advance");
 }
 
+// The concrete supplier case: pay 1,000 before there is a purchase, first clear
+// an older 400 credit opening, then carry 600 forward and use 500 when a purchase
+// is entered later.
+function supplierAdvanceClearsOpeningThenPurchase() {
+  const payment = [pay("PM", 1000, "2026-02-01", "payable")];
+  const creditOpening = inv("OPEN", 400, "2026-01-01", "payable");
+  const before = settleFifo([creditOpening], payment);
+  assert.deepEqual(allocOf(before), ["PM->OPEN:400"]);
+  assert.equal(before.advance.payable, 600);
+
+  const after = settleFifo([creditOpening, inv("PUR", 500, "2026-03-01", "payable")], payment);
+  assert.deepEqual(allocOf(after), ["PM->OPEN:400", "PM->PUR:500"]);
+  assert.equal(after.advance.payable, 100);
+}
+
 // Reducing an invoice under what is already allocated to it: the excess is
 // released and the next outstanding item in the same queue takes it.
 function reducingAnInvoiceReleasesToTheNextItem() {
@@ -158,15 +175,14 @@ function editingADateChangesMatching() {
   assert.deepEqual(allocOf(after), ["P->B:500"], "backdating an invoice moves it to the front of the queue");
 }
 
-// Nothing above should imply a journal entry can settle anything: the engine is
-// only ever handed invoices and payments, and the running balance is where a
-// journal entry has its effect.
-function journalEntriesOnlyMoveTheRunningBalance() {
+// Opening-balance entries still move the visible running balance like every
+// ledger row; FIFO settlement is recorded separately and never rewrites history.
+function openingEntriesMoveTheRunningBalance() {
   const rows = [
     { debit: 1000, credit: 0 }, // sales invoice
-    { debit: 0, credit: 250 },  // journal entry, credit side
+    { debit: 0, credit: 250 },  // opening-balance entry, credit side
     { debit: 0, credit: 400 },  // payment received
-    { debit: 150, credit: 0 },  // journal entry, debit side
+    { debit: 150, credit: 0 },  // opening-balance entry, debit side
   ];
   const withBalances = runningBalances(500, rows);
   assert.deepEqual(withBalances.map((r) => r.balance), [1500, 1250, 850, 1000], "balance is opening + debit - credit, row by row");
@@ -196,10 +212,11 @@ function main() {
   openingBalanceLeadsItsQueue();
   queuesDoNotCross();
   advanceAbsorbedByTheNextInvoice();
+  supplierAdvanceClearsOpeningThenPurchase();
   reducingAnInvoiceReleasesToTheNextItem();
   deletingAnInvoiceFreesItsPayments();
   editingADateChangesMatching();
-  journalEntriesOnlyMoveTheRunningBalance();
+  openingEntriesMoveTheRunningBalance();
   openingBalanceSeedsTheRunningBalance();
   impactOfNoChangeIsEmpty();
   console.log("ledger-flow.check.ts OK");

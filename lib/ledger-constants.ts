@@ -40,15 +40,18 @@ export const LEDGER_TYPE_LABELS: Record<LedgerEntryType, string> = {
   item_bought: "Item Bought",
   payment_received: "Payment Received",
   payment_made: "Payment Made",
-  journal_entry: "Journal Entry",
+  // JOURNAL_ENTRY is retained as an internal legacy document code (cash
+  // transfers also use it), but a contact-linked row is an opening-balance
+  // posting in the party ledger and is named accordingly.
+  journal_entry: "Opening Balance",
 };
 
 // document_type_code -> the entry kind the statement shows. MARKET_PURCHASE
 // reads as "item_bought" because that is what it is to the party; it differs
 // only in that it settles through an expense rather than through the payables
-// queue. Anything else — journal entries, credit and debit notes — moves the
-// running balance without settling anything, which is what "journal_entry"
-// means here.
+// queue. The legacy JOURNAL_ENTRY code maps to the internal journal_entry kind,
+// whose user-facing name is Opening Balance and whose FIFO side comes from its
+// debit/credit row.
 export function codeToLedgerType(code: string): LedgerEntryType {
   switch (code) {
     case "OPENING_BALANCE": return "opening_balance";
@@ -85,9 +88,10 @@ export function openingQueueSide(signedOpening: number): QueueSide | null {
   return null;
 }
 
-// Document type codes that carry a settleable balance, and the queue each one
-// belongs to. MARKET_PURCHASE is deliberately absent: it books a credit on the
-// ledger but is settled by its own expense, not by a payment to the party.
+// Document type codes with a fixed settlement side. A contact-linked legacy
+// JOURNAL_ENTRY is also settleable, but its side comes from its ledger row and
+// therefore cannot live in this fixed map. MARKET_PURCHASE is deliberately
+// absent: it settles through its own expense.
 export const SETTLEABLE_CODES = {
   SALES_INVOICE: "receivable",
   PURCHASE_INVOICE: "payable",
@@ -231,20 +235,26 @@ export function settlementState(amount: number, settled: number): SettlementStat
 // Running balance
 // ---------------------------------------------------------------------------
 
+// The one closing-balance formula used by the contact list and the individual
+// statement. Keeping the paisa conversion here prevents tiny floating-point
+// differences from making the outside figure disagree by 0.01.
+export function closingBalance(opening: number, debit: number, credit: number): number {
+  return fromPaisa(toPaisa(opening) + toPaisa(debit) - toPaisa(credit));
+}
+
 // The statement's Balance column, and nothing more than it: previous balance +
 // debit - credit, seeded from the opening balance. Positive means the party owes
 // us.
 //
-// Note the sign: this is debit - credit. `lib/payment-constants.ts` holds a
-// contact's list-level balance the other way round (credit - debit, positive =
-// "We Owe"), which is why the two must not be compared without negating one.
+// The contact list uses this same sign, so its displayed payable/receivable must
+// always agree exactly with the unfiltered statement closing balance.
 export function runningBalances<T extends { debit: number; credit: number }>(
   opening: number,
   entries: readonly T[],
 ): (T & { balance: number })[] {
   let running = toPaisa(opening);
   return entries.map((entry) => {
-    running += toPaisa(entry.debit) - toPaisa(entry.credit);
+    running = toPaisa(closingBalance(fromPaisa(running), entry.debit, entry.credit));
     return { ...entry, balance: fromPaisa(running) };
   });
 }

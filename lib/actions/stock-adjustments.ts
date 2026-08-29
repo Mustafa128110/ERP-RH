@@ -29,8 +29,6 @@ import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { resolveBaseQuantities } from "@/lib/queries/unit-conversion";
 import { companySettingValue } from "@/lib/queries/settings";
-import { postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
-import { stockAdjustmentLedgerLines } from "@/lib/general-ledger-constants";
 
 // An adjustment is the one document that writes stock without a counterparty: no
 // customer, no supplier, no second location. One line per item at the adjusted
@@ -339,13 +337,6 @@ export async function createStockAdjustment(
 
       await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
 
-      if (!pendingApproval) {
-        const glLines = stockAdjustmentLedgerLines(rows.map((row) => ({ movement: row.movement, cost: row.unitCost * Number(row.line.baseQuantity) })));
-        if (glLines.length > 0) {
-          await postGeneralLedgerIfCutover(tx, { companyId, documentId: doc.id, documentDate, lines: glLines });
-        }
-      }
-
       return doc.id;
     });
   } catch (e) {
@@ -394,18 +385,6 @@ export async function approveStockAdjustment(_prevState: ActionResult | undefine
         WHERE dl.document_id = ${documentId}::uuid
           AND dl.item_id IS NOT NULL AND dl.stock_movement IS NOT NULL
       `);
-      const adjustmentLines = await tx
-        .select({ movement: documentLines.stockMovement, lineTotal: documentLines.lineTotal })
-        .from(documentLines)
-        .where(eq(documentLines.documentId, documentId));
-      const glLines = stockAdjustmentLedgerLines(
-        adjustmentLines
-          .filter((line): line is { movement: 1 | -1; lineTotal: string } => line.movement === 1 || line.movement === -1)
-          .map((line) => ({ movement: line.movement, cost: Number(line.lineTotal) })),
-      );
-      if (glLines.length > 0) {
-        await postGeneralLedgerIfCutover(tx, { companyId: pending.companyId, documentId, documentDate: pending.documentDate, lines: glLines });
-      }
     });
 
     await invalidateLookups(CACHE.items);
@@ -459,7 +438,6 @@ export async function deleteStockAdjustment(_prevState: ActionResult | undefined
           JOIN document_lines dl ON dl.id = it.document_line_id
           WHERE dl.document_id = ${documentId}::uuid
         `);
-        await reverseGeneralLedger(tx, doomed.companyId, documentId, "Stock adjustment cancelled");
       }
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, documentId), inArray(documents.status, ["pending", "posted"])));
     });

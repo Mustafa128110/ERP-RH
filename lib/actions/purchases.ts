@@ -23,7 +23,7 @@ import {
   taxes,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, adjustSettlementBalancesBatch, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
@@ -47,16 +47,26 @@ import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment
 import { changeSummary } from "@/lib/audit-constants";
 import { csvBool, csvErrorText } from "@/lib/csv";
 import { inCompany } from "@/lib/contact-scope";
+import {
+  hasRecordedPurchaseSettlement,
+  legacyPurchasePairKeys,
+  purchaseLineKey,
+  purchasePaidMode,
+  purchaseSettlementAmount,
+  remainingPurchasePayable,
+  requestedPurchaseSettlement,
+  type PurchasePaidMode,
+} from "@/lib/purchase-edit-rules";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
 import { bankAccountLabel } from "@/lib/account-label";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
-import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
+import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { settingsForCompanies } from "@/lib/queries/settings";
 
@@ -177,7 +187,11 @@ export async function getStockPurchase(documentId: string) {
   // rather than one after another.
   const [[doc], lineRows, [linkedCheque]] = await Promise.all([
     db
-      .select(getTableColumns(documents))
+      .select({
+        ...getTableColumns(documents),
+        allocatedAmount: sql<string>`coalesce((select sum(pa.amount) from payment_allocations pa where pa.invoice_document_id = ${documents.id}), 0)`,
+        shippingExpenseAmount: sql<string>`coalesce((select sum(e.amount) from expenses e where e.document_id = ${documents.id} and e.status = 'posted'), 0)`,
+      })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases")))
@@ -188,6 +202,13 @@ export async function getStockPurchase(documentId: string) {
   if (!doc) return null;
 
   const settlementType: SettlementType | null = doc.bankAccountId ? "account" : doc.cashAccountId ? "cash" : linkedCheque ? "cheque" : null;
+  const goodsTotal = round1(Number(doc.grandTotal) - Number(doc.shippingTotal));
+  const ownSettlementAmount = purchaseSettlementAmount(
+    Number(doc.paidAmount),
+    Number(doc.shippingExpenseAmount),
+    Number(doc.allocatedAmount),
+  );
+  const ownPaidMode = purchasePaidMode(ownSettlementAmount, goodsTotal);
 
   return {
     id: doc.id,
@@ -199,6 +220,12 @@ export async function getStockPurchase(documentId: string) {
     taxId: doc.taxId,
     shippingTotal: doc.shippingTotal,
     isPaid: doc.isPaid,
+    paidAmount: doc.paidAmount,
+    purchasePaidMode: ownPaidMode,
+    purchaseSettlementAmount: String(ownSettlementAmount),
+    allocatedAmount: doc.allocatedAmount,
+    shippingExpenseAmount: doc.shippingExpenseAmount,
+    legacyUntrackedSettlement: ownSettlementAmount > 0 && !settlementType,
     bankAccountId: doc.bankAccountId,
     cashAccountId: doc.cashAccountId,
     chequeId: linkedCheque?.id ?? null,
@@ -244,6 +271,7 @@ async function resolvePurchaseLineRows(
   location: { locationId: string; locationName: string },
   tax: { taxable: boolean[]; lineTaxAmounts: number[]; taxTotal: number; taxInclusive: boolean },
   adjustment: { discountTotal: number; shippingTotal: number },
+  allowedMissingConversions: ReadonlySet<string> = new Set(),
 ) {
   // One delivery arrives in one place, so the location is a header field and is
   // resolved once rather than per line — a typed name that did not match creates
@@ -253,7 +281,15 @@ async function resolvePurchaseLineRows(
   const unitIds = await resolveUnitIds(tx, lines.map((line) => ({ unitId: line.unitId || null, unitName: line.unitName || null })));
   const baseQuantities = await resolveBaseQuantities(
     tx,
-    lines.map((line, index) => ({ itemId: itemIds[index] ?? null, unitId: unitIds[index] ?? null, quantity: Number(line.quantity) })),
+    lines.map((line, index) => ({
+      itemId: itemIds[index] ?? null,
+      unitId: unitIds[index] ?? null,
+      quantity: Number(line.quantity),
+      // Legacy purchases may contain a unit combination that predates explicit
+      // conversion rules. Editing its price/date must remain possible, but a
+      // newly selected disconnected combination is still refused.
+      allowMissing: allowedMissingConversions.has(purchaseLineKey(itemIds[index], unitIds[index])),
+    })),
   );
   const totalQuantity = lines.reduce((sum, line) => sum + Number(line.quantity), 0);
   const adjustmentPerUnit = perUnitShare(
@@ -439,12 +475,8 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // state to be in: nothing is owed either way, so there is nothing to settle.
   // That's what separates a stock receipt (goods and a rate, no money) from a
   // purchase invoice, and it's read off the type rather than asked for again.
-  const isPaid = documentType.affectsPayable && formData.get("isPaid") === "yes";
+  const paidMode = (documentType.affectsPayable ? String(formData.get("isPaid") ?? "no") : "no") as PurchasePaidMode;
   const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
-  const bankAccountId = isPaid && settlementType === "account" ? opt(formData, "bankAccountId") : null;
-  const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
-  const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
-  if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   let tax;
@@ -467,6 +499,19 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   // so what the supplier is owed is the total minus the shipping.
   const shippingAmount = round1(Number(shippingTotal) || 0);
   const goodsTotal = round1(grandTotal - shippingAmount);
+  const enteredPaidAmount = Number(formData.get("paidAmount") ?? 0);
+  if (!Number.isFinite(enteredPaidAmount) || enteredPaidAmount < 0) return { error: "Amount paid must be zero or more." };
+  const purchasePaidAmount = requestedPurchaseSettlement(paidMode, enteredPaidAmount, goodsTotal);
+  if (paidMode === "partial" && (purchasePaidAmount <= 0 || purchasePaidAmount >= goodsTotal)) {
+    return { error: "A partial payment must be above zero and below the amount owed to the supplier." };
+  }
+  const hasPurchasePayment = purchasePaidAmount > 0;
+  const bankAccountId = hasPurchasePayment && settlementType === "account" ? opt(formData, "bankAccountId") : null;
+  const cashAccountId = hasPurchasePayment && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
+  const chequeId = hasPurchasePayment && settlementType === "cheque" ? opt(formData, "chequeId") : null;
+  if (hasPurchasePayment && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
+  const basePaidAmount = round1(shippingAmount + purchasePaidAmount);
+  const isPaid = basePaidAmount >= grandTotal;
   // Read before the transaction: shippingCashAccountId uses the connection, not
   // the tx handle.
   const shippingCashId = shippingAmount > 0 ? await shippingCashAccountId(companyId) : null;
@@ -504,10 +549,10 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           shippingTotal,
           grandTotal: String(grandTotal),
           isPaid,
-          // Shipping is paid on arrival (the expense below), so what the
-          // purchase shows as paid is the shipping amount when it isn't fully
-          // paid — the partial-paid state — and the whole total when it is.
-          paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
+          // paid_amount combines the two sources created in this transaction:
+          // freight paid as an expense and any amount paid at the purchase.
+          // Later PAYMENT_MADE allocations add their own amount independently.
+          paidAmount: String(basePaidAmount),
           bankAccountId,
           cashAccountId,
           createdBy: session.userId,
@@ -561,26 +606,22 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
         documentId: doc.id,
       });
 
-      // Unpaid purchase = money owed to the supplier — record it as a credit.
-      // Paid purchases settle immediately instead: deduct the settling
-      // account and skip the payable ledger row. A type that doesn't affect the
-      // payable does neither — it moved stock, not money.
+      // The supplier ledger contains only what remains after money paid at this
+      // purchase. Freight never enters it: freight is the linked expense below.
+      // Later PAYMENT_MADE documents carry their own debit and allocate against
+      // this credit, so their money is not folded into the purchase settlement.
       //
       // Either way the credit/settlement is the goods portion only: the
       // shipping has already left the building, as the expense below.
-      if (!documentType.affectsPayable) {
-        // nothing to book
-      } else if (!isPaid) {
-        if (goodsTotal > 0) {
-          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(goodsTotal) });
-        }
-      } else {
+      const remainingPayable = remainingPurchasePayable(grandTotal, shippingAmount, purchasePaidAmount);
+      if (documentType.affectsPayable && remainingPayable > 0) {
+        await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(remainingPayable) });
+      }
+      if (hasPurchasePayment) {
         if (chequeId) {
           await linkCheque(tx, chequeId, doc.id, "out", companyId);
         }
-        if (goodsTotal > 0) {
-          await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
-        }
+        await adjustSettlementBalance(tx, "out", String(purchasePaidAmount), bankAccountId, cashAccountId, chequeId, 1, companyId);
       }
 
       // The freight expense, linked back to this purchase so a later edit or
@@ -596,30 +637,6 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           shipping: String(shippingAmount),
           cashAccountId: shippingCashId!,
           userId: session.userId,
-        });
-      }
-
-      if (documentType.affectsPayable) {
-        const glPurchaseSettlement = isPaid
-          ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
-          : null;
-        const glShippingSettlement = shippingAmount > 0
-          ? await settlementGeneralLedgerAccount(tx, companyId, null, shippingCashId, null)
-          : null;
-        await postGeneralLedgerIfCutover(tx, {
-          companyId,
-          documentId: doc.id,
-          documentDate,
-          lines: [
-            { accountCode: "1200", debit: goodsTotal, memo: "Inventory received" },
-            isPaid
-              ? { ...glPurchaseSettlement!, credit: goodsTotal, memo: "Purchase settled at counter" }
-              : { accountCode: "2000", credit: goodsTotal, memo: "Supplier payable" },
-            ...(shippingAmount > 0 ? [
-              { accountCode: "6000", debit: shippingAmount, memo: "Purchase shipping" },
-              { ...glShippingSettlement!, credit: shippingAmount, memo: "Shipping paid" },
-            ] : []),
-          ],
         });
       }
 
@@ -766,19 +783,38 @@ export async function updateStockPurchase(
   if (existingDoc.companyId !== companyId) return { error: "A posted purchase can't be moved to another company. Delete it and enter it in the correct company." };
   const [documentType] = await db.select().from(documentTypes).where(eq(documentTypes.id, existingDoc.documentTypeId)).limit(1);
 
-  // Read after the type, for the same reason as in createStockPurchase: a
-  // document that doesn't touch the payable has no paid/unpaid state.
-  const isPaid = Boolean(documentType?.affectsPayable) && formData.get("isPaid") === "yes";
-  const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
-  const bankAccountId = isPaid && settlementType === "account" ? opt(formData, "bankAccountId") : null;
-  const cashAccountId = isPaid && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
-  const chequeId = isPaid && settlementType === "cheque" ? opt(formData, "chequeId") : null;
-  if (isPaid && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
+  // This control describes only money paid from inside the purchase form.
+  // Standalone PAYMENT_MADE allocations are released and rebuilt below, never
+  // converted into (or reversed as) purchase-owned money.
+  const settlementTypeRaw = String(formData.get("settlementType") ?? "");
+  const settlementType = settlementTypeRaw as SettlementType;
+  const submittedPaidMode = (documentType?.affectsPayable ? String(formData.get("isPaid") ?? "no") : "no") as PurchasePaidMode;
+  // A form opened on the previous UI called externally-paid purchases "legacy".
+  // Interpret that stale sentinel from the actual allocation source, not as a
+  // new purchase-owned payment, so an open dialog cannot move the Payment away.
+  const paidMode: PurchasePaidMode = settlementTypeRaw === "legacy" && allocatedAmount > 0 ? "no" : submittedPaidMode;
+  const enteredPaidAmount = Number(formData.get("paidAmount") ?? 0);
+  if (!Number.isFinite(enteredPaidAmount) || enteredPaidAmount < 0) return { error: "Amount paid must be zero or more." };
+  const purchasePaidAmount = requestedPurchaseSettlement(paidMode, enteredPaidAmount, goodsTotal);
+  if (paidMode === "partial" && (purchasePaidAmount <= 0 || purchasePaidAmount >= goodsTotal)) {
+    return { error: "A partial payment must be above zero and below the amount owed to the supplier." };
+  }
+  // A historical purchase-owned payment with no target can remain untouched.
+  // Externally allocated Payments are not legacy settlement; their amount is
+  // represented by allocatedAmount and the UI initializes this control to No.
+  const preserveLegacySettlement = purchasePaidAmount > 0 && settlementTypeRaw === "legacy" && allocatedAmount === 0;
+  const hasPurchasePayment = purchasePaidAmount > 0;
+  const bankAccountId = hasPurchasePayment && settlementType === "account" ? opt(formData, "bankAccountId") : null;
+  const cashAccountId = hasPurchasePayment && settlementType === "cash" ? opt(formData, "cashAccountId") : null;
+  const chequeId = hasPurchasePayment && settlementType === "cheque" ? opt(formData, "chequeId") : null;
+  if (hasPurchasePayment && !preserveLegacySettlement && !bankAccountId && !cashAccountId && !chequeId) return { error: "Select an account, cash account, or cheque." };
+  const basePaidAmount = round1(shippingAmount + purchasePaidAmount);
+  const isPaid = basePaidAmount >= grandTotal;
   // How much room the payables queue will have for this bill after the save: a
   // purchase marked paid settles at its own counter and leaves the queue
   // altogether, an unpaid one offers the goods portion (the freight has already
   // gone out as an expense). Anything settled beyond that has to be released.
-  const settleableAfterSave = isPaid ? 0 : goodsTotal;
+  const settleableAfterSave = Math.max(0, round1(grandTotal - basePaidAmount));
   const releasedByEdit = Number((allocatedAmount - settleableAfterSave).toFixed(2));
   if (releasedByEdit > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
     return {
@@ -787,12 +823,16 @@ export async function updateStockPurchase(
     };
   }
   let vanishedDuringSave = false;
+  let invalidLegacySettlement = false;
+  let previousPurchasePaidAmount = 0;
 
-  await db.transaction(async (tx) => {
+  try {
+    await db.transaction(async (tx) => {
     const [lockedDoc] = await tx
       .select({
         isPaid: documents.isPaid,
         grandTotal: documents.grandTotal,
+        paidAmount: documents.paidAmount,
         bankAccountId: documents.bankAccountId,
         cashAccountId: documents.cashAccountId,
       })
@@ -804,20 +844,29 @@ export async function updateStockPurchase(
       vanishedDuringSave = true;
       return;
     }
-    await assertGeneralLedgerDateStaysPostCutover(tx, { companyId, documentId, documentDate });
     const [existingCheque] = await tx
       .select({ id: chequeRegister.id })
       .from(chequeRegister)
       .where(eq(chequeRegister.documentId, documentId))
       .limit(1)
       .for("update");
-    await reverseGeneralLedger(tx, companyId, documentId, "Reversed before purchase correction");
+    const hadRecordedSettlement = hasRecordedPurchaseSettlement({
+      bankAccountId: lockedDoc.bankAccountId,
+      cashAccountId: lockedDoc.cashAccountId,
+      chequeId: existingCheque?.id ?? null,
+    });
+    // Accept the sentinel only for a genuinely old paid purchase with no target.
+    // A forged request cannot erase a real movement without reversing it.
+    if (preserveLegacySettlement && (!lockedDoc.isPaid || hadRecordedSettlement)) {
+      invalidLegacySettlement = true;
+      return;
+    }
     // Hand back the allocated payments before paid_amount is rewritten below.
     // Unlike the sales side this update *sets* paid_amount rather than adding to
     // it, so leaving the allocations in place would leave payment_allocations rows
     // pointing at money the new paid_amount no longer accounts for. The recompute
     // at the end of the transaction puts back whatever still fits.
-    await releaseInvoiceAllocations(tx, [documentId]);
+    const releasedAllocations = await releaseInvoiceAllocations(tx, [documentId]);
     // The freight expense from this purchase's last save, if any. A merge can
     // leave several (the losers' expenses travel to the survivor), so every
     // linked row is reversed and dropped, and one new expense is written for
@@ -827,19 +876,23 @@ export async function updateStockPurchase(
       .from(expenses)
       .where(eq(expenses.documentId, documentId));
     const oldShippingPaid = round1(linkedExpenses.reduce((sum, e) => sum + Number(e.amount), 0));
-    // What the old settlement actually covered. Since the shipping-expense
-    // change a paid purchase settles the goods portion (grandTotal − shipping);
-    // one saved before it settled the whole total. The linked expense is the
-    // tell: present → the settlement was goods-only.
-    const oldSettled = round1(Number(lockedDoc.grandTotal) - oldShippingPaid);
+    // paid_amount also included the allocations just released and the freight
+    // expense. The remainder alone came from this purchase's own settlement
+    // account and is the only amount this edit may reverse.
+    const oldPurchasePaid = purchaseSettlementAmount(
+      Number(lockedDoc.paidAmount),
+      oldShippingPaid,
+      releasedAllocations.released,
+    );
+    previousPurchasePaidAmount = oldPurchasePaid;
 
     // Reverse the old settlement (if it was paid) before applying the new
     // one — handles amount changes and paid/unpaid flips in one pass.
-    if (lockedDoc.isPaid) {
+    if (oldPurchasePaid > 0 && hadRecordedSettlement) {
       await adjustSettlementBalance(
         tx,
         "out",
-        String(oldSettled),
+        String(oldPurchasePaid),
         lockedDoc.bankAccountId,
         lockedDoc.cashAccountId,
         existingCheque?.id ?? null,
@@ -847,7 +900,7 @@ export async function updateStockPurchase(
         companyId,
       );
       if (existingCheque) {
-        await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
+        await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
       }
     }
     // And the freight payments themselves, before the new state is written.
@@ -884,24 +937,28 @@ export async function updateStockPurchase(
         isPaid,
         // Unpaid with freight: the shipping has already left as the expense, so
         // that's what the purchase shows as paid — the partial-paid state.
-        paidAmount: isPaid ? String(grandTotal) : String(shippingAmount),
+        paidAmount: String(basePaidAmount),
         bankAccountId,
         cashAccountId,
         updatedAt: new Date(),
       })
       .where(eq(documents.id, documentId));
 
-    if (isPaid) {
+    if (hasPurchasePayment && !preserveLegacySettlement) {
       if (chequeId) {
         await linkCheque(tx, chequeId, documentId, "out", companyId);
       }
       // The goods portion only — the shipping is covered by the expense below.
-      await adjustSettlementBalance(tx, "out", String(goodsTotal), bankAccountId, cashAccountId, chequeId, 1, companyId);
+      await adjustSettlementBalance(tx, "out", String(purchasePaidAmount), bankAccountId, cashAccountId, chequeId, 1, companyId);
     }
 
     // inventory_transactions.document_line_id is ON DELETE RESTRICT, so old
     // movements must go before the lines they point at can be replaced.
-    const oldLines = await tx.select({ id: documentLines.id }).from(documentLines).where(eq(documentLines.documentId, documentId));
+    const oldLines = await tx
+      .select({ id: documentLines.id, itemId: documentLines.itemId, unitId: documentLines.unitId })
+      .from(documentLines)
+      .where(eq(documentLines.documentId, documentId));
+    const allowedMissingConversions = legacyPurchasePairKeys(oldLines);
     if (oldLines.length > 0) {
       await tx.delete(inventoryTransactions).where(
         inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)),
@@ -911,7 +968,7 @@ export async function updateStockPurchase(
     const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName }, tax, {
       discountTotal: Number(discountTotal),
       shippingTotal: Number(shippingTotal),
-    });
+    }, allowedMissingConversions);
     const insertedLines = await tx
       .insert(documentLines)
       .values(
@@ -937,13 +994,13 @@ export async function updateStockPurchase(
       );
     }
 
-    // Re-sync the payable credit: drop whatever was there and re-add only if
-    // still unpaid, so flipping paid/unpaid on edit doesn't leave stale rows. A
-    // type that doesn't affect the payable never has one. Either way the credit
-    // is the goods portion only — the shipping has left as the expense below.
+    // Re-sync only the supplier amount left after the purchase's own payment.
+    // Freight is never in this ledger row, and later PAYMENT_MADE documents keep
+    // their own debit rows and allocations.
     await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-    if (!isPaid && documentType?.affectsPayable) {
-      await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(goodsTotal) });
+    const remainingPayable = remainingPurchasePayable(grandTotal, shippingAmount, purchasePaidAmount);
+    if (remainingPayable > 0 && documentType?.affectsPayable) {
+      await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(remainingPayable) });
     }
 
     // Re-write the freight expense for the current shipping figure — the old
@@ -960,30 +1017,6 @@ export async function updateStockPurchase(
       });
     }
 
-    if (documentType?.affectsPayable) {
-      const glPurchaseSettlement = isPaid
-        ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
-        : null;
-      const glShippingSettlement = shippingAmount > 0
-        ? await settlementGeneralLedgerAccount(tx, companyId, null, shippingCashId, null)
-        : null;
-      await postGeneralLedgerIfCutover(tx, {
-        companyId,
-        documentId,
-        documentDate,
-        lines: [
-          { accountCode: "1200", debit: goodsTotal, memo: "Inventory received" },
-          isPaid
-            ? { ...glPurchaseSettlement!, credit: goodsTotal, memo: "Purchase settled at counter" }
-            : { accountCode: "2000", credit: goodsTotal, memo: "Supplier payable" },
-          ...(shippingAmount > 0 ? [
-            { accountCode: "6000", debit: shippingAmount, memo: "Purchase shipping" },
-            { ...glShippingSettlement!, credit: shippingAmount, memo: "Shipping paid" },
-          ] : []),
-        ],
-      });
-    }
-
     // Rebuild the payables queue for this supplier from the oldest bill forward.
     // The edit may have changed this bill's amount or its date, either of which
     // moves its position, so the payments are walked again rather than patched.
@@ -993,7 +1026,12 @@ export async function updateStockPurchase(
     if (existingDoc.contactId && existingDoc.contactId !== resolvedContactId) {
       await recomputeParty(tx, existingDoc.companyId, existingDoc.contactId);
     }
-  });
+    });
+  } catch (error) {
+    if (error instanceof MissingUnitConversionError) return { error: error.message };
+    throw error;
+  }
+  if (invalidLegacySettlement) return { error: "Select the account, cash account, or cheque that paid this purchase." };
   if (vanishedDuringSave) return { error: "Purchase not found — it may already have been deleted." };
 
   // A purchase can create items and contacts on the fly (resolve-refs.ts), and it
@@ -1017,7 +1055,7 @@ export async function updateStockPurchase(
     detail: changeSummary([
       ["Total", existingDoc.grandTotal, grandTotal.toFixed(2)],
       ["Date", existingDoc.documentDate, documentDate],
-      ["Paid", existingDoc.isPaid ? "yes" : "no", isPaid ? "yes" : "no"],
+      ["Paid in purchase", previousPurchasePaidAmount.toFixed(2), purchasePaidAmount.toFixed(2)],
       ["Supplier", existingDoc.contactId, contactId || contactName],
     ]) || `Total ${grandTotal}`,
   });
@@ -1026,14 +1064,16 @@ export async function updateStockPurchase(
 }
 
 export async function deleteStockPurchase(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't delete the purchase.", async () => {
+  return guard("Couldn't permanently delete the purchase.", async () => {
   const session = await getLiveSession();
-  requirePermission(session, "purchases", "delete");
+  // Permanent deletion is system administration, not a company-scoped role
+  // operation. A company Admin assignment must not be enough to erase history.
+  requireGlobalPermission(session, "purchases", "delete");
 
   const documentId = String(formData.get("documentId") ?? "");
 
-  // Read scoped: a guessed id from an unauthorized company is "not found", and
-  // the delete permission is then checked against the row's own company.
+  // Read scoped: even a system administrator cannot use a guessed id to reach a
+  // company outside their current access scope.
   const [existingDoc] = await db
     .select({
       number: documents.number,
@@ -1050,7 +1090,7 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     .limit(1);
   if (!existingDoc) return { error: "Purchase not found." };
   // Allocated payments are released and re-walked rather than blocking the
-  // cancellation — see the same change in updateStockPurchase. The confirmation is
+  // deletion — see the same change in updateStockPurchase. The confirmation is
   // required because the payments move to other bills, which is not something to
   // do behind the user's back.
   const [allocated] = await db
@@ -1059,17 +1099,15 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
     .where(eq(paymentAllocations.invoiceDocumentId, documentId));
   const allocatedAmount = Number(allocated?.amount ?? 0);
   if (allocatedAmount > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
-    return { needsConfirmation: true, error: `This purchase has ${allocatedAmount.toFixed(2)} of payments settled against it. Confirm the cancellation to release them to the supplier's other outstanding bills.` };
+    return { needsConfirmation: true, error: `This purchase has ${allocatedAmount.toFixed(2)} of payments settled against it. Confirm permanent deletion to release them to the supplier's other outstanding bills.` };
   }
-  requirePermission(session, "purchases", "delete", { companyId: existingDoc.companyId });
   let vanishedDuringDelete = false;
 
   try {
     await db.transaction(async (tx) => {
       const [lockedDoc] = await tx
         .select({
-          isPaid: documents.isPaid,
-          grandTotal: documents.grandTotal,
+          paidAmount: documents.paidAmount,
           bankAccountId: documents.bankAccountId,
           cashAccountId: documents.cashAccountId,
         })
@@ -1087,6 +1125,11 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
         .where(eq(chequeRegister.documentId, documentId))
         .limit(1)
         .for("update");
+      const hadRecordedSettlement = hasRecordedPurchaseSettlement({
+        bankAccountId: lockedDoc.bankAccountId,
+        cashAccountId: lockedDoc.cashAccountId,
+        chequeId: existingCheque?.id ?? null,
+      });
       // The freight expense was paid from the cash account, so its settlement
       // has to be reversed before the document goes. The cascade on
       // expenses.document_id would delete the rows by itself, but a paid expense
@@ -1098,18 +1141,22 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
         .where(eq(expenses.documentId, documentId));
       const oldShippingPaid = round1(linkedExpenses.reduce((sum, e) => sum + Number(e.amount), 0));
       // Give the allocated payments back before the settlement reversal below.
-      // payment_allocations.invoice_document_id is ON DELETE RESTRICT, so a bill
-      // with allocations could not be removed anyway — but the reason to release
-      // first is that those payments are separate posted documents which have to
-      // survive this cancellation and find another bill.
-      await releaseInvoiceAllocations(tx, [documentId]);
-      // Same rule as update: the old settlement covered the goods only when a
-      // freight expense was linked (post-change data), the whole total before.
-      if (lockedDoc.isPaid) {
+      // payment_allocations.invoice_document_id is ON DELETE RESTRICT. The
+      // payment documents are independent records: release and reallocate them,
+      // then erase only this purchase.
+      const releasedAllocations = await releaseInvoiceAllocations(tx, [documentId]);
+      const oldPurchasePaid = purchaseSettlementAmount(
+        Number(lockedDoc.paidAmount),
+        oldShippingPaid,
+        releasedAllocations.released,
+      );
+      // Reverse only money paid inside the purchase. Standalone PAYMENT_MADE
+      // documents survive this deletion and are reallocated below.
+      if (oldPurchasePaid > 0 && hadRecordedSettlement) {
         await adjustSettlementBalance(
           tx,
           "out",
-          String(round1(Number(lockedDoc.grandTotal) - oldShippingPaid)),
+          String(oldPurchasePaid),
           lockedDoc.bankAccountId,
           lockedDoc.cashAccountId,
           existingCheque?.id ?? null,
@@ -1133,43 +1180,32 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
       // Unlinked regardless of the paid flag: cheque_register.document_id is ON
       // DELETE NO ACTION, so a cheque still pointing here fails the delete.
       if (existingCheque) {
-        await tx.update(chequeRegister).set({ documentId: null }).where(eq(chequeRegister.id, existingCheque.id));
+        await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
       }
+      // Hard deletion removes the original effects instead of appending reversal
+      // rows. Inventory must go before document lines (their FK is RESTRICT), and
+      // ledger rows before the document. Lines then cascade with the document.
       await tx.execute(sql`
-        INSERT INTO inventory_transactions
-          (company_id, document_line_id, movement, quantity, base_quantity, unit_cost, total_cost)
-        SELECT it.company_id, it.document_line_id, -it.movement, it.quantity,
-               it.base_quantity, it.unit_cost, it.total_cost
-        FROM inventory_transactions it
-        JOIN document_lines dl ON dl.id = it.document_line_id
-        WHERE dl.document_id = ${documentId}::uuid
+        DELETE FROM inventory_transactions it
+        USING document_lines dl
+        WHERE it.document_line_id = dl.id
+          AND dl.document_id = ${documentId}::uuid
       `);
-      await tx.execute(sql`
-        INSERT INTO ledger_entries (company_id, document_id, debit, credit)
-        SELECT company_id, document_id, credit, debit
-        FROM ledger_entries
-        WHERE document_id = ${documentId}::uuid
-      `);
-      await reverseGeneralLedger(tx, existingDoc.companyId, documentId, "Purchase cancelled");
-      await tx
-        .update(documents)
-        .set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
+      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
+      await tx.delete(documents).where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
       // The bill has left the payables queue, so every payment made to this
       // supplier is walked again: what was sitting on this bill moves onto the
       // next outstanding one, and any surplus stands as an advance.
       await recomputeParty(tx, existingDoc.companyId, existingDoc.contactId);
     });
   } catch (e) {
-    return { error: describeDbError(e, "Can't delete — this purchase is still referenced elsewhere.") };
+    return { error: describeDbError(e, "Can't permanently delete — this purchase is still referenced elsewhere.") };
   }
   if (vanishedDuringDelete) return { error: "Purchase not found — it may already have been deleted." };
 
   // A purchase can create items and contacts on the fly (resolve-refs.ts), and it
   // always moves stock and touches the payable ledger — so the cached option lists
-  // and every page reading them are stale, not just the purchase list. Without the
-  // stock/products lines, deleting a purchase reversed the movement in the
-  // database while the Stock page kept showing the old quantity.
+  // and every page reading them are stale, not just the purchase list.
   await invalidateLookups(CACHE.documentTypes, CACHE.cheques, CACHE.items, CACHE.contacts, CACHE.expenseCategories);
   await invalidateReads(...READS);
   revalidatePath("/purchases/stock");
@@ -1178,14 +1214,14 @@ export async function deleteStockPurchase(_prevState: ActionResult | undefined, 
   revalidatePath("/ledger");
   revalidatePath("/expenses");
   await recordAudit({
-    action: "cancel",
+    action: "delete",
     entity: "purchase",
     entityId: documentId,
     summary: existingDoc.number,
     companyId: existingDoc.companyId,
     detail: allocatedAmount > 0
-      ? `Total ${existingDoc.grandTotal}; released ${allocatedAmount.toFixed(2)} of settled payments`
-      : `Total ${existingDoc.grandTotal}`,
+      ? `Permanently deleted by system administrator; total ${existingDoc.grandTotal}; released ${allocatedAmount.toFixed(2)} of settled payments`
+      : `Permanently deleted by system administrator; total ${existingDoc.grandTotal}`,
   });
   return { success: true };
   });

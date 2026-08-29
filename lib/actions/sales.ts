@@ -39,7 +39,6 @@ import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
-import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 
 // A sale writes the invoice, the stock it took out, the customer's ledger and
 // whatever settled it. `purchases` is deliberately absent — this file names no
@@ -175,7 +174,7 @@ export async function listChequesForSales(currentDocumentId?: string) {
 //
 // Read off ledger_entries, which is the whole of what has moved on this
 // contact's books: the sale's debit, a payment received's credit, and any
-// journal entry posted from the Ledger screen. It used to sum
+// opening-balance entry posted from the Ledger screen. It used to sum
 // (grand_total - paid_amount) over the invoices instead, and that number only
 // moves when someone edits the invoice — a payment taken on the Payments screen
 // never writes back to `documents.paid_amount`, so a customer who had settled up
@@ -187,8 +186,8 @@ export async function listChequesForSales(currentDocumentId?: string) {
 // contact's running total, the same figure the Ledger's "Owes Us" column shows,
 // so the two screens now agree by construction rather than by coincidence.
 //
-// Sign follows the ledger convention (credit - debit, positive = we owe them),
-// inverted here because this asks the receivable question. A contact who is also
+// Sign follows the statement/list convention (debit - credit, positive = they
+// owe us). A contact who is also
 // a supplier nets across both — one running account, which is what the Ledger
 // already reports for them — and a net payable clamps to zero, showing no line.
 export async function getCustomerOutstanding(contactId: string, excludeSaleId?: string): Promise<number> {
@@ -652,30 +651,6 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
         await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, debit: String(balance) });
       }
 
-      // The party ledger above remains the customer statement. From the chosen
-      // cutover date onward this is the separate double-entry posting: cash and
-      // receivable together equal the sale total, while the exact outbound stock
-      // cost moves from inventory into COGS. Pre-cutover invoices do nothing
-      // here, so their historical accounting is never rewritten.
-      const stockCost = round1(stockLines.reduce((sum, { l }) => sum + (Number(l.unitCost) || 0) * Number(l.quantity), 0));
-      const glSettlementAccount = paidAmount > 0
-        ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
-        : null;
-      await postGeneralLedgerIfCutover(tx, {
-        companyId,
-        documentId: doc.id,
-        documentDate,
-        lines: [
-          ...(paidAmount > 0 ? [{ ...glSettlementAccount!, debit: paidAmount, memo: "Sale settled at counter" }] : []),
-          ...(balance > 0 ? [{ accountCode: "1100", debit: balance, memo: "Sale receivable" }] : []),
-          { accountCode: "4000", credit: grandTotal, memo: "Sales revenue" },
-          ...(stockCost > 0 ? [
-            { accountCode: "5000", debit: stockCost, memo: "Cost of goods sold" },
-            { accountCode: "1200", credit: stockCost, memo: "Inventory issued" },
-          ] : []),
-        ],
-      });
-
       // A customer who has paid ahead has money sitting on their account with
       // nowhere to go. This invoice is somewhere for it to go: recomputing the
       // queue lets the standing advance settle against it the moment it exists,
@@ -838,14 +813,12 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
         vanishedDuringSave = true;
         return;
       }
-      await assertGeneralLedgerDateStaysPostCutover(tx, { companyId, documentId, documentDate });
       const [existingCheque] = await tx
         .select({ id: chequeRegister.id })
         .from(chequeRegister)
         .where(eq(chequeRegister.documentId, documentId))
         .limit(1)
         .for("update");
-      await reverseGeneralLedger(tx, companyId, documentId, "Reversed before sale correction");
       // Hand back the receipts before anything reads paid_amount. What is left is
       // the part payment taken at the counter, which is the only piece that came
       // through this invoice's own bank or cash account — the allocated piece
@@ -942,25 +915,6 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
           })),
         );
       }
-
-      const stockCost = round1(stockLines.reduce((sum, { l }) => sum + (Number(l.unitCost) || 0) * Number(l.quantity), 0));
-      const glSettlementAccount = paidAmount > 0
-        ? await settlementGeneralLedgerAccount(tx, companyId, bankAccountId, cashAccountId, chequeId)
-        : null;
-      await postGeneralLedgerIfCutover(tx, {
-        companyId,
-        documentId,
-        documentDate,
-        lines: [
-          ...(paidAmount > 0 ? [{ ...glSettlementAccount!, debit: paidAmount, memo: "Sale settled at counter" }] : []),
-          ...(balance > 0 ? [{ accountCode: "1100", debit: balance, memo: "Sale receivable" }] : []),
-          { accountCode: "4000", credit: grandTotal, memo: "Sales revenue" },
-          ...(stockCost > 0 ? [
-            { accountCode: "5000", debit: stockCost, memo: "Cost of goods sold" },
-            { accountCode: "1200", credit: stockCost, memo: "Inventory issued" },
-          ] : []),
-        ],
-      });
 
       // Settlement is rebuilt from scratch for the party, in date order, rather
       // than patched: this edit may have changed the amount, the date or the
@@ -1126,7 +1080,6 @@ export async function deleteSale(_prevState: ActionResult | undefined, formData:
         FROM ledger_entries
         WHERE document_id = ${documentId}::uuid
       `);
-      await reverseGeneralLedger(tx, existingDoc.companyId, documentId, "Sale cancelled");
       await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, documentId), eq(documents.status, "posted")));
       // The invoice is gone from the queue, so every receipt on this customer's
       // account has to be walked again from the oldest item forward. Receipts that

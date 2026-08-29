@@ -23,6 +23,7 @@ type PurchaseCheques = Awaited<ReturnType<typeof listChequesForPurchases>>;
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
+type SettlementOption = Option & { companyId: string | null };
 type PurchaseItemRow = { itemName: string; qty: string; unit: string; unitPrice: string; unitCost: string; lineTotal: string };
 type PurchaseBreakdown = {
   subtotal: string;
@@ -75,6 +76,7 @@ export function StockPurchaseManager({
   taxOptions,
   conversionOptions,
   taxSettings,
+  canHardDelete,
 }: {
   rows: PurchaseRow[];
   companyOptions: Option[];
@@ -83,22 +85,23 @@ export function StockPurchaseManager({
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: Option[];
   unitOptions: Option[];
-  bankAccountOptions: Option[];
-  cashAccountOptions: Option[];
-  chequeOptions: Option[];
+  bankAccountOptions: SettlementOption[];
+  cashAccountOptions: SettlementOption[];
+  chequeOptions: SettlementOption[];
   taxOptions: (Option & { rate: string })[];
   conversionOptions: UnitConversionOption[];
   taxSettings: Record<string, Record<string, string>>;
+  canHardDelete: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseDetail | null>(null);
-  const [editChequeOptions, setEditChequeOptions] = useState<Option[]>(chequeOptions);
+  const [editChequeOptions, setEditChequeOptions] = useState<SettlementOption[]>(chequeOptions);
 
   // Rows the list shows, which is the server's list plus whatever is in flight.
   // The rows here are already-formatted totals with their own line items, so a
   // saved edit changes no cell until the payload lands — nothing is guessed at,
-  // least of all money. What it does buy is the fade and the instant cancel, and
+  // least of all money. What it does buy is the fade and the instant delete, and
   // those are what the wait was actually costing.
   const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id");
 
@@ -123,7 +126,7 @@ export function StockPurchaseManager({
     }
   }
 
-  // Called from inside the form's own action when a save or a cancellation
+  // Called from inside the form's own action when a save or a deletion
   // starts, and it is not housekeeping: the warm copy was taken before this
   // write, so handing it to the next open would show the purchase as it used to
   // be — worse than the round trip it saves.
@@ -264,7 +267,7 @@ export function StockPurchaseManager({
 
       {editing && (
         // Hidden rather than closed while this purchase's write is in the air. The
-        // server may still have something to say — a cancellation that would
+        // server may still have something to say — a deletion that would
         // release settled payments is refused once, with the figures — and a hidden
         // popup keeps that question and every typed line standing; a closed one
         // would have thrown both away. `pending` empties when the action settles,
@@ -293,16 +296,18 @@ export function StockPurchaseManager({
                 patch(editing.id);
               }}
             />
-            <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteStockPurchaseButton
-                purchaseId={editing.id}
-                onDone={close}
-                onDeleting={() => {
-                  forgetWarm(editing.id);
-                  remove(editing.id);
-                }}
-              />
-            </div>
+            {canHardDelete && (
+              <div className="rounded border border-error/30 bg-error-tint p-4">
+                <DeleteStockPurchaseButton
+                  purchaseId={editing.id}
+                  onDone={close}
+                  onDeleting={() => {
+                    forgetWarm(editing.id);
+                    remove(editing.id);
+                  }}
+                />
+              </div>
+            )}
           </div>
         </Dialog>
       )}

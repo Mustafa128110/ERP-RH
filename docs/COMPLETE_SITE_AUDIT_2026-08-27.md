@@ -64,7 +64,7 @@ The production configuration rejects missing or placeholder Supabase URL, anon k
 
 ## Business-logic and data-integrity review
 
-The audit covered sales, quotations, purchases, market purchases, payments, settlements, stock movements, transfers, adjustments, inter-company flows, products, contacts, accounts/general ledger, reports, taxes, sessions, cache invalidation, numbering, and operation IDs.
+The audit covered sales, quotations, purchases, market purchases, payments, settlements, stock movements, transfers, adjustments, inter-company flows, products, contacts, accounts, reports, taxes, sessions, cache invalidation, numbering, and operation IDs.
 
 Live integrity queries found:
 

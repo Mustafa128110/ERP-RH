@@ -17,6 +17,7 @@ import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
 import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
+import type { PurchasePaidMode } from "@/lib/purchase-edit-rules";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input filling a table cell; the collapsed cell border is the line.
@@ -26,6 +27,8 @@ const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
+type SettlementOption = Option & { companyId: string | null };
+type SettlementMode = SettlementType | "legacy";
 type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
 type TaxOption = { id: string; name: string; rate: string };
 type DocumentTypeOption = {
@@ -79,6 +82,11 @@ type PurchaseDefaults = {
   shippingTotal: string;
   isPaid: boolean;
   paidAmount?: string;
+  purchasePaidMode: PurchasePaidMode;
+  purchaseSettlementAmount: string;
+  allocatedAmount: string;
+  shippingExpenseAmount: string;
+  legacyUntrackedSettlement: boolean;
   bankAccountId: string | null;
   cashAccountId: string | null;
   chequeId: string | null;
@@ -114,9 +122,9 @@ export function StockPurchaseCreateForm({
   documentTypeOptions: DocumentTypeOption[];
   locationOptions: (Option & { locationType?: string })[];
   unitOptions: Option[];
-  bankAccountOptions: Option[];
-  cashAccountOptions: Option[];
-  chequeOptions: Option[];
+  bankAccountOptions: SettlementOption[];
+  cashAccountOptions: SettlementOption[];
+  chequeOptions: SettlementOption[];
   taxOptions: TaxOption[];
   conversionOptions: UnitConversionOption[];
   taxSettings: Record<string, Record<string, string>>;
@@ -190,11 +198,19 @@ export function StockPurchaseCreateForm({
   const [shippingTotal, setShippingTotal] = useState(() => defaults?.shippingTotal ?? "0");
   const [contactId, setContactId] = useState(() => defaults?.contactId ?? "");
   const [supplierText, setSupplierText] = useState(() => supplierOptions.find((s) => s.id === defaults?.contactId)?.name ?? "");
-  type PaidMode = "yes" | "partial" | "no";
-  const [isPaid, setIsPaid] = useState<PaidMode>(() => defaults?.isPaid ? "yes" : Number(defaults?.paidAmount) > 0 ? "partial" : "no");
-  const [paidAmount, setPaidAmount] = useState(() => (defaults && !defaults.isPaid ? (defaults.paidAmount ?? "") : ""));
-  const [settlementType, setSettlementType] = useState<SettlementType>(defaults?.settlementType ?? "account");
-  const settlementOptions = settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? cashAccountOptions : chequeOptions;
+  const [isPaid, setIsPaid] = useState<PurchasePaidMode>(() => defaults?.purchasePaidMode ?? "no");
+  const [paidAmount, setPaidAmount] = useState(() => defaults?.purchaseSettlementAmount ?? "");
+  const [settlementType, setSettlementType] = useState<SettlementMode>(
+    defaults?.legacyUntrackedSettlement ? "legacy" : defaults?.settlementType ?? "account",
+  );
+  // Settlement accounts are company-scoped just like suppliers and items. The
+  // option bundle contains every company in the user's topbar scope, so showing
+  // it unfiltered let a purchase submit another company's account and reach the
+  // server-side SettlementScopeError. Global bank accounts (companyId = null)
+  // remain valid for every company through the shared inCompany rule.
+  const settlementOptions = settlementType === "legacy"
+    ? []
+    : (settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? cashAccountOptions : chequeOptions).filter(inCompany(companyId));
   const settlementFieldName = settlementType === "account" ? "bankAccountId" : settlementType === "cash" ? "cashAccountId" : "chequeId";
   const settlementDefault =
     settlementType === "account" ? defaults?.bankAccountId : settlementType === "cash" ? defaults?.cashAccountId : defaults?.chequeId;
@@ -709,8 +725,8 @@ export function StockPurchaseCreateForm({
 
       <div className="flex flex-wrap items-start gap-3">
         <label className={`${labelClass} w-40`}>
-          <span className={labelTextClass}>Paid?</span>
-          <select name="isPaid" value={isPaid} onChange={(e) => setIsPaid(e.target.value as PaidMode)} className={fieldClass}>
+          <span className={labelTextClass}>Paid in purchase?</span>
+          <select name="isPaid" value={isPaid} onChange={(e) => setIsPaid(e.target.value as PurchasePaidMode)} className={fieldClass}>
             <option value="no">No</option>
             <option value="partial">Partial</option>
             <option value="yes">Yes</option>
@@ -718,11 +734,11 @@ export function StockPurchaseCreateForm({
         </label>
         {isPaid === "partial" && (
           <label className={`${labelClass} w-40`}>
-            <span className={labelTextClass}>Amount Paid</span>
+            <span className={labelTextClass}>Paid to Supplier</span>
             <input
               type="number"
               min="0"
-              max={grandTotal}
+              max={Math.max(0, grandTotal - (Number(shippingTotal) || 0))}
               step="0.1"
               value={paidAmount}
               onChange={(e) => setPaidAmount(e.target.value)}
@@ -730,17 +746,19 @@ export function StockPurchaseCreateForm({
             />
           </label>
         )}
-        {isPaid !== "no" && (
-          <div className="flex flex-col justify-center gap-0.5 self-stretch pt-5 text-sm">
-            <span className="text-steel">Paid: {isPaid === "yes" ? grandTotal : money(Number(paidAmount) || 0)}</span>
-            <span className={grandTotal - (isPaid === "yes" ? grandTotal : Number(paidAmount) || 0) > 0 ? "font-semibold text-error" : "font-semibold text-success"}>Balance: {money(grandTotal - (isPaid === "yes" ? grandTotal : Number(paidAmount) || 0))}</span>
-          </div>
-        )}
+        <div className="flex flex-col justify-center gap-0.5 self-stretch pt-5 text-sm">
+          <span className="text-steel">Paid here: {money(isPaid === "yes" ? Math.max(0, grandTotal - (Number(shippingTotal) || 0)) : Number(paidAmount) || 0)}</span>
+          {Number(defaults?.allocatedAmount ?? 0) > 0 && <span className="text-steel">From Payments: {money(defaults?.allocatedAmount ?? 0)}</span>}
+          {Number(shippingTotal) > 0 && <span className="text-steel">Shipping expense: {money(shippingTotal)}</span>}
+          <span className={grandTotal - (isPaid === "yes" ? Math.max(0, grandTotal - (Number(shippingTotal) || 0)) : Number(paidAmount) || 0) - Number(defaults?.allocatedAmount ?? 0) - (Number(shippingTotal) || 0) > 0 ? "font-semibold text-error" : "font-semibold text-success"}>
+            Balance after saved payments: {money(Math.max(0, grandTotal - (isPaid === "yes" ? Math.max(0, grandTotal - (Number(shippingTotal) || 0)) : Number(paidAmount) || 0) - Number(defaults?.allocatedAmount ?? 0) - (Number(shippingTotal) || 0)))}
+          </span>
+        </div>
       </div>
 
-      {/* The amount actually settled — the whole total when paid in full, so the
-          server never has to infer it from the mode. */}
-      <input type="hidden" name="paidAmount" value={isPaid === "yes" ? String(grandTotal) : (Number(paidAmount) || 0).toFixed(2)} />
+      {/* Only the amount paid at this purchase. Shipping is its own expense and
+          later PAYMENT_MADE allocations remain separate server-side sources. */}
+      <input type="hidden" name="paidAmount" value={isPaid === "yes" ? String(Math.max(0, grandTotal - (Number(shippingTotal) || 0))) : (Number(paidAmount) || 0).toFixed(2)} />
 
       {isPaid !== "no" && (
         <div className="flex flex-col gap-3 rounded border border-sand p-3">
@@ -763,19 +781,25 @@ export function StockPurchaseCreateForm({
             </div>
           </div>
           <input type="hidden" name="settlementType" value={settlementType} />
-          <label className={`${labelClass} w-56`}>
-            <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
-            <select key={settlementType} name={settlementFieldName} required defaultValue={settlementDefault ?? ""} className={fieldClass}>
-              <option value="" disabled>
-                {settlementOptions.length === 0 ? "None available — create one first" : "Select"}
-              </option>
-              {settlementOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
+          {settlementType === "legacy" ? (
+            <p className="max-w-xl text-sm text-steel">
+              This older purchase was marked paid without an account. Saving keeps that history and does not change any account balance. Choose a method above only to start tracking it against an account.
+            </p>
+          ) : (
+            <label className={`${labelClass} w-56`}>
+              <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
+              <select key={`${settlementType}:${companyId}`} name={settlementFieldName} required defaultValue={settlementDefault ?? ""} className={fieldClass}>
+                <option value="" disabled>
+                  {settlementOptions.length === 0 ? "None available — create one first" : "Select"}
                 </option>
-              ))}
-            </select>
-          </label>
+                {settlementOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       )}
 
@@ -824,15 +848,15 @@ export function DeleteStockPurchaseButton({
   // The list drops the row when this is called, from inside the action below so it
   // runs after the confirm() has had its say. Nothing reports a failure back: if
   // the server answers with the question about payments to release instead of a
-  // cancellation, React reverts the removal as this action settles and the popup
+  // deletion, React reverts the removal as this action settles and the popup
   // returns with that question on it. See lib/optimistic-records.ts.
   onDeleting?: () => void;
 }) {
-  // Payments settled against this bill don't block the cancellation and don't have
+  // Payments settled against this bill don't block permanent deletion and don't have
   // to be unlinked by hand — they are released onto whatever else is still owed to
   // the supplier. But that is money moving between documents, so the server refuses
   // once and says how much; that sentence becomes the question, and the next press
-  // sends the answer back. One submit only, so a later cancellation is asked again.
+  // sends the answer back. One submit only, so a later deletion is asked again.
   const [confirming, setConfirming] = useState(false);
   const [state, action, pending] = useActionState(
     optimistically(async (prev: { error?: string; success?: boolean; needsConfirmation?: boolean } | undefined, formData: FormData) => {
@@ -860,13 +884,13 @@ export function DeleteStockPurchaseButton({
         // Already asked, and asked more precisely than this: the amber sentence
         // beside the button names the payments that would move.
         if (confirming) return;
-        if (!confirm("Cancel this purchase? Its history will remain and its stock and accounting effects will be reversed.")) e.preventDefault();
+        if (!confirm("Permanently delete this purchase? It will be removed completely, stock and balances will be recalculated, and this cannot be undone.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="documentId" value={purchaseId} />
       <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <button type="submit" disabled={pending} className="text-sm font-medium text-error hover:underline disabled:opacity-40">
-        {pending ? "Cancelling…" : confirming ? "Confirm cancellation" : "Cancel this purchase"}
+        {pending ? "Deleting…" : confirming ? "Confirm permanent deletion" : "Permanently delete purchase"}
       </button>
       {state?.error && (
         <p className={`mt-2 ${state.needsConfirmation ? confirmNoticeClass : errorTextClass}`}>{state.error}</p>

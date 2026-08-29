@@ -8,6 +8,8 @@ async function main() {
     broken_links: number;
     overpaid_payments: number;
     invoice_mismatches: number;
+    opening_entry_mismatches: number;
+    invalid_payment_allocations: number;
     total_allocations: number;
     allocated_amount: string;
   }>(sql`
@@ -27,7 +29,7 @@ async function main() {
          JOIN document_types pt ON pt.id = p.document_type_id
          JOIN documents i ON i.id = pa.invoice_document_id
          JOIN document_types it ON it.id = i.document_type_id
-         LEFT JOIN ledger_entries ob ON ob.document_id = i.id AND it.code = 'OPENING_BALANCE'
+         LEFT JOIN ledger_entries party_entry ON party_entry.document_id = i.id AND it.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
         WHERE pa.company_id <> p.company_id OR pa.company_id <> i.company_id
            OR p.contact_id IS DISTINCT FROM i.contact_id
            OR NOT ((pt.code = 'PAYMENT_RECEIVED' AND it.code = 'SALES_INVOICE')
@@ -39,20 +41,41 @@ async function main() {
                 -- as two explicit arms so an allocation with no ledger row behind
                 -- it, or one on the wrong side, is a broken link rather than an
                 -- unknown that quietly passes.
-                OR (it.code = 'OPENING_BALANCE' AND pt.code = 'PAYMENT_RECEIVED' AND coalesce(ob.debit, 0) > 0)
-                OR (it.code = 'OPENING_BALANCE' AND pt.code = 'PAYMENT_MADE' AND coalesce(ob.credit, 0) > 0))) AS broken_links,
+                OR (it.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY') AND pt.code = 'PAYMENT_RECEIVED' AND coalesce(party_entry.debit, 0) > 0)
+                OR (it.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY') AND pt.code = 'PAYMENT_MADE' AND coalesce(party_entry.credit, 0) > 0))) AS broken_links,
       (SELECT count(*)::int
          FROM allocation_totals a JOIN documents p ON p.id = a.payment_document_id
         WHERE a.amount > p.grand_total) AS overpaid_payments,
       (SELECT count(*)::int
          FROM invoice_totals a JOIN documents i ON i.id = a.invoice_document_id
         WHERE a.amount > i.paid_amount) AS invoice_mismatches,
+      (SELECT count(*)::int
+         FROM documents i
+         JOIN document_types it ON it.id = i.document_type_id
+         LEFT JOIN invoice_totals a ON a.invoice_document_id = i.id
+        WHERE i.status = 'posted'
+          AND it.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
+          AND i.paid_amount <> coalesce(a.amount, 0)) AS opening_entry_mismatches,
+      (SELECT count(*)::int
+       FROM payment_allocations pa
+       JOIN documents p ON p.id = pa.payment_document_id
+       LEFT JOIN bank_accounts b ON b.id = p.bank_account_id
+       LEFT JOIN cash_accounts c ON c.id = p.cash_account_id
+       WHERE NOT (
+         (p.bank_account_id IS NOT NULL AND (b.company_id IS NULL OR b.company_id = p.company_id))
+         OR (p.cash_account_id IS NOT NULL AND c.company_id = p.company_id)
+         OR (p.bank_account_id IS NULL AND p.cash_account_id IS NULL AND EXISTS (
+           SELECT 1 FROM cheque_register q WHERE q.document_id = p.id AND q.company_id = p.company_id
+         ))
+       )) AS invalid_payment_allocations,
       (SELECT count(*)::int FROM payment_allocations) AS total_allocations,
       (SELECT coalesce(sum(amount), 0) FROM payment_allocations) AS allocated_amount
   `);
   assert.equal(integrity?.broken_links, 0, "allocations must stay in one company/contact and match payment direction");
   assert.equal(integrity?.overpaid_payments, 0, "a payment cannot allocate more than its value");
   assert.equal(integrity?.invoice_mismatches, 0, "allocated value must be reflected in invoice paid_amount");
+  assert.equal(integrity?.opening_entry_mismatches, 0, "opening-balance paid_amount must exactly equal its FIFO allocations");
+  assert.equal(integrity?.invalid_payment_allocations, 0, "a payment with another company's settlement account must never settle a party item");
 
   const [fifo] = await db.execute<{ violations: number }>(sql`
     SELECT count(*)::int AS violations
@@ -98,6 +121,48 @@ async function main() {
       )
   `);
   assert.equal(openingFirst?.violations, 0, "an invoice cannot be settled while the party's opening balance on that side is still open");
+
+  // Purchases/sales and contact-linked legacy opening entries share one FIFO per
+  // side. A later purchase cannot hold a payment while an older credit opening
+  // remains, and the same rule holds for receivables.
+  const [sharedFifo] = await db.execute<{ violations: number }>(sql`
+    WITH items AS (
+      SELECT d.id, d.company_id, d.contact_id, d.document_date, d.created_at,
+             (dt.code = 'OPENING_BALANCE') AS is_opening,
+             CASE
+               WHEN dt.code = 'SALES_INVOICE' THEN 'receivable'
+               WHEN dt.code = 'PURCHASE_INVOICE' THEN 'payable'
+               WHEN coalesce(le.debit, 0) > 0 THEN 'receivable'
+               ELSE 'payable'
+             END AS side,
+             d.grand_total - d.paid_amount AS remaining
+      FROM documents d
+      JOIN document_types dt ON dt.id = d.document_type_id
+      LEFT JOIN ledger_entries le
+        ON le.document_id = d.id
+       AND dt.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
+      WHERE d.status = 'posted'
+        AND d.contact_id IS NOT NULL
+        AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'JOURNAL_ENTRY')
+    )
+    SELECT count(*)::int AS violations
+    FROM items older
+    WHERE older.remaining > 0
+      AND EXISTS (
+        SELECT 1
+        FROM items later
+        JOIN payment_allocations pa ON pa.invoice_document_id = later.id
+        WHERE later.company_id = older.company_id
+          AND later.contact_id = older.contact_id
+          AND later.side = older.side
+          AND (
+            (older.is_opening AND NOT later.is_opening)
+            OR (older.is_opening = later.is_opening
+                AND (later.document_date, later.created_at, later.id) > (older.document_date, older.created_at, older.id))
+          )
+      )
+  `);
+  assert.equal(sharedFifo?.violations, 0, "purchases/invoices and opening-balance entries must share one chronological FIFO per side");
 
   console.log(`payment-allocation checks passed (${integrity?.total_allocations ?? 0} allocation(s), ${integrity?.allocated_amount ?? "0"} settled)`);
 }

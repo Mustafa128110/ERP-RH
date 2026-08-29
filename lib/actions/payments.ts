@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -16,7 +16,7 @@ import {
   paymentAllocations,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission, PermissionError } from "@/lib/auth/permissions";
+import { requireGlobalPermission, requirePermission, PermissionError } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { ensureDocumentType, nextDocumentNumber, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, adjustSettlementBalancesBatch, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
@@ -32,14 +32,14 @@ import { changeSummary } from "@/lib/audit-constants";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { allocatePaymentsFifo, reallocateAccountPaymentsFifo, releasePaymentAllocations } from "@/lib/actions/payment-allocation";
-import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, postPaymentGeneralLedgerBatch, reverseGeneralLedger, settlementGeneralLedgerAccount } from "@/lib/actions/general-ledger";
 
 // A payment settles invoices, so it changes the party's balance and how much of
-// each invoice is still owed — hence `purchases` and `products` alongside the
-// obvious three. It moves no stock, and it names no SALES_INVOICE, so the sales
-// and stock lists stay warm.
+// each invoice is still owed — hence `sales`, `purchases`, and `products`
+// alongside the obvious three. It moves no stock, so only the stock list stays
+// warm.
 const READS = [
   READ_DOMAIN.payments,
+  READ_DOMAIN.sales,
   READ_DOMAIN.purchases,
   READ_DOMAIN.ledger,
   READ_DOMAIN.products,
@@ -106,7 +106,18 @@ export async function listPayments(filters: PaymentFilters = {}) {
       id: documents.id,
       number: documents.number,
       documentDate: documents.documentDate,
-      grandTotal: documents.grandTotal,
+      // Purchase rows represent only money paid inside the purchase. Freight is
+      // a linked expense and later PAYMENT_MADE allocations are separate rows;
+      // neither belongs in this counter-payment amount.
+      grandTotal: sql<string>`case when ${documentTypes.code} = 'PURCHASE_INVOICE'
+        then greatest(
+          ${documents.paidAmount}
+          - coalesce((select sum(e.amount) from expenses e where e.document_id = ${documents.id} and e.status = 'posted'), 0)
+          - coalesce((select sum(pa.amount) from payment_allocations pa where pa.invoice_document_id = ${documents.id}), 0),
+          0
+        )
+        else ${documents.grandTotal}
+      end`,
       companyId: documents.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       contactId: documents.contactId,
@@ -135,7 +146,12 @@ export async function listPayments(filters: PaymentFilters = {}) {
         // itself — so it's picked up here rather than duplicated as one.
         or(
           inArray(documentTypes.code, [...codes]),
-          filters.direction === "received" ? undefined : and(eq(documentTypes.code, "PURCHASE_INVOICE"), eq(documents.isPaid, true)),
+          filters.direction === "received"
+            ? undefined
+            : and(
+                eq(documentTypes.code, "PURCHASE_INVOICE"),
+                or(isNotNull(documents.bankAccountId), isNotNull(documents.cashAccountId), isNotNull(chequeRegister.id)),
+              ),
         ),
         await companyInPermissionScope(documents.companyId, session, "payments"),
         eq(documents.status, "posted"),
@@ -286,21 +302,6 @@ export async function createPayment(
         await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, ...paymentLedgerSide(direction, values.amount) });
       }
       await allocatePaymentsFifo(tx, [doc.id]);
-      const glSettlementAccount = await settlementGeneralLedgerAccount(tx, values.companyId, values.bankAccountId, values.cashAccountId, values.chequeId);
-      await postGeneralLedgerIfCutover(tx, {
-        companyId: values.companyId,
-        documentId: doc.id,
-        documentDate: values.paymentDate,
-        lines: direction === "received"
-          ? [
-              { ...glSettlementAccount, debit: Number(values.amount), memo: "Customer payment received" },
-              { accountCode: "1100", credit: Number(values.amount), memo: "Accounts receivable settled" },
-            ]
-          : [
-              { accountCode: "2000", debit: Number(values.amount), memo: "Supplier payable settled" },
-              { ...glSettlementAccount, credit: Number(values.amount), memo: "Supplier payment made" },
-            ],
-      });
     });
   } catch (e) {
     if (e instanceof DuplicateOperationError) return { error: e.message };
@@ -538,19 +539,6 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
         .map(({ row, amount, documentId }) => ({ companyId: row.companyId, documentId, ...paymentLedgerSide(row.direction, amount) }));
       if (entries.length > 0) await tx.insert(ledgerEntries).values(entries);
       await allocatePaymentsFifo(tx, prepared.map(({ documentId }) => documentId));
-      await postPaymentGeneralLedgerBatch(
-        tx,
-        prepared.map(({ row, amount, documentId }) => ({
-          documentId,
-          companyId: row.companyId,
-          paymentDate: row.paymentDate,
-          amount,
-          direction: row.direction,
-          bankAccountId: row.bankAccountId,
-          cashAccountId: row.cashAccountId,
-          chequeId: row.chequeId,
-        })),
-      );
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
@@ -632,8 +620,6 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
           vanishedDuringSave = true;
           return;
         }
-        await assertGeneralLedgerDateStaysPostCutover(tx, { companyId: existing.companyId, documentId: paymentId, documentDate: values.paymentDate });
-        await reverseGeneralLedger(tx, existing.companyId, paymentId, "Reversed before payment correction");
         await releasePaymentAllocations(tx, [paymentId]);
         const [existingCheque] = await tx
           .select({ id: chequeRegister.id })
@@ -672,21 +658,6 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         if (contactId) {
           await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
         }
-        const glSettlementAccount = await settlementGeneralLedgerAccount(tx, existing.companyId, values.bankAccountId, values.cashAccountId, values.chequeId);
-        await postGeneralLedgerIfCutover(tx, {
-          companyId: existing.companyId,
-          documentId: paymentId,
-          documentDate: values.paymentDate,
-          lines: direction === "received"
-            ? [
-                { ...glSettlementAccount, debit: Number(values.amount), memo: "Customer payment received" },
-                { accountCode: "1100", credit: Number(values.amount), memo: "Accounts receivable settled" },
-              ]
-            : [
-                { accountCode: "2000", debit: Number(values.amount), memo: "Supplier payable settled" },
-                { ...glSettlementAccount, credit: Number(values.amount), memo: "Supplier payment made" },
-              ],
-        });
         const paymentCode = direction === "made" ? "PAYMENT_MADE" : "PAYMENT_RECEIVED";
         await reallocateAccountPaymentsFifo(tx, existing.companyId, existing.contactId, paymentCode);
         if (contactId !== existing.contactId) {
@@ -720,9 +691,11 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
 }
 
 export async function deletePayment(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Couldn't cancel the payment.", async () => {
+  return guard("Couldn't permanently delete the payment.", async () => {
   const session = await getLiveSession();
-  requirePermission(session, "payments", "delete");
+  // Erasing a posted payment requires a system-wide Admin grant. Company role
+  // permissions can edit payments but cannot remove their existence.
+  requireGlobalPermission(session, "payments", "delete");
 
   const paymentId = String(formData.get("paymentId") ?? "");
 
@@ -748,20 +721,8 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
     )
     .limit(1);
   if (!existing) return { error: "Payment not found." };
-  // The delete permission is checked against the row's own company — a guessed
-  // id from a company the user can't delete in is refused even when they hold
-  // the permission somewhere else. Caught like createPayment: this action
-  // isn't guard-wrapped, and a throw would be misread by the form's transport
-  // wrapper as a network failure.
-  try {
-    requirePermission(session, "payments", "delete", { companyId: existing.companyId });
-  } catch (e) {
-    if (e instanceof PermissionError) return { error: e.message };
-    throw e;
-  }
-
   const direction: PaymentDirection = existing.code === "PAYMENT_MADE" ? "made" : "received";
-  // Cancelling a payment un-settles whatever it was covering. Those invoices go
+  // Deleting a payment un-settles whatever it was covering. Those invoices go
   // back to outstanding or partial, which is a change to documents the person
   // cancelling may not have in front of them — so it is confirmed first, with the
   // affected invoices listed by previewLedgerRowDelete.
@@ -773,7 +734,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
   if (allocatedAmount > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
     return {
       needsConfirmation: true,
-      error: `This payment is settling ${allocatedAmount.toFixed(2)} against ${direction === "made" ? "supplier bills" : "customer invoices"}. Confirm the cancellation to return them to outstanding.`,
+      error: `This payment is settling ${allocatedAmount.toFixed(2)} against ${direction === "made" ? "supplier bills" : "customer invoices"}. Confirm permanent deletion to return them to outstanding.`,
     };
   }
   let vanishedDuringDelete = false;
@@ -801,13 +762,10 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
       if (existingCheque) {
         await tx.update(chequeRegister).set({ documentId: null, status: UNSPENT_CHEQUE_STATUS }).where(eq(chequeRegister.id, existingCheque.id));
       }
-      await tx.insert(ledgerEntries).values(
-        direction === "made"
-          ? { companyId: existing.companyId, documentId: paymentId, credit: lockedPayment.amount, debit: "0" }
-          : { companyId: existing.companyId, documentId: paymentId, debit: lockedPayment.amount, credit: "0" },
-      );
-      await reverseGeneralLedger(tx, existing.companyId, paymentId, "Payment cancelled");
-      await tx.update(documents).set({ status: "cancelled", cancelledBy: session.userId, cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(documents.id, paymentId), eq(documents.status, "posted")));
+      // Remove the original accounting row and document; a hard delete must not
+      // leave a cancellation document or a compensating ledger entry behind.
+      await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
+      await tx.delete(documents).where(and(eq(documents.id, paymentId), eq(documents.status, "posted")));
       await reallocateAccountPaymentsFifo(
         tx,
         existing.companyId,
@@ -825,7 +783,7 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
     if (pgError?.code) {
       console.error('[deletePayment] PostgreSQL error code:', pgError.code, 'constraint:', pgError.constraint_name, 'detail:', pgError.detail);
     }
-    return { error: describeDbError(e, "Can't cancel this payment.") };
+    return { error: describeDbError(e, "Can't permanently delete this payment.") };
   }
   if (vanishedDuringDelete) return { error: "Payment not found — it may already have been deleted." };
 
@@ -834,14 +792,14 @@ export async function deletePayment(_prevState: ActionResult | undefined, formDa
   revalidatePath("/payments");
   revalidatePath("/ledger");
   await recordAudit({
-    action: "cancel",
+    action: "delete",
     entity: `payment ${direction}`,
     entityId: paymentId,
     summary: existing.number,
     companyId: existing.companyId,
     detail: allocatedAmount > 0
-      ? `Amount ${existing.amount}; un-settled ${allocatedAmount.toFixed(2)}`
-      : `Amount ${existing.amount}`,
+      ? `Permanently deleted by system administrator; amount ${existing.amount}; un-settled ${allocatedAmount.toFixed(2)}`
+      : `Permanently deleted by system administrator; amount ${existing.amount}`,
   });
   return { success: true };
   });

@@ -9,6 +9,7 @@ import {
 } from "@/lib/queries/lookups";
 import { PaymentManager } from "@/components/modules/PaymentManager";
 import { ListFilters } from "@/components/ui/ListFilters";
+import { getSession } from "@/lib/auth/session";
 
 export default async function Page({
   searchParams,
@@ -16,7 +17,7 @@ export default async function Page({
   searchParams: Promise<{ contact?: string; direction?: string; company?: string; from?: string; to?: string }>;
 }) {
   const filters = await searchParams;
-  const [payments, companyRows, contactRows, bankAccountOptions, cashAccountOptions, chequeOptions, ledgerBalances] = await Promise.all([
+  const [payments, companyRows, contactRows, bankAccountOptions, cashAccountOptions, chequeOptions, ledgerBalances, session] = await Promise.all([
     listPayments(filters),
     getCompanies(),
     getContactOptions(),
@@ -26,6 +27,7 @@ export default async function Page({
     // Which company each contact's balance sits in, so a new payment settles the
     // books that actually hold it rather than whichever company sorts first.
     listPaymentLedgerBalances(),
+    getSession(),
   ]);
 
   return (
@@ -38,6 +40,7 @@ export default async function Page({
       bankAccountOptions={bankAccountOptions}
       cashAccountOptions={cashAccountOptions}
       chequeOptions={chequeOptions}
+      canHardDelete={session?.globalPermissions.has("payments.delete") ?? false}
       filters={
         <ListFilters key="filters" />
       }

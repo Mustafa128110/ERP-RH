@@ -553,7 +553,7 @@ export function DeletePaymentButton({
   // returns with that question on it. See lib/optimistic-records.ts.
   onDeleting?: () => void;
 }) {
-  // Cancelling a payment that is settling invoices puts those invoices back to
+  // Permanently deleting a payment that is settling invoices puts those invoices back to
   // outstanding. Nothing has to be unlinked first, but the server refuses once and
   // says what it is settling — that sentence becomes the question, and the next
   // press sends the answer back. One submit only.
@@ -583,13 +583,13 @@ export function DeletePaymentButton({
       onSubmit={(e) => {
         // Already asked, and asked more precisely than this.
         if (confirming) return;
-        if (!confirm("Cancel this payment? Its history will remain and FIFO settlements will be recalculated.")) e.preventDefault();
+        if (!confirm("Permanently delete this payment? It will be removed completely, invoice settlements will be recalculated, and this cannot be undone.")) e.preventDefault();
       }}
     >
       <input type="hidden" name="paymentId" value={paymentId} />
       <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Cancelling…" : confirming ? "Confirm cancellation" : "Cancel this payment"}
+        {pending ? "Deleting…" : confirming ? "Confirm permanent deletion" : "Permanently delete payment"}
       </button>
       {state?.error && (
         <p className={`mt-2 ${state.needsConfirmation ? confirmNoticeClass : errorTextClass}`}>{state.error}</p>

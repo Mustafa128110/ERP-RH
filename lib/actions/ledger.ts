@@ -18,6 +18,7 @@ import { changeSummary } from "@/lib/audit-constants";
 import { cachedPageRead } from "@/lib/read-cache";
 import {
   codeToLedgerType,
+  closingBalance,
   describeImpacts,
   impactOfChange,
   settlementState,
@@ -29,9 +30,6 @@ import {
 } from "@/lib/ledger-constants";
 import { isOpeningBalanceDirection, openingLedgerSide, openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { readPartySettlement, settleableAfterEdit } from "@/lib/queries/party-ledger";
-import { assertGeneralLedgerDateStaysPostCutover, postGeneralLedgerIfCutover, reverseGeneralLedger } from "@/lib/actions/general-ledger";
-import { openingBalanceLedgerLines, partyJournalLedgerLines } from "@/lib/general-ledger-constants";
-import { isManualJournalCounterpart } from "@/lib/manual-journal-constants";
 
 // This file edits documents and ledger entries on both sides of the book and
 // re-settles what they were paid with, so a write here can change every list that
@@ -90,10 +88,9 @@ export interface ContactLedgerBalance {
 // which carries the contact, so a sale's balance shows up under the customer's
 // name for free.
 //
-// Credit = money owed to the contact (an unpaid purchase). Debit = the other
-// direction: money paid back out, or what a customer still owes on a part-paid
-// sale. balance = credit - debit, so a positive balance is a payable and a
-// negative one is a receivable.
+// Debit means the party owes us and credit means we owe them. `balance` uses the
+// statement convention (debit - credit), so the list value is exactly the
+// individual sheet's closing balance: positive receivable, negative payable.
 export async function listLedgerBalances(): Promise<ContactLedgerBalance[]> {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
@@ -125,11 +122,21 @@ async function loadLedgerBalances(
         company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
         credit: ledgerEntries.credit,
         debit: ledgerEntries.debit,
+        code: documentTypes.code,
+        bankAccountId: documents.bankAccountId,
+        cashAccountId: documents.cashAccountId,
+        bankCompanyId: bankAccounts.companyId,
+        cashCompanyId: cashAccounts.companyId,
+        chequeCompanyId: chequeRegister.companyId,
       })
       .from(ledgerEntries)
       .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
+      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(companies, eq(companies.id, ledgerEntries.companyId))
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
+      .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
+      .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
+      .leftJoin(chequeRegister, eq(chequeRegister.documentId, documents.id))
       // This used to read every company's entries regardless of who was signed in
       // or what the topbar was set to — the only list in the app that didn't scope.
       .where(await companyInPermissionScope(ledgerEntries.companyId, session, permissionModule)),
@@ -242,11 +249,21 @@ async function loadLedgerBalances(
     map.set(key, list);
   }
 
+  // Apply the same settlement-ownership rule as the individual statement and
+  // FIFO engine. A malformed historical payment cannot affect one surface while
+  // being correctly excluded from the other.
+  const validBalanceRows = rows.filter((r) => {
+    if (r.code !== "PAYMENT_MADE" && r.code !== "PAYMENT_RECEIVED") return true;
+    if (r.bankAccountId) return r.bankCompanyId === null || r.bankCompanyId === r.companyId;
+    if (r.cashAccountId) return r.cashCompanyId === r.companyId;
+    return r.chequeCompanyId === r.companyId;
+  });
+
   // Keyed by company as well as contact: a contact belongs to one company, but
   // the same supplier is often set up in both, and their balances are separate
   // sets of books that must not be summed into one row.
   const byContact = new Map<string, ContactLedgerBalance>();
-  for (const r of rows) {
+  for (const r of validBalanceRows) {
     const key = `${r.companyId}:${r.contactId ?? "unknown"}`;
     const entry = byContact.get(key) ?? {
       contactId: r.contactId ?? "unknown",
@@ -265,13 +282,9 @@ async function loadLedgerBalances(
     byContact.set(key, entry);
   }
 
-  // Balance convention (locked by lib/payment-constants.check.ts): balance =
-  // credit - debit, so positive is a payable ("We Owe") and negative is a
-  // receivable ("Owes Us"). A sale posts to debit (party owes us -> credit - debit
-  // goes negative), a purchase to credit (we owe them -> positive), and a payment
-  // reverses the side of the invoice it settles.
+  // One sign everywhere: the list and statement both use debit - credit.
   const balances = Array.from(byContact.values())
-    .map((e) => ({ ...e, balance: e.credit - e.debit }))
+    .map((e) => ({ ...e, balance: closingBalance(0, e.debit, e.credit) }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
 
   // Group invoice headers by contact, top 6 per contact.
@@ -340,21 +353,20 @@ async function loadLedgerBalances(
 // A balance that didn't come from a sale or a purchase — an opening balance
 // carried over from the old books, a correction, a settlement agreed off-invoice.
 //
-// ledger_entries.document_id is NOT NULL: every entry hangs off a document, which
-// is where its contact and date come from. So a manual entry is a JOURNAL_ENTRY
-// document (the universal model already has the type and the JE series) plus its
-// one ledger row — no schema change, and it shows up wherever documents do.
+// ledger_entries.document_id is NOT NULL: every opening-balance entry hangs off
+// a document, which supplies its contact and date. Legacy storage uses the
+// JOURNAL_ENTRY code and JE number series, but every party-facing surface calls
+// it Opening Balance.
 // Shared by both writers. Only the fields both of them post are validated here —
 // editing a contact's balance identifies the company and the contact by the row
 // that was clicked, not by form fields, so those two are checked by
-// createLedgerEntry, which is the only caller that actually collects them.
+// createOpeningBalanceEntry, which is the only caller that collects them.
 function readEntryForm(formData: FormData) {
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
   const contactId = String(formData.get("contactId") ?? "").trim();
   const contactName = String(formData.get("contactName") ?? "").trim();
   const direction = String(formData.get("direction") ?? "");
-  const counterpartAccountCode = String(formData.get("counterpartAccountCode") ?? "");
   const amount = Number(String(formData.get("amount") ?? "").trim());
   const note = String(formData.get("note") ?? "").trim();
 
@@ -362,32 +374,27 @@ function readEntryForm(formData: FormData) {
     ? "Date is required."
     : direction !== "owes_us" && direction !== "we_owe"
       ? "Pick which way the balance runs."
-      : !isManualJournalCounterpart(counterpartAccountCode)
-        ? "Pick the counterpart account for this journal entry."
       : // The table's own CHECK rejects a zero row (one side must be > 0), so
         // this catches it here with a sentence rather than a failed insert.
         !Number.isFinite(amount) || amount <= 0
         ? "Enter an amount greater than zero."
         : null;
 
-  return { companyId, documentDate, contactId, contactName, direction, counterpartAccountCode, amount, note, error };
+  return { companyId, documentDate, contactId, contactName, direction, amount, note, error };
 }
 
-// Writes one journal entry: the document, its single ledger row, and the number.
-// `signedAmount` follows the ledger balance convention (lib/payment-constants.ts):
-// balance = credit - debit, so positive = we owe (credit) and negative = they owe
-// us (debit). A caller that computed a difference can hand it straight over without
-// re-deciding which column it is.
+// Writes one contact opening-balance entry: the document, its single ledger row,
+// and the number. `signedAmount` uses the statement convention: debit - credit,
+// so positive means they owe us and negative means we owe them.
 //
-// Shared by "+ Add Entry" and by saving a contact's balance.
-async function writeJournalEntry(
+// Shared by "+ Add Opening Balance" and by saving a contact's balance.
+async function writeOpeningBalanceEntry(
   input: {
     companyId: string;
     documentDate: string;
     contactId: string | null;
     contactName: string | null;
     signedAmount: number;
-    counterpartAccountCode: string;
     note: string;
     userId: string;
   },
@@ -396,7 +403,7 @@ async function writeJournalEntry(
   const documentType = await ensureDocumentType({
     companyId: input.companyId,
     code: "JOURNAL_ENTRY",
-    name: "Journal Entry",
+    name: "Opening Balance",
     series: "JE",
     affectsAccounting: true,
     active: true,
@@ -426,27 +433,24 @@ async function writeJournalEntry(
 
     await tx.insert(ledgerEntries).values(
       input.signedAmount > 0
-        ? { companyId: input.companyId, documentId: doc.id, credit: magnitude }
-        : { companyId: input.companyId, documentId: doc.id, debit: magnitude },
+        ? { companyId: input.companyId, documentId: doc.id, debit: magnitude }
+        : { companyId: input.companyId, documentId: doc.id, credit: magnitude },
     );
 
     await tx.insert(documentNumberLedger).values({ companyId: input.companyId, documentTypeId: documentType.id, number, documentId: doc.id });
-    await postGeneralLedgerIfCutover(tx, {
-      companyId: input.companyId,
-      documentId: doc.id,
-      documentDate: input.documentDate,
-      lines: partyJournalLedgerLines(input.signedAmount, input.counterpartAccountCode),
-    });
+    // An advance payment already sitting on the account must immediately settle
+    // this new entry; otherwise it would wait until some unrelated later edit.
+    await recomputeParty(tx, input.companyId, resolvedContactId);
   });
 }
 
-export async function createLedgerEntry(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
+export async function createOpeningBalanceEntry(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard(
-    "Couldn't add the ledger entry.",
+    "Couldn't add the opening balance.",
     async () => {
       const session = await getLiveSession();
 
-      const { companyId, documentDate, contactId, contactName, direction, counterpartAccountCode, amount, note, error } = readEntryForm(formData);
+      const { companyId, documentDate, contactId, contactName, direction, amount, note, error } = readEntryForm(formData);
       if (!companyId) return { error: "Company is required." };
       if (!contactId && !contactName) return { error: "Pick a contact or type a new name." };
       if (error) return { error };
@@ -457,14 +461,13 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
       // can't act on.
       requirePermission(session, "accounts", "create", { companyId });
 
-      await writeJournalEntry(
+      await writeOpeningBalanceEntry(
         {
           companyId,
           documentDate,
           contactId: contactId || null,
           contactName: contactName || null,
-          signedAmount: direction === "we_owe" ? amount : -amount,
-          counterpartAccountCode,
+          signedAmount: direction === "owes_us" ? amount : -amount,
           note,
           userId: session.userId,
         },
@@ -475,20 +478,20 @@ export async function createLedgerEntry(_prevState: ActionResult | undefined, fo
       await invalidateLookups(CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
       await invalidateReads(...READS);
       revalidatePath("/ledger");
-      await recordAudit({ action: "create", entity: "ledger entry", summary: contactName || contactId, companyId, detail: `${direction} ${amount}${note ? ` — ${note}` : ""}` });
+      await recordAudit({ action: "create", entity: "opening balance", summary: contactName || contactId, companyId, detail: `${direction} ${amount}${note ? ` — ${note}` : ""}` });
       return { success: true };
     },
-    { [DUPLICATE]: "Can't add — a journal entry number is already in use for this company." },
+    { [DUPLICATE]: "Can't add — an opening balance number is already in use for this company." },
   );
 }
 
 // Saving a contact's row from the ledger table. The balance shown is the sum of
 // everything on that contact's books — sales, purchases, payments, earlier
-// journal entries — so it can't be "updated" in place; there is no single row
+// opening-balance entries — so it can't be "updated" in place; there is no single row
 // holding it.
 //
 // What's saved instead is the difference: whatever number is typed becomes the
-// balance, by posting one journal entry for the gap. Nothing already recorded is
+// balance, by posting one opening-balance entry for the gap. Nothing already recorded is
 // touched, so the invoices behind the balance keep saying what they said, and a
 // correction leaves a dated, noted trail of its own.
 export async function setContactBalance(
@@ -506,7 +509,7 @@ export async function setContactBalance(
       // into another set of books.
       requirePermission(session, "accounts", "create", { companyId });
 
-      const { documentDate, direction, counterpartAccountCode, amount, note, error } = readEntryForm(formData);
+      const { documentDate, direction, amount, note, error } = readEntryForm(formData);
       if (error) return { error };
 
       // Summed in the database rather than by pulling every entry back and
@@ -521,21 +524,20 @@ export async function setContactBalance(
         .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
         .where(and(eq(ledgerEntries.companyId, companyId), eq(documents.contactId, contactId)));
 
-      const current = Number(totals?.credit ?? 0) - Number(totals?.debit ?? 0);
-      const desired = direction === "we_owe" ? amount : -amount;
+      const current = Number(totals?.debit ?? 0) - Number(totals?.credit ?? 0);
+      const desired = direction === "owes_us" ? amount : -amount;
       const delta = Number((desired - current).toFixed(2));
       // Saving without changing the number is not an error, it just has nothing
       // to post — and a zero-value ledger row would fail the table's CHECK anyway.
       if (delta === 0) return { success: true };
 
-      await writeJournalEntry(
+      await writeOpeningBalanceEntry(
         {
           companyId,
           documentDate,
           contactId,
           contactName: null,
           signedAmount: delta,
-          counterpartAccountCode,
           note: note || "Balance correction",
           userId: session.userId,
         },
@@ -555,7 +557,7 @@ export async function setContactBalance(
       });
       return { success: true };
     },
-    { [DUPLICATE]: "Can't save — a journal entry number is already in use for this company." },
+    { [DUPLICATE]: "Can't save — an opening balance number is already in use for this company." },
   );
 }
 
@@ -586,8 +588,7 @@ export type PartyLedgerEntry = {
   paymentMethod?: string | null;
   // How much of this entry FIFO has settled, and what that reads as. Present
   // only for the entries that carry a settleable balance — a sales invoice, a
-  // purchase invoice, or a payment. A journal entry never settles anything, so
-  // it has none of this rather than a misleading "outstanding".
+  // purchase invoice, opening-balance entry, or payment.
   settledAmount?: number;
   settlement?: SettlementState;
   // Which invoices a payment went to, or which payments settled an invoice.
@@ -882,7 +883,7 @@ export async function getPartyLedger(
 
     for (const entry of entries) {
       const doc = docById.get(entry.documentId);
-      if (!doc) continue; // journal entries, credit/debit notes, market purchases
+      if (!doc) continue; // credit/debit notes and market purchases
       // An invoice settled at the counter is settled; a payment is "settled" once
       // all of it has found an invoice to sit against.
       const settled = entry.type === "payment_received" || entry.type === "payment_made"
@@ -971,12 +972,23 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
 
       switch (doc.code) {
         case "JOURNAL_ENTRY": {
-          // A journal entry is handled here instead of by one of the commerce
-          // modules, so it must establish its own company-scoped delete right.
+          // A contact opening-balance entry is handled here instead of by one of
+          // the commerce modules, so it establishes its own scoped delete right.
           requirePermission(session, "accounts", "delete", { companyId: doc.companyId });
+          const [allocated] = await db
+            .select({ amount: sql<string>`coalesce(sum(${paymentAllocations.amount}), 0)` })
+            .from(paymentAllocations)
+            .where(eq(paymentAllocations.invoiceDocumentId, documentId));
+          const allocatedAmount = Number(allocated?.amount ?? 0);
+          if (allocatedAmount > 0 && !confirmed) {
+            return {
+              needsConfirmation: true,
+              error: `This opening balance has ${allocatedAmount.toFixed(2)} settled against it. Confirm cancellation to release and reapply that payment by FIFO.`,
+            };
+          }
           let cancelled = false;
           await db.transaction(async (tx) => {
-            // Claim the posted journal before writing a reversal. Two requests
+            // Claim the posted entry before writing a reversal. Two requests
             // that race here cannot both add the opposite entry.
             const [claimed] = await tx
               .update(documents)
@@ -996,6 +1008,7 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
               .returning({ id: documents.id });
             if (!claimed) return;
             cancelled = true;
+            await releaseInvoiceAllocations(tx, [documentId]);
             // Financial history is immutable: retain the source rows and add
             // one linked-by-document opposite entry rather than hard deleting.
             await tx.execute(sql`
@@ -1004,6 +1017,7 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
               FROM ledger_entries
               WHERE document_id = ${documentId}::uuid
             `);
+            await recomputeParty(tx, doc.companyId, doc.contactId);
           });
           if (!cancelled) return { error: "Already cancelled." };
           break;
@@ -1206,9 +1220,7 @@ export async function setPartyOpeningBalance(
           // Hand back what was settled against the old figure before the new one
           // is written, for the reason releaseInvoiceAllocations documents: the
           // payments holding those allocations are separate posted documents.
-          await assertGeneralLedgerDateStaysPostCutover(tx, { companyId, documentId, documentDate });
           await releaseInvoiceAllocations(tx, [documentId]);
-          await reverseGeneralLedger(tx, companyId, documentId, "Reversed before opening balance correction");
           await tx
             .update(documents)
             .set({
@@ -1265,11 +1277,6 @@ export async function setPartyOpeningBalance(
               : { companyId, documentId, credit: magnitude },
           );
         }
-        const glLines = openingBalanceLedgerLines(signedAmount);
-        if (glLines.length > 0) {
-          await postGeneralLedgerIfCutover(tx, { companyId, documentId, documentDate, lines: glLines });
-        }
-
         await recomputeParty(tx, companyId, contactId);
       });
 
@@ -1403,7 +1410,7 @@ export async function previewPartyOpeningBalance(
 // ---------------------------------------------------------------------------
 
 // Every edit and delete recorded against this party's opening balance, invoices,
-// payments and journal entries, oldest last.
+// payments and opening-balance entries, oldest last.
 //
 // The audit log keys on the document id, so the party's documents are collected
 // first and matched in one `IN` — two statements, not one per row. The contact id
