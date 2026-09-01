@@ -79,8 +79,8 @@ function setupDots(ruleOptions: Option[], unitOptions: Option[]): SetupDot[] {
   }));
 }
 
-function LegendDot({ color }: { color: string }) {
-  return <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />;
+function LegendDot({ color, title }: { color: string; title: string }) {
+  return <span title={title} className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />;
 }
 
 // Rates are derived, not stored — the three purchase rates come from the
@@ -320,7 +320,7 @@ export function ProductsManager({
               <p className="mt-1 text-steel">Every product assigned to a rule shows that rule&apos;s dot in Unit Rules.</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {dots.filter((dot) => dot.kind === "rule").map((dot) => (
-                  <div key={`rule:${dot.id}`} className="flex items-center gap-2"><LegendDot color={dot.color} /> {dot.name}</div>
+                  <div key={`rule:${dot.id}`} className="flex items-center gap-2"><LegendDot color={dot.color} title={`Rule: ${dot.name}`} /> {dot.name}</div>
                 ))}
                 {ruleOptions.length === 0 && <p className="text-steel">No unit rules yet.</p>}
               </div>
@@ -331,7 +331,7 @@ export function ProductsManager({
               <p className="mt-1 text-steel">Products with the same base unit show the same dot in Base Quantity.</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {dots.filter((dot) => dot.kind === "base-unit").map((dot) => (
-                  <div key={`base:${dot.id}`} className="flex items-center gap-2"><LegendDot color={dot.color} /> {dot.name}</div>
+                  <div key={`base:${dot.id}`} className="flex items-center gap-2"><LegendDot color={dot.color} title={`Base quantity: ${dot.name}`} /> {dot.name}</div>
                 ))}
                 {unitOptions.length === 0 && <p className="text-steel">No units yet.</p>}
               </div>
