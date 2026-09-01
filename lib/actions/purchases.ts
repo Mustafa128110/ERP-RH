@@ -49,8 +49,6 @@ import { csvBool, csvErrorText } from "@/lib/csv";
 import { inCompany } from "@/lib/contact-scope";
 import {
   hasRecordedPurchaseSettlement,
-  legacyPurchasePairKeys,
-  purchaseLineKey,
   purchasePaidMode,
   purchaseSettlementAmount,
   remainingPurchasePayable,
@@ -271,7 +269,6 @@ async function resolvePurchaseLineRows(
   location: { locationId: string; locationName: string },
   tax: { taxable: boolean[]; lineTaxAmounts: number[]; taxTotal: number; taxInclusive: boolean },
   adjustment: { discountTotal: number; shippingTotal: number },
-  allowedMissingConversions: ReadonlySet<string> = new Set(),
 ) {
   // One delivery arrives in one place, so the location is a header field and is
   // resolved once rather than per line — a typed name that did not match creates
@@ -285,11 +282,11 @@ async function resolvePurchaseLineRows(
       itemId: itemIds[index] ?? null,
       unitId: unitIds[index] ?? null,
       quantity: Number(line.quantity),
-      // Legacy purchases may contain a unit combination that predates explicit
-      // conversion rules. Editing its price/date must remain possible, but a
-      // newly selected disconnected combination is still refused.
-      allowMissing: allowedMissingConversions.has(purchaseLineKey(itemIds[index], unitIds[index])),
     })),
+    // Purchases record what physically arrived even when product setup is not
+    // finished. A disconnected or not-yet-configured unit is provisionally 1:1;
+    // assigning the base unit/rule later rebuilds every historical quantity.
+    "assume-base",
   );
   const totalQuantity = lines.reduce((sum, line) => sum + Number(line.quantity), 0);
   const adjustmentPerUnit = perUnitShare(
@@ -958,7 +955,6 @@ export async function updateStockPurchase(
       .select({ id: documentLines.id, itemId: documentLines.itemId, unitId: documentLines.unitId })
       .from(documentLines)
       .where(eq(documentLines.documentId, documentId));
-    const allowedMissingConversions = legacyPurchasePairKeys(oldLines);
     if (oldLines.length > 0) {
       await tx.delete(inventoryTransactions).where(
         inArray(inventoryTransactions.documentLineId, oldLines.map((l) => l.id)),
@@ -968,7 +964,7 @@ export async function updateStockPurchase(
     const lineRows = await resolvePurchaseLineRows(tx, companyId, validLines, { locationId, locationName }, tax, {
       discountTotal: Number(discountTotal),
       shippingTotal: Number(shippingTotal),
-    }, allowedMissingConversions);
+    });
     const insertedLines = await tx
       .insert(documentLines)
       .values(

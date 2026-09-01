@@ -18,7 +18,7 @@ const snoColumn: ColumnDef = { key: SNO_KEY, label: "#", align: "right" };
 
 // Keys that exist to drive rendering rather than to be read — searching them
 // would match "true" against a typed "tru".
-const HIDDEN_KEYS = new Set(["id", "_incomplete"]);
+const HIDDEN_KEYS = new Set(["id", "_incomplete", "_ruleIds", "_baseUnitId"]);
 
 // What a row matches against: every value on it that a human could read. Built
 // once per row per render of the list, not once per keystroke per row.

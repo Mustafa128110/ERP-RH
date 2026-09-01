@@ -33,9 +33,11 @@ async function main() {
       for (const key of ["id", "name", "sku", "company"] as const) {
         assert.ok(row[key] !== undefined && row[key] !== null, `row ${row.id}: ${key} missing`);
       }
-      for (const key of ["categoryId", "category", "brand", "onHand", "purchaseRate1", "salesRate"] as const) {
+      for (const key of ["categoryId", "category", "brand", "onHand", "purchaseRate1", "salesRate", "ruleIds"] as const) {
         assert.ok(key in row, `row ${row.id}: ${key} absent from the result shape`);
       }
+      assert.ok(Array.isArray(row.ruleIds), `row ${row.id}: ruleIds must be an array for the setup-dot column`);
+      assert.equal(new Set(row.ruleIds).size, row.ruleIds.length, `row ${row.id}: a rule dot was returned more than once`);
       if (row.onHand !== null) {
         assert.ok(Number.isFinite(Number(row.onHand)), `row ${row.id}: onHand "${row.onHand}" is not a number`);
       }

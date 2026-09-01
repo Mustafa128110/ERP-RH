@@ -16,7 +16,7 @@ import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
-import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
+import { multiplierToBase, priceBetweenUnits, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
 import type { PurchasePaidMode } from "@/lib/purchase-edit-rules";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
@@ -347,6 +347,15 @@ export function StockPurchaseCreateForm({
   const visibleSuppliers = useMemo(() => supplierOpts.filter(inCompany(companyId)), [supplierOpts, companyId]);
   const visibleItems = useMemo(() => itemOpts.filter((it) => it.companyId === companyId), [itemOpts, companyId]);
 
+  function unitsForLine(line: Line) {
+    // Receiving stock must never be blocked by catalogue setup. Any unit may be
+    // recorded now; if it is not connected to the product's base unit yet, the
+    // server provisionally treats the entered quantity as base quantity. Adding
+    // the rule later rebuilds this line and its inventory transaction.
+    void line;
+    return unitOpts;
+  }
+
   // Switching company drops any supplier/line item that belonged to the old one,
   // so a stale id can't be submitted against the new company. Done on change (not
   // in an effect) — the reset is a response to the user's action, not a sync.
@@ -401,11 +410,21 @@ export function StockPurchaseCreateForm({
   }
 
   function pickUnit(i: number, name: string) {
-    const unitId = unitOpts.find((unit) => unit.name === name)?.id ?? "";
+    const unitId = unitsForLine(lines[i]).find((unit) => unit.name === name)?.id ?? "";
     const line = lines[i];
     const item = itemOpts.find((option) => option.id === line.itemId);
-    const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
-    updateLine(i, { unitText: name, unitId, unitPrice: item ? priceForUnit(item.rate, multiplier) : line.unitPrice });
+    const currentMultiplier = item ? multiplierToBase(item.id, line.unitId, item.baseUnitId, conversionOptions) : 1;
+    const nextMultiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+    updateLine(i, {
+      unitText: name,
+      unitId,
+      // With no rule there is no honest price conversion. Keep exactly what was
+      // typed instead of blanking it; a later rule rebuilds quantities, not the
+      // supplier's historical invoice price.
+      unitPrice: item && nextMultiplier !== null
+        ? priceBetweenUnits(line.unitPrice, currentMultiplier, nextMultiplier, item.rate)
+        : line.unitPrice,
+    });
   }
 
   const subtotal = round1(lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0));
@@ -613,7 +632,7 @@ export function StockPurchaseCreateForm({
                   <td data-label="Unit" className={`${tdClass} document-line-fact`}>
                     <ComboBox
                       value={line.unitText}
-                      options={unitOpts}
+                      options={unitsForLine(line)}
                       placeholder="Unit"
                       inputProps={{ "aria-label": `Unit for line ${i + 1}` }}
                       className={cellInput}

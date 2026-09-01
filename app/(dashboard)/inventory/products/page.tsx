@@ -1,4 +1,4 @@
-import { listProductsWithRates } from "@/lib/actions/products";
+import { getProductAssignmentOptions, listProductsWithRates } from "@/lib/actions/products";
 import { getBrands, getCategories, getCompanies } from "@/lib/queries/lookups";
 import { ProductsManager } from "@/components/modules/ProductsManager";
 import type { Row } from "@/lib/table";
@@ -7,11 +7,12 @@ import { money, qty } from "@/lib/format";
 const formatRate = (value: string | null) => (value === null ? null : money(value));
 
 export default async function Page() {
-  const [items, companyRows, categoryRows, brandRows] = await Promise.all([
+  const [items, companyRows, categoryRows, brandRows, assignmentOptions] = await Promise.all([
     listProductsWithRates(),
     getCompanies(),
     getCategories(),
     getBrands(),
+    getProductAssignmentOptions(),
   ]);
 
   const rows: Row[] = items.map((item) => ({
@@ -38,9 +39,20 @@ export default async function Page() {
     _searchItem: `${item.name} ${item.sku}`,
     _hasUnitRule: item.hasUnitRule,
     _hasBaseUnit: Boolean(item.baseUnitId),
+    // Flat strings keep DataTable rows serializable while the dedicated setup
+    // dot column resolves ids through the rule/unit option lists beside it.
+    _ruleIds: item.ruleIds.join(","),
+    _baseUnitId: item.baseUnitId,
   }));
 
   return (
-    <ProductsManager rows={rows} companyOptions={companyRows} categoryOptions={categoryRows} brandOptions={brandRows} />
+    <ProductsManager
+      rows={rows}
+      companyOptions={companyRows}
+      categoryOptions={categoryRows}
+      brandOptions={brandRows}
+      unitOptions={assignmentOptions.units}
+      ruleOptions={assignmentOptions.rules}
+    />
   );
 }

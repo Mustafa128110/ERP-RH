@@ -16,7 +16,7 @@ import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
-import { multiplierToBase, priceForUnit, unitIdsForProduct, type UnitConversionOption } from "@/lib/unit-conversion";
+import { multiplierToBase, priceBetweenUnits, unitIdsForProduct, type UnitConversionOption } from "@/lib/unit-conversion";
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -468,13 +468,14 @@ export function SaleFormPage({
     const unitId = unitsForLine(lines[i]).find((unit) => unit.name === name)?.id ?? "";
     patchLine(i, (line) => {
       const item = itemOpts.find((option) => option.id === line.itemId);
-      const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+      const currentMultiplier = item ? multiplierToBase(item.id, line.unitId, item.baseUnitId, conversionOptions) : 1;
+      const nextMultiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
       return {
         ...line,
         unitText: name,
         unitId,
-        listPrice: item ? priceForUnit(item.rate, multiplier) : line.listPrice,
-        unitPrice: item ? priceForUnit(item.salesRate, multiplier) : line.unitPrice,
+        listPrice: item ? priceBetweenUnits(line.listPrice, currentMultiplier, nextMultiplier, item.rate) : line.listPrice,
+        unitPrice: item ? priceBetweenUnits(line.unitPrice, currentMultiplier, nextMultiplier, item.salesRate) : line.unitPrice,
       };
     });
   }

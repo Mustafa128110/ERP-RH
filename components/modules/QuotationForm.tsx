@@ -14,7 +14,7 @@ import { useClientUserId } from "@/lib/client-user";
 import { useSync } from "@/components/layout/SyncProvider";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
-import { multiplierToBase, priceForUnit, type UnitConversionOption } from "@/lib/unit-conversion";
+import { multiplierToBase, priceBetweenUnits, priceForUnit, unitIdsForProduct, type UnitConversionOption } from "@/lib/unit-conversion";
 
 // Deliberately not SaleForm with the money parts hidden. A quotation has no
 // payment, no settlement account, no previous-balance line and no stock — a
@@ -198,6 +198,13 @@ export function QuotationForm({
   const companyItems = itemOptions.filter((i) => i.companyId === companyId);
   const companyCustomers = customerOptions.filter(inCompany(companyId));
 
+  function unitsForLine(line: Line) {
+    const item = itemOptions.find((option) => option.id === line.itemId);
+    if (!item) return unitOptions;
+    const allowed = new Set(unitIdsForProduct(item.id, item.baseUnitId, conversionOptions));
+    return unitOptions.filter((unit) => allowed.has(unit.id));
+  }
+
   function update(index: number, patch: Partial<Line>) {
     setLines((prev) => {
       const next = prev.map((l, i) => (i === index ? { ...l, ...patch } : l));
@@ -222,10 +229,12 @@ export function QuotationForm({
   }
 
   function pickUnit(index: number, name: string) {
-    const unitId = unitOptions.find((unit) => unit.name === name)?.id ?? "";
-    const item = itemOptions.find((option) => option.id === lines[index].itemId);
-    const multiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
-    update(index, { unitText: name, unitId, unitPrice: item ? priceForUnit(item.salesRate, multiplier) : lines[index].unitPrice });
+    const line = lines[index];
+    const unitId = unitsForLine(line).find((unit) => unit.name === name)?.id ?? "";
+    const item = itemOptions.find((option) => option.id === line.itemId);
+    const currentMultiplier = item ? multiplierToBase(item.id, line.unitId, item.baseUnitId, conversionOptions) : 1;
+    const nextMultiplier = item ? multiplierToBase(item.id, unitId, item.baseUnitId, conversionOptions) : 1;
+    update(index, { unitText: name, unitId, unitPrice: item ? priceBetweenUnits(line.unitPrice, currentMultiplier, nextMultiplier, item.salesRate) : line.unitPrice });
   }
 
   const filled = lines.filter((l) => (l.itemId || l.itemText.trim()) && Number(l.quantity) > 0);
@@ -407,7 +416,7 @@ export function QuotationForm({
                   <ComboBox
                     value={line.unitText}
                     onChange={(name) => pickUnit(r, name)}
-                    options={unitOptions}
+                    options={unitsForLine(line)}
                     className={cellInput}
                     inputProps={{ "data-cell": `${r}-1`, "aria-label": `Unit for line ${r + 1}`, disabled: locked }}
                   />

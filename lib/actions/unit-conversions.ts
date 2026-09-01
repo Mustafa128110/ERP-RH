@@ -11,6 +11,7 @@ import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { rebuildItemBaseQuantities } from "@/lib/queries/unit-conversion";
+import { expandUnitConversionOptions } from "@/lib/unit-conversion";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type RuleValues = { name: string; fromUnitId: string; toUnitId: string; multiplier: string };
@@ -59,11 +60,15 @@ async function scopedRule(id: string, action: "view" | "create" | "edit" | "dele
 async function assertConsistentRuleGraphs(tx: Tx, itemIds: string[]) {
   const ids = [...new Set(itemIds.filter(Boolean))];
   if (ids.length === 0) return;
-  const rows = await tx
-    .select({ itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
-    .from(itemUnitConversionRules)
-    .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId))
-    .where(inArray(itemUnitConversionRules.itemId, ids));
+  const [assignments, rules] = await Promise.all([
+    tx
+      .select({ ruleId: unitConversions.id, itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
+      .from(itemUnitConversionRules)
+      .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId))
+      .where(inArray(itemUnitConversionRules.itemId, ids)),
+    tx.select({ ruleId: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier }).from(unitConversions),
+  ]);
+  const rows = expandUnitConversionOptions(assignments, rules);
   const byItem = new Map<string, typeof rows>();
   for (const row of rows) byItem.set(row.itemId, [...(byItem.get(row.itemId) ?? []), row]);
   for (const [itemId, rules] of byItem) {
@@ -92,6 +97,21 @@ async function assertConsistentRuleGraphs(tx: Tx, itemIds: string[]) {
       }
     }
   }
+}
+
+// A rule can affect products without being assigned to them directly. For
+// example, changing the shared dozen-to-piece rule changes every product whose
+// assigned packing hierarchy reaches Dozen. Capture those products before a
+// rule is edited/deleted so their persisted base quantities are rebuilt too.
+async function effectiveRuleItemIds(tx: Tx, ruleId: string) {
+  const [assignments, rules] = await Promise.all([
+    tx
+      .select({ ruleId: unitConversions.id, itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
+      .from(itemUnitConversionRules)
+      .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId)),
+    tx.select({ ruleId: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier }).from(unitConversions),
+  ]);
+  return [...new Set(expandUnitConversionOptions(assignments, rules).filter((row) => row.ruleId === ruleId).map((row) => row.itemId))];
 }
 
 async function ruleItemIds(tx: Tx, ruleId: string) {
@@ -135,9 +155,16 @@ export async function createUnitConversion(_prevState: ActionResult | undefined,
     const values = readForm(formData);
     const error = valid(values);
     if (error) return { error };
-    const [created] = await db.insert(unitConversions).values(values).returning({ id: unitConversions.id });
+    let createdId = "";
+    await db.transaction(async (tx) => {
+      const [created] = await tx.insert(unitConversions).values(values).returning({ id: unitConversions.id });
+      createdId = created.id;
+      const affected = await effectiveRuleItemIds(tx, created.id);
+      await assertConsistentRuleGraphs(tx, affected);
+      await rebuildItemBaseQuantities(tx, affected);
+    });
     await invalidateUnitRuleViews();
-    await recordAudit({ action: "create", entity: "unit rule", entityId: created.id, summary: values.name });
+    await recordAudit({ action: "create", entity: "unit rule", entityId: createdId, summary: values.name });
     return { success: true };
   });
 }
@@ -150,8 +177,9 @@ export async function updateUnitConversion(id: string, _prevState: ActionResult 
     const error = valid(values);
     if (error) return { error };
     await db.transaction(async (tx) => {
-      const affected = await ruleItemIds(tx, id);
+      const before = await effectiveRuleItemIds(tx, id);
       await tx.update(unitConversions).set({ ...values, updatedAt: new Date() }).where(eq(unitConversions.id, id));
+      const affected = [...new Set([...before, ...(await effectiveRuleItemIds(tx, id))])];
       await assertConsistentRuleGraphs(tx, affected);
       await rebuildItemBaseQuantities(tx, affected);
     });
@@ -184,6 +212,42 @@ export async function setUnitConversionRuleItems(ruleId: string, itemIds: string
   });
 }
 
+// Products-page assignment is additive: it attaches the chosen rule to the
+// ticked products without removing that rule from products that already use it.
+export async function assignUnitConversionRuleToItems(ruleId: string, itemIds: string[]): Promise<ActionResult> {
+  return guard("Couldn't assign the unit rule.", async () => {
+    const { session, rule } = await scopedRule(ruleId, "edit");
+    if (!rule) return { error: "Unit rule not found." };
+    const selected = [...new Set(itemIds.filter(Boolean))];
+    if (selected.length === 0) return { error: "Select at least one product." };
+    const products = await scopedItems(session as NonNullable<Awaited<ReturnType<typeof getLiveSession>>>, selected, "edit");
+    if (!products) {
+      return { error: "One or more selected products were not found." };
+    }
+    if (rule.companyId && products.some((product) => product.companyId !== rule.companyId)) {
+      return { error: "This company-specific rule can only be assigned to products from the same company." };
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(itemUnitConversionRules)
+        .values(selected.map((itemId) => ({ itemId, ruleId })))
+        .onConflictDoNothing();
+      await assertConsistentRuleGraphs(tx, selected);
+      await rebuildItemBaseQuantities(tx, selected);
+    });
+    await invalidateUnitRuleViews();
+    await recordAudit({
+      action: "update",
+      entity: "unit rule assignments",
+      entityId: ruleId,
+      summary: rule.name,
+      detail: `${selected.length} product(s) assigned from Products`,
+    });
+    return { success: true };
+  });
+}
+
 export async function deleteUnitConversion(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
   return guard("Couldn't delete this unit rule.", async () => {
     const id = String(formData.get("id") ?? "");
@@ -191,7 +255,7 @@ export async function deleteUnitConversion(_prevState: ActionResult | undefined,
     if (!rule) return { error: "Unit rule not found." };
     let affected: string[] = [];
     await db.transaction(async (tx) => {
-      affected = await ruleItemIds(tx, id);
+      affected = await effectiveRuleItemIds(tx, id);
       await tx.delete(unitConversions).where(eq(unitConversions.id, id));
       await rebuildItemBaseQuantities(tx, affected);
     });

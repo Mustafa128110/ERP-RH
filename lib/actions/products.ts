@@ -13,6 +13,7 @@ import {
   itemUnitConversionRules,
   items,
   locations,
+  unitConversions,
   units,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
@@ -77,6 +78,77 @@ export interface ProductBatchRow {
   urduName: string | null;
   taxable: boolean;
   isActive: boolean;
+}
+
+// Lightweight option lists for the two selection actions on the Products page.
+// They are read under products.view so opening Products never starts requiring a
+// second page permission merely to render its toolbar.
+export async function getProductAssignmentOptions() {
+  const session = await getSession();
+  requirePermission(session, "products", "view");
+  const ruleScope = await companyInPermissionScope(unitConversions.companyId, session, "products");
+  const [unitRows, ruleRows] = await Promise.all([
+    getUnits(),
+    db
+      .select({ id: unitConversions.id, name: unitConversions.name })
+      .from(unitConversions)
+      .where(ruleScope)
+      .orderBy(unitConversions.name),
+  ]);
+  return {
+    units: unitRows.map((unit) => ({ id: unit.id, name: unit.symbol ? `${unit.name} (${unit.symbol})` : unit.name })),
+    rules: ruleRows,
+  };
+}
+
+// Assigning a base unit is deliberately separate from editing the whole product
+// grid: select a set, choose one unit, and rebuild all of their historical line
+// quantities against that base in the same transaction.
+export async function assignBaseUnitToProducts(itemIds: string[], unitId: string): Promise<ActionResult> {
+  return guard("Couldn't assign the base stock unit.", async () => {
+    const session = await getLiveSession();
+    requirePermission(session, "products", "edit");
+    const ids = [...new Set(itemIds.filter(Boolean))];
+    if (ids.length === 0) return { error: "Select at least one product." };
+    if (!unitId) return { error: "Select a base stock unit." };
+
+    const scope = await companyInPermissionScope(items.companyId, session, "products", "edit");
+    let companyId: string | undefined;
+    await db.transaction(async (tx) => {
+      const [unit] = await tx.select({ id: units.id }).from(units).where(eq(units.id, unitId)).limit(1);
+      if (!unit) throw new RowError("The selected unit no longer exists.");
+
+      const selected = await tx
+        .select({ id: items.id, companyId: items.companyId })
+        .from(items)
+        .where(and(inArray(items.id, ids), scope));
+      if (selected.length !== ids.length) throw new RowError("One or more selected products no longer exist, or aren't in your company scope.");
+      for (const row of selected) requirePermission(session, "products", "edit", { companyId: row.companyId });
+      companyId = selected[0]?.companyId;
+
+      const updated = await tx
+        .update(items)
+        .set({ baseUnitId: unitId })
+        .where(and(inArray(items.id, ids), scope))
+        .returning({ id: items.id });
+      if (updated.length !== ids.length) throw new RowError("One or more products changed while the base unit was being assigned.");
+      await rebuildItemBaseQuantities(tx, ids);
+    });
+
+    await invalidateLookups(CACHE.items);
+    await invalidateReads(...READS);
+    revalidatePath("/inventory/products");
+    revalidatePath("/inventory/stock");
+    await recordAudit({
+      action: "update",
+      entity: "product base unit",
+      entityId: unitId,
+      summary: `${ids.length} product(s) assigned`,
+      companyId,
+      detail: `base unit ${unitId}`,
+    });
+    return { success: true };
+  });
 }
 
 interface ProductReferenceInput {
@@ -306,23 +378,25 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
   const ids = rows.map((r) => r.id);
 
   // Same derivation as the stock list (lib/actions/stock.ts) — SUM(movement *
-  // base_quantity) — grouped by location and unit rather than rolled up, because
-  // that's the grain an adjustment is written at.
+  // base_quantity), grouped by location and labelled with the product's base
+  // unit. The unit originally typed on a purchase remains document history; it
+  // must not split one base-unit stock balance into several buckets here.
   const stockRowsPromise = db
     .select({
       itemId: documentLines.itemId,
       locationId: documentLines.locationId,
       location: sql<string>`coalesce(${locations.name}, 'Unassigned')`,
-      unitId: documentLines.unitId,
+      unitId: items.baseUnitId,
       unit: sql<string>`coalesce(${units.symbol}, ${units.name}, '—')`,
       onHand: sql<string>`sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity})`,
     })
     .from(inventoryTransactions)
     .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
-    .leftJoin(units, eq(units.id, documentLines.unitId))
+    .innerJoin(items, eq(items.id, documentLines.itemId))
+    .leftJoin(units, eq(units.id, items.baseUnitId))
     .leftJoin(locations, eq(locations.id, documentLines.locationId))
     .where(inArray(documentLines.itemId, ids))
-    .groupBy(documentLines.itemId, documentLines.locationId, locations.name, documentLines.unitId, units.symbol, units.name);
+    .groupBy(documentLines.itemId, documentLines.locationId, locations.name, items.baseUnitId, units.symbol, units.name);
 
   // The rate columns, for exactly the items being edited. Same derivation the
   // products list uses (lib/actions/products.ts listProductsWithRates): the last
@@ -795,18 +869,19 @@ async function recordAdjustments(shared: ProductBatchEditShared, saved: SavedPro
   const currentRows = await db
     .select({
       itemId: documentLines.itemId,
-      unitId: documentLines.unitId,
+      unitId: items.baseUnitId,
       onHand: sql<string>`coalesce(sum(${inventoryTransactions.movement} * ${inventoryTransactions.baseQuantity}), 0)`,
     })
     .from(inventoryTransactions)
     .innerJoin(documentLines, eq(documentLines.id, inventoryTransactions.documentLineId))
+    .innerJoin(items, eq(items.id, documentLines.itemId))
     .where(
       and(
         inArray(documentLines.itemId, [...new Set(targets.map((row) => row.itemId))]),
         locationId ? eq(documentLines.locationId, locationId) : isNull(documentLines.locationId),
       ),
     )
-    .groupBy(documentLines.itemId, documentLines.unitId);
+    .groupBy(documentLines.itemId, items.baseUnitId);
 
   const stockKey = (itemId: string, unitId: string | null) => `${itemId}:${unitId ?? "unassigned"}`;
   const onHandByItemUnit = new Map(

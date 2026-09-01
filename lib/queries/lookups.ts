@@ -29,6 +29,7 @@ import { CACHE } from "@/lib/cache-keys";
 import { settingsForCompanies } from "@/lib/queries/settings";
 import { queryItemOptions } from "@/lib/queries/item-options";
 import { unitPickerLabel } from "@/lib/unit-picker-label";
+import { expandUnitConversionOptions } from "@/lib/unit-conversion";
 export { CACHE, READ_DOMAIN } from "@/lib/cache-keys";
 
 // Dropdown option lists. Nearly forty near-identical copies of these were spread
@@ -148,17 +149,22 @@ export const getUnits = lookup(CACHE.units, () => db.select().from(units));
 export const getTaxes = lookup(CACHE.taxes, () => db.select().from(taxes).where(eq(taxes.isActive, true)));
 export const getRoles = lookup(CACHE.roles, () => db.select().from(roles));
 
-export const getUnitConversionOptions = lookup(`${CACHE.items}:unit-conversions`, () =>
-  db
-    .select({
-      itemId: itemUnitConversionRules.itemId,
-      fromUnitId: unitConversions.fromUnitId,
-      toUnitId: unitConversions.toUnitId,
-      multiplier: unitConversions.multiplier,
-    })
-    .from(itemUnitConversionRules)
-    .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId)),
-);
+export const getUnitConversionOptions = lookup(`${CACHE.items}:unit-conversions`, async () => {
+  const [assignments, rules] = await Promise.all([
+    db
+      .select({
+        ruleId: unitConversions.id,
+        itemId: itemUnitConversionRules.itemId,
+        fromUnitId: unitConversions.fromUnitId,
+        toUnitId: unitConversions.toUnitId,
+        multiplier: unitConversions.multiplier,
+      })
+      .from(itemUnitConversionRules)
+      .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId)),
+    db.select({ ruleId: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier }).from(unitConversions),
+  ]);
+  return expandUnitConversionOptions(assignments, rules);
+});
 
 // Still company-scoped: document types and expense categories belong to a company.
 export const getDocumentTypes = scopedLookup(CACHE.documentTypes, documentTypes.companyId, (w) => db.select().from(documentTypes).where(w));

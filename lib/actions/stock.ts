@@ -35,8 +35,8 @@ export interface StockItemRow {
   companyId: string;
   lowStockQty: number;
   location: string;
-  // Different units for the same item are never added together — each gets
-  // its own total here (one item = one card, one entry per unit).
+  // Stock is summed in the product's base unit. Kept as an array because the UI
+  // shape predates base-unit normalization; there is one entry per product.
   unitTotals: StockUnitTotal[];
   // Populated only in the "all locations" view. One entry per location+unit
   // pair — a location stocking an item in two units gets two rows here.
@@ -44,8 +44,8 @@ export interface StockItemRow {
 }
 
 // On-hand quantity is derived, not stored — SUM(movement * base_quantity)
-// over every inventory_transactions row for the item, scoped to a matching
-// unit (a line with no unit recorded gets its own "—" bucket). No
+// over every inventory_transactions row for the item and labelled with the
+// product's base unit (an unconfigured product uses "—"). No
 // locationId filter aggregates every location into one card per item — the
 // "All" default — with a per-location, per-unit breakdown; a locationId
 // filter (including the "unassigned" sentinel, for lines with no location)
@@ -105,7 +105,7 @@ export async function listStockLevels(locationId?: string, companyId?: string): 
   // All rows share one location when locationId is set — grab its name once.
   const filteredLocationName = locationId ? (rows[0]?.locationName ?? UNASSIGNED_LABEL) : null;
 
-  // Level 1: one row per item + unit + location already, straight from SQL.
+  // Level 1: one row per item + base unit + location already, straight from SQL.
   type LocAgg = {
     itemId: string;
     itemName: string;

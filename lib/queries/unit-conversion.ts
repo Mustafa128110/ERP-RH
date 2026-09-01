@@ -3,7 +3,7 @@ import "server-only";
 import { inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { documentLines, itemUnitConversionRules, items, unitConversions } from "@/lib/db/schema";
-import { multiplierToBase, type UnitConversionOption } from "@/lib/unit-conversion";
+import { expandUnitConversionOptions, multiplierToBase } from "@/lib/unit-conversion";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -44,21 +44,17 @@ export async function resolveBaseQuantities(
   const itemIds = [...new Set(lines.map((line) => line.itemId).filter((id): id is string => Boolean(id)))];
   if (itemIds.length === 0) return lines.map((line) => Math.abs(line.quantity));
 
-  const [itemRows, rules] = await Promise.all([
+  const [itemRows, assignments, rules] = await Promise.all([
     tx.select({ id: items.id, baseUnitId: items.baseUnitId }).from(items).where(inArray(items.id, itemIds)),
     tx
-      .select({ itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
+      .select({ ruleId: unitConversions.id, itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
       .from(itemUnitConversionRules)
       .innerJoin(unitConversions, sql`${unitConversions.id} = ${itemUnitConversionRules.ruleId}`)
       .where(inArray(itemUnitConversionRules.itemId, itemIds)),
+    tx.select({ ruleId: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier }).from(unitConversions),
   ]);
   const baseByItem = new Map(itemRows.map((item) => [item.id, item.baseUnitId]));
-  const conversions: UnitConversionOption[] = rules.map((rule) => ({
-    itemId: rule.itemId,
-    fromUnitId: rule.fromUnitId,
-    toUnitId: rule.toUnitId,
-    multiplier: rule.multiplier,
-  }));
+  const conversions = expandUnitConversionOptions(assignments, rules);
 
   const quantities = lines.map((line) => {
     if (!line.itemId || !line.unitId) return Math.abs(line.quantity);
