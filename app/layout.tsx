@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { getSession } from "@/lib/auth/session";
 import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
 import { ServiceWorkerRegister } from "@/components/layout/ServiceWorkerRegister";
+import { DocumentTitle } from "@/components/layout/DocumentTitle";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "@fontsource/fraunces/600.css";
 import "@fontsource/inter/400.css";
@@ -18,7 +19,7 @@ import "./globals.css";
 // or reachable from a restricted deployment network.
 
 export const metadata: Metadata = {
-  title: "Royal Hardware ERP",
+  title: "ERP RH",
   description: "Inventory, sales, purchases and ledgers for Royal Hardware and M52.",
   // The PWA shell (public/manifest.json + public/sw.js): repeat visits load from
   // cache, and the app keeps working offline for pages already visited.
@@ -85,6 +86,7 @@ export default async function RootLayout({
         app cannot control and did not cause.
       */}
       <body suppressHydrationWarning className="min-h-full flex flex-col">
+        <DocumentTitle />
         {children}
         <ServiceWorkerRegister />
         {/*
