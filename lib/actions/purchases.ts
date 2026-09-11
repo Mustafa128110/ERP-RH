@@ -3,6 +3,7 @@
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { documentEditorColumns } from "@/lib/queries/document-editor";
 import { commandContext } from "@/lib/db/command-context";
 import {
   bankAccounts,
@@ -182,25 +183,20 @@ export async function getStockPurchase(documentId: string) {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
 
-  // Three independent lookups keyed on the id we were handed — run them together
-  // rather than one after another.
-  const [[doc], lineRows, [linkedCheque]] = await Promise.all([
-    db
+  const [doc] = await db
       .select({
         ...getTableColumns(documents),
+        ...documentEditorColumns,
         allocatedAmount: sql<string>`coalesce((select sum(pa.amount) from payment_allocations pa where pa.invoice_document_id = ${documents.id}), 0)`,
         shippingExpenseAmount: sql<string>`coalesce((select sum(e.amount) from expenses e where e.document_id = ${documents.id} and e.status = 'posted'), 0)`,
       })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases")))
-      .limit(1),
-    db.select().from(documentLines).where(eq(documentLines.documentId, documentId)).orderBy(documentLines.lineNo),
-    db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1),
-  ]);
+      .limit(1);
   if (!doc) return null;
 
-  const settlementType: SettlementType | null = doc.bankAccountId ? "account" : doc.cashAccountId ? "cash" : linkedCheque ? "cheque" : null;
+  const settlementType: SettlementType | null = doc.bankAccountId ? "account" : doc.cashAccountId ? "cash" : doc.linkedChequeId ? "cheque" : null;
   const goodsTotal = round1(Number(doc.grandTotal) - Number(doc.shippingTotal));
   const ownSettlementAmount = purchaseSettlementAmount(
     Number(doc.paidAmount),
@@ -211,6 +207,7 @@ export async function getStockPurchase(documentId: string) {
 
   return {
     id: doc.id,
+    _revision: doc._revision,
     companyId: doc.companyId,
     contactId: doc.contactId,
     documentDate: doc.documentDate,
@@ -227,12 +224,12 @@ export async function getStockPurchase(documentId: string) {
     legacyUntrackedSettlement: ownSettlementAmount > 0 && !settlementType,
     bankAccountId: doc.bankAccountId,
     cashAccountId: doc.cashAccountId,
-    chequeId: linkedCheque?.id ?? null,
+    chequeId: doc.linkedChequeId,
     settlementType,
     // Every line of a purchase carries the same location — it's a header field on
     // the form — so the first line speaks for the document.
-    locationId: lineRows[0]?.locationId ?? "",
-    lines: lineRows.map((l) => ({
+    locationId: doc.editorLines[0]?.locationId ?? "",
+    lines: doc.editorLines.map((l) => ({
       itemId: l.itemId ?? "",
       unitId: l.unitId ?? "",
       quantity: l.quantity,

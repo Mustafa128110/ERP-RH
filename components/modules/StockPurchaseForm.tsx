@@ -73,6 +73,7 @@ const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
 ];
 
 type PurchaseDefaults = {
+  _revision: string;
   companyId: string;
   contactId: string | null;
   documentDate: string;
@@ -148,7 +149,7 @@ export function StockPurchaseCreateForm({
   // (in the layout) sets the id before children render, so the first render
   // already carries the scoped key.
   const userId = useClientUserId();
-  const purchaseDraftKey = userId ? `${PURCHASE_DRAFT_KEY}:${userId}` : PURCHASE_DRAFT_KEY;
+  const purchaseDraftKey = isEdit ? `edit:${userId}:documents:${purchaseId}` : userId ? `${PURCHASE_DRAFT_KEY}:${userId}` : PURCHASE_DRAFT_KEY;
   // One id per *save*, not per open form. It is claimed by the server inside the
   // same transaction as the purchase, so a replayed submit can't post twice — but
   // the claim is permanent, so "Next Purchase" has to stop sending
@@ -200,6 +201,8 @@ export function StockPurchaseCreateForm({
   const [supplierText, setSupplierText] = useState(() => supplierOptions.find((s) => s.id === defaults?.contactId)?.name ?? "");
   const [isPaid, setIsPaid] = useState<PurchasePaidMode>(() => defaults?.purchasePaidMode ?? "no");
   const [paidAmount, setPaidAmount] = useState(() => defaults?.purchaseSettlementAmount ?? "");
+  const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
+  const [settlementAccounts, setSettlementAccounts] = useState<Record<string, string>>({});
   const [settlementType, setSettlementType] = useState<SettlementMode>(
     defaults?.legacyUntrackedSettlement ? "legacy" : defaults?.settlementType ?? "account",
   );
@@ -235,15 +238,16 @@ export function StockPurchaseCreateForm({
   // and components/ui/useDraft.tsx — the hook owns the store read, the
   // offer/restore/discard logic and the save-on-change effect.
   //
-  // New purchases only — restoring a stale copy over a saved one would overwrite
-  // whatever someone else had corrected.
-  const draftState = { lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxId, shippingTotal, isPaid, settlementType };
+  // Recovery checks the original record version before applying edited input.
+  const draftState = { _revision: defaults?._revision, lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType, documentDate, settlementAccounts };
   type PurchaseDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(purchaseDraftKey, {
+  const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(purchaseDraftKey, {
     state: draftState,
-    enabled: !isEdit,
-    hasContent: (d) => d.lines.some((l) => l.itemText?.trim() || l.quantity?.trim()),
+    enabled: !isEdit || !!defaults?._revision,
+    skipInitialSave: true,
+    canRestore: (d) => Array.isArray(d.lines) && (!isEdit || d._revision === defaults?._revision),
+    hasContent: (d) => isEdit || d.lines?.some((l) => l.itemText?.trim() || l.quantity?.trim()) || !!d.supplierText || !!d.paidAmount || Number(d.discountTotal) !== 0 || Number(d.shippingTotal) !== 0 || !!d.documentDate && d.documentDate !== todayISO() || Object.keys(d.settlementAccounts ?? {}).length > 0,
     apply: (d) => {
       setLines(d.lines);
       setCompanyId(d.companyId);
@@ -255,7 +259,10 @@ export function StockPurchaseCreateForm({
       setTaxId(d.taxId);
       setShippingTotal(d.shippingTotal);
       setIsPaid(d.isPaid);
+      setPaidAmount(d.paidAmount ?? "");
       setSettlementType(d.settlementType);
+      setDocumentDate(d.documentDate ?? defaults?.documentDate ?? todayISO());
+      setSettlementAccounts(d.settlementAccounts ?? {});
     },
   });
 
@@ -297,9 +304,10 @@ export function StockPurchaseCreateForm({
     setTaxId(taxSettings[companyId]?.default_purchase_tax_id ?? "");
     setShippingTotal("0");
     setIsPaid("no");
+    setPaidAmount("");
     setSettlementType("account");
-    // Resets what isn't controlled state — the date back to today, the settlement
-    // select, and the manual document number. Company is controlled, so it stays.
+    setDocumentDate(todayISO());
+    setSettlementAccounts({});
     formRef.current?.reset();
   }
 
@@ -463,7 +471,7 @@ export function StockPurchaseCreateForm({
 
   return (
     <>
-    <form data-command-record={purchaseId} data-draft-key={isEdit ? undefined : purchaseDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-command-table={isEdit ? "documents" : undefined} data-command-record={purchaseId} data-command-revision={defaults?._revision} data-recovery-key={isEdit ? purchaseDraftKey : undefined} data-draft-key={isEdit ? undefined : purchaseDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <input
@@ -487,8 +495,9 @@ export function StockPurchaseCreateForm({
       {/* An unfinished purchase from before — a crash, a closed tab, a reload.
           Offered, never applied on its own: silently refilling the grid would
           have someone post a delivery they thought they had typed fresh. */}
-      {offerDraft && <DraftBanner noun="purchase" onRestore={restoreDraft} onDiscard={discardDraft} />}
-      <fieldset disabled={offerDraft} className="contents">
+      {offerDraft && <DraftBanner noun={isEdit ? "purchase edit" : "purchase"} onRestore={restoreDraft} onDiscard={discardDraft} canRestore={canRestore} onDownload={download} />}
+      {isEdit && !defaults?._revision && <p role="alert" className={errorTextClass}>Refresh this page to load the record version before editing.</p>}
+      <fieldset disabled={offerDraft || isEdit && !defaults?._revision} className="contents">
 
       {/* --- documents header. Clear sits on the section heading's own line
           rather than in a strip of its own above it. --- */}
@@ -543,7 +552,7 @@ export function StockPurchaseCreateForm({
           </label>
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Document Date</span>
-            <DateField name="documentDate" required defaultValue={defaults?.documentDate ?? todayISO()} className={fieldClass} />
+            <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
           </label>
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Location</span>
@@ -808,7 +817,7 @@ export function StockPurchaseCreateForm({
           ) : (
             <label className={`${labelClass} w-56`}>
               <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
-              <select key={`${settlementType}:${companyId}`} name={settlementFieldName} required defaultValue={settlementDefault ?? ""} className={fieldClass}>
+              <select name={settlementFieldName} required value={settlementAccounts[`${settlementType}:${companyId}`] ?? settlementDefault ?? ""} onChange={(e) => setSettlementAccounts({ ...settlementAccounts, [`${settlementType}:${companyId}`]: e.target.value })} className={fieldClass}>
                 <option value="" disabled>
                   {settlementOptions.length === 0 ? "None available — create one first" : "Select"}
                 </option>

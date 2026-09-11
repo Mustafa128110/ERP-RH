@@ -33,6 +33,8 @@ Quick-add dialogs that must return a real foreign-key ID remain confirmed operat
 - `npm run check`: TypeScript, ESLint, tax/unit checks, offline checks, and WhatsApp matching.
 - `npm run build`: production compilation and route generation.
 - `scripts/check-durable-browser.mjs`: real Edge/IndexedDB commit acknowledgment, offline/reload, shared tabs, account isolation, duplicate identity, injected quota failure, native beforeunload dialog, draft restore, and edit revision capture.
+- `scripts/check-document-browser.mjs`: actual sale and purchase forms, complete create/edit draft restoration, changed-version refusal, quota failure, stable command identity, and immediate next-entry reset while offline. Routing/server imports are mocked; no live business writes.
+- `lib/queries/document-editor.check.ts` (part of `check:db`): read-only equivalence of the combined editor snapshot against the former separate queries, including exact decimal strings, ordered lines, linked cheques and record versions. Verified against 494 sale/purchase records.
 - `scripts/check-table-browser.mjs`: 5,000 rows, initially 20 mounted; complete selection/search, End navigation, show-all, printing, and 390px mobile scrolling. This is a DOM scaling result, **not** a measured twofold whole-app speedup.
 - `lib/command-receipt.db.check.ts`: actual PostgreSQL driver, canonical replay, actor/payload isolation, nested transactions and rollback/retry. Uses temporary tables and rolls its outer transaction back; it does not insert business records.
 - `lib/whatsapp-agent/state.check.ts`: actual Redis, unique disposable test keys, confirmation replay, acknowledgment ownership, refusal recovery, and cancellation race. No customer messages or business actions are sent.
@@ -48,6 +50,10 @@ Run the browser checks with Playwright installed or `PLAYWRIGHT_MODULE` pointing
 5. Run a backup/restore rehearsal in a disposable database. This change's backup workflow has been checked structurally; a new archive has not been generated and restored during this implementation.
 
 ## Remaining work and limits
+
+Sale and purchase forms now also recover unsaved edits per account and document. Recovery requires the exact original record version; if the record changed, the earlier input remains downloadable and cannot be restored onto the new version. The queued update carries that version and the draft's operation ID, and the draft clears only after durable local handoff. Their drafts now include dates, settlement account selections, sale type and purchase partial-payment amounts. Resetting the form resets these values as well. The shared draft hook skips untouched edits and preserves recovery offers when a draft key changes.
+
+Both document editors load header, ordered lines, linked cheque and row version in one SQL statement. This replaces three reads, removes two round trips, and prevents an editor from mixing a newer header version with older lines. The existing company/permission and posted-document filters remain in place. No database migration is required for this extension.
 
 The follow-up release extends recovery and revision checks to brands, units, taxes, warehouses, and companies. Their list queries carry the row version in the same SQL statement, and that version travels with queued edits/deletes. Native edit controls are saved per account and record; restore is explicit, stale or malformed drafts remain downloadable, and passwords/files/hidden controls are excluded. An update clears its draft only after IndexedDB commits; queueing a deletion retains any separate unsaved edit. Master batch dialogs retain their rows, except one-row quick-add dialogs that must return confirmed IDs. Browser recovery and temporary-table PostgreSQL conflict checks cover this extension. No new migration is needed.
 

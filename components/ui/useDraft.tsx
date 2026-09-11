@@ -16,8 +16,7 @@ import { clearDraft, draftSnapshot, noDraft, saveDraft, subscribeDraft, readDraf
 //   - The draft is OFFERED, never applied. Silently repopulating a form is
 //     worse than losing it — the shop would post a sale it believed it had
 //     typed fresh. Restore is a click.
-//   - New records only. An edit has a saved record behind it, and quietly
-//     restoring a stale copy over one is how someone else's changes disappear.
+//   - Edit callers must supply a version check before offering restoration.
 //   - "Discard" dismisses the offer and clears the draft; the next keystroke
 //     re-arms protection, because the work being typed now deserves it too.
 //
@@ -27,30 +26,40 @@ import { clearDraft, draftSnapshot, noDraft, saveDraft, subscribeDraft, readDraf
 export function useDraft<T>(key: string, opts: {
   // The whole form state, saved on change. Must be serialisable (JSON).
   state: T;
-  // False on an edit — a draft never overwrites a saved record.
   enabled: boolean;
+  // An untouched edit is already stored on the server; only preserve changes.
+  skipInitialSave?: boolean;
+  canRestore?: (draft: T) => boolean;
   // A draft of a form nobody typed into is noise; return false unless the
   // draft is worth offering back. Defaults to "offer anything".
   hasContent?: (draft: T) => boolean;
   // Write the draft's fields into the form's state. Runs only when the user
   // clicks Restore.
   apply: (draft: T) => void;
-}): { offerDraft: boolean; restore: () => void; discard: () => void; storageError: boolean } {
+}): { offerDraft: boolean; canRestore: boolean; restore: () => void; discard: () => void; download: () => void; storageError: boolean } {
   const { state, enabled, apply } = opts;
 
   // The draft as it stood when this form opened — lib/draft.ts explains why
   // it's read through a store rather than in an effect or an initialiser.
   const savedDraft = useSyncExternalStore(subscribeDraft, () => draftSnapshot<T>(key), noDraft);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const dismissed = dismissedKey === key;
   const [storageError, setStorageError] = useState(false);
   const lastSaved = useRef<string | null>(null);
   const recovery = useRef<{ key: string; waiting: boolean } | null>(null);
   const offerDraft = enabled && !dismissed && !!savedDraft && (opts.hasContent ? opts.hasContent(savedDraft) : true);
+  const canRestore = !!savedDraft && (!opts.canRestore || opts.canRestore(savedDraft));
 
   function restore() {
-    if (!savedDraft) return;
+    if (!savedDraft || !canRestore) return;
     apply(savedDraft);
-    setDismissed(true);
+    setDismissedKey(key);
+  }
+
+  function download() {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(savedDraft, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = "unsaved-input.json"; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   // Discard must not immediately re-save: clearing then re-rendering would
@@ -60,7 +69,7 @@ export function useDraft<T>(key: string, opts: {
   function discard() {
     clearDraft(key);
     suppressNextSave.current = true;
-    setDismissed(true);
+    setDismissedKey(key);
   }
 
   // Saved on every render while enabled. One JSON stringify of a handful of
@@ -73,11 +82,12 @@ export function useDraft<T>(key: string, opts: {
     if (recovery.current?.key !== key) {
       const original = readDraft<T>(key);
       recovery.current = { key, waiting: original !== null && (!opts.hasContent || opts.hasContent(original)) };
-      lastSaved.current = null;
+      lastSaved.current = opts.skipInitialSave ? JSON.stringify(state) : null;
     }
     if (!dismissed && recovery.current.waiting) return;
     if (suppressNextSave.current) {
       suppressNextSave.current = false;
+      lastSaved.current = JSON.stringify(state);
       return;
     }
     const serialized = JSON.stringify(state);
@@ -90,7 +100,7 @@ export function useDraft<T>(key: string, opts: {
 
   useEffect(() => () => resetDraftSnapshot(key), [key]);
 
-  return { offerDraft, restore, discard, storageError };
+  return { offerDraft, canRestore, restore, discard, download, storageError };
 }
 
 // The banner every draft-offering form renders, so the offer reads and behaves
@@ -99,18 +109,23 @@ export function DraftBanner({
   noun,
   onRestore,
   onDiscard,
+  canRestore = true,
+  onDownload,
 }: {
   noun: string;
   onRestore: () => void;
   onDiscard: () => void;
+  canRestore?: boolean;
+  onDownload?: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-brass-600 bg-brass-100 px-3 py-2 text-sm text-ink">
-      <span>You have an unsaved {noun} from earlier. Restore or discard it before starting another.</span>
+      <span>{canRestore ? `You have an unsaved ${noun} from earlier. Restore or discard it before continuing.` : "This record changed since your unsaved edit. Download your previous input to review it against the latest record."}</span>
       <span className="flex items-center gap-3">
-        <button type="button" onClick={onRestore} className="font-semibold text-navy-800 hover:underline">
+        {canRestore && <button type="button" onClick={onRestore} className="font-semibold text-navy-800 hover:underline">
           Restore it
-        </button>
+        </button>}
+        {onDownload && <button type="button" onClick={onDownload} className="text-navy-800 hover:underline">Download a copy</button>}
         <button type="button" onClick={onDiscard} className="text-steel hover:underline">
           Discard
         </button>

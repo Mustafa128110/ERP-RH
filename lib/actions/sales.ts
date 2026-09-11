@@ -3,6 +3,7 @@
 import { and, desc, eq, getTableColumns, gte, ilike, inArray, lte, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { documentEditorColumns } from "@/lib/queries/document-editor";
 import {
   documents,
   documentTypes,
@@ -225,25 +226,19 @@ export async function getSale(documentId: string) {
   const session = await getSession();
   requirePermission(session, "sales", "view");
 
-  // All three only need the id that was passed in, so there is nothing to wait
-  // for between them — as three sequential statements this cost three round
-  // trips to open one sale for editing.
-  const [[doc], lineRows, [linkedCheque]] = await Promise.all([
-    db
-      .select(getTableColumns(documents))
+  const [doc] = await db
+      .select({ ...getTableColumns(documents), ...documentEditorColumns })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
-      .limit(1),
-    db.select().from(documentLines).where(eq(documentLines.documentId, documentId)).orderBy(documentLines.lineNo),
-    db.select({ id: chequeRegister.id }).from(chequeRegister).where(eq(chequeRegister.documentId, documentId)).limit(1),
-  ]);
+      .limit(1);
   if (!doc) return null;
 
-  const settlementType: SettlementType | null = doc.bankAccountId ? "account" : doc.cashAccountId ? "cash" : linkedCheque ? "cheque" : null;
+  const settlementType: SettlementType | null = doc.bankAccountId ? "account" : doc.cashAccountId ? "cash" : doc.linkedChequeId ? "cheque" : null;
 
   return {
     id: doc.id,
+    _revision: doc._revision,
     companyId: doc.companyId,
     contactId: doc.contactId,
     documentDate: doc.documentDate,
@@ -255,13 +250,13 @@ export async function getSale(documentId: string) {
     paidAmount: doc.paidAmount,
     bankAccountId: doc.bankAccountId,
     cashAccountId: doc.cashAccountId,
-    chequeId: linkedCheque?.id ?? null,
+    chequeId: doc.linkedChequeId,
     settlementType,
     // Sales recorded before the channels existed carry NULL — they were counter
     // sales, which is also what the backfill in 0043 wrote for the ones already
     // in the table.
     saleType: doc.saleType ?? DEFAULT_SALE_TYPE,
-    lines: lineRows.map((l) => ({
+    lines: doc.editorLines.map((l) => ({
       itemId: l.itemId ?? "",
       locationId: l.locationId ?? "",
       unitId: l.unitId ?? "",

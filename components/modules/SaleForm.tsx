@@ -100,6 +100,7 @@ const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
 ];
 
 export type SaleDefaults = {
+  _revision: string;
   companyId: string;
   contactId: string | null;
   documentDate: string;
@@ -178,7 +179,7 @@ export function SaleFormPage({
   // first render already carries the scoped key and no write ever lands under
   // an unscoped one. Reactive read so a late-arriving id re-keys the form.
   const userId = useClientUserId();
-  const saleDraftKey = userId ? `${SALE_DRAFT_KEY}:${userId}` : SALE_DRAFT_KEY;
+  const saleDraftKey = isEdit ? `edit:${userId}:documents:${saleId}` : userId ? `${SALE_DRAFT_KEY}:${userId}` : SALE_DRAFT_KEY;
 
   // Grid refs first: the reset below focuses the first cell, and both the reset
   // and the action that calls it have to be declared before use.
@@ -243,6 +244,9 @@ export function SaleFormPage({
   );
   const [paidAmount, setPaidAmount] = useState(() => (defaults && !defaults.isPaid ? (defaults.paidAmount ?? "") : ""));
   const [settlementType, setSettlementType] = useState<SettlementType>(defaults?.settlementType ?? "cash");
+  const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
+  const [saleType, setSaleType] = useState<SaleType>(() => defaults?.saleType ?? DEFAULT_SALE_TYPE);
+  const [settlementAccounts, setSettlementAccounts] = useState<Record<string, string>>({});
 
   // --- Draft ----------------------------------------------------------------
   // Everything above, kept in localStorage while it's being typed, so a crash
@@ -255,17 +259,19 @@ export function SaleFormPage({
   // logic and the save-on-change effect; this form only names its draft and how
   // a restored one is written back into the setters above.
   //
-  // New sales only: an edit has a saved record behind it, and quietly restoring
-  // a stale copy over one is how someone else's changes disappear.
-  const draftState = { lines, companyId, contactId, customerText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType };
+  // An edit retains the version it was opened from, never rebasing old input
+  // onto another person's later changes.
+  const draftState = { _revision: defaults?._revision, lines, companyId, contactId, customerText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType, documentDate, saleType, settlementAccounts };
   type SaleDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(saleDraftKey, {
+  const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<SaleDraft>(saleDraftKey, {
     state: draftState,
-    enabled: !isEdit,
+    enabled: !isEdit || !!defaults?._revision,
+    skipInitialSave: true,
+    canRestore: (d) => Array.isArray(d.lines) && (!isEdit || d._revision === defaults?._revision),
     // A draft of a form nobody typed into is noise; only an unfinished sale is
     // worth offering back.
-    hasContent: (d) => d.lines.some((l) => l.itemText?.trim() || l.quantity?.trim()),
+    hasContent: (d) => isEdit || d.lines?.some((l) => l.itemText?.trim() || l.quantity?.trim()) || !!d.paidAmount || Number(d.discountTotal) !== 0 || Number(d.shippingTotal) !== 0 || !!d.documentDate && d.documentDate !== todayISO() || !!d.saleType && d.saleType !== DEFAULT_SALE_TYPE || Object.keys(d.settlementAccounts ?? {}).length > 0 || !!d.customerText && d.customerText !== DEFAULT_CUSTOMER,
     // Restoring is a click, not something that happens on its own. Silently
     // repopulating a form is worse than losing it: the shop would post a sale
     // it believed it had typed fresh.
@@ -280,6 +286,9 @@ export function SaleFormPage({
       setIsPaid(d.isPaid);
       setPaidAmount(d.paidAmount);
       setSettlementType(d.settlementType);
+      setDocumentDate(d.documentDate ?? defaults?.documentDate ?? todayISO());
+      setSaleType(d.saleType ?? defaults?.saleType ?? DEFAULT_SALE_TYPE);
+      setSettlementAccounts(d.settlementAccounts ?? {});
     },
   });
 
@@ -323,8 +332,9 @@ export function SaleFormPage({
     setIsPaid(defaultPaidMode(companyId));
     setPaidAmount("");
     setSettlementType("cash");
-    // Resets what isn't controlled state — the document date back to today, and
-    // the settlement select. Company is controlled, so it survives.
+    setDocumentDate(todayISO());
+    setSaleType(DEFAULT_SALE_TYPE);
+    setSettlementAccounts({});
     formRef.current?.reset();
     focusCell(0, 0);
   }
@@ -537,7 +547,7 @@ export function SaleFormPage({
 
   return (
     <>
-      <form data-command-record={saleId} data-draft-key={isEdit ? undefined : saleDraftKey} ref={formRef} action={action} className="sale-form flex min-w-0 flex-col gap-5">
+      <form data-command-table={isEdit ? "documents" : undefined} data-command-record={saleId} data-command-revision={defaults?._revision} data-recovery-key={isEdit ? saleDraftKey : undefined} data-draft-key={isEdit ? undefined : saleDraftKey} ref={formRef} action={action} className="sale-form flex min-w-0 flex-col gap-5">
         <input type="hidden" name="operationId" value={operationId} />
         <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
         <input
@@ -576,8 +586,9 @@ export function SaleFormPage({
 
         {/* An unfinished sale from before — a crash, a closed tab, a reload.
             Offered, never applied on its own. */}
-        {offerDraft && <DraftBanner noun="sale" onRestore={restoreDraft} onDiscard={discardDraft} />}
-      <fieldset disabled={offerDraft} className="contents">
+        {offerDraft && <DraftBanner noun={isEdit ? "sale edit" : "sale"} onRestore={restoreDraft} onDiscard={discardDraft} canRestore={canRestore} onDownload={download} />}
+        {isEdit && !defaults?._revision && <p role="alert" className={errorTextClass}>Refresh this page to load the record version before editing.</p>}
+        <fieldset disabled={offerDraft || isEdit && !defaults?._revision} className="contents">
 
         {/* --- documents header --- */}
         <div className="flex flex-col gap-3">
@@ -614,14 +625,14 @@ export function SaleFormPage({
             </label>
             <label className={`${labelClass} w-full sm:w-40`}>
               <span className={labelTextClass}>Document Date</span>
-              <DateField name="documentDate" required defaultValue={defaults?.documentDate ?? todayISO()} className={fieldClass} />
+              <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
             </label>
             <label className={`${labelClass} w-full sm:w-44`}>
               <span className={labelTextClass}>Type</span>
               {/* Counter is preselected rather than left blank: it's what nearly
                   every sale is, and the other two exist to be told apart from it
                   when the takings are reconciled. */}
-              <select name="saleType" required defaultValue={defaults?.saleType ?? DEFAULT_SALE_TYPE} className={fieldClass}>
+              <select name="saleType" required value={saleType} onChange={(e) => setSaleType(e.target.value as SaleType)} className={fieldClass}>
                 {SALE_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
@@ -866,7 +877,7 @@ export function SaleFormPage({
               <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
               {/* Keyed on the company too: switching it changes both the option
                   list and which drawer is the default. */}
-              <select key={`${settlementType}:${companyId}`} name={settlementFieldName} required defaultValue={settlementDefault ?? ""} className={fieldClass}>
+              <select name={settlementFieldName} required value={settlementAccounts[`${settlementType}:${companyId}`] ?? settlementDefault ?? ""} onChange={(e) => setSettlementAccounts({ ...settlementAccounts, [`${settlementType}:${companyId}`]: e.target.value })} className={fieldClass}>
                 <option value="" disabled>
                   {settlementOptions.length === 0 ? "None available — create one first" : "Select"}
                 </option>

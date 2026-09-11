@@ -95,6 +95,9 @@ try {
     return { error: result.error, queued: !!result.queued, count: (await work.listCommands("user-a")).length };
   });
   assert.equal(original.queued, false); assert.ok(original.error); assert.equal(original.count, 1, "quota failure must not acknowledge or replace input");
+  // The shared-tab check opened another page. Bring this one forward before
+  // requiring real user activation; background tabs can suspend animation frames.
+  await page.bringToFront();
   await page.click("#activate");
   await page.evaluate(() => { window.addEventListener("beforeunload", event => work.warnBeforeUnload(event, true)); });
   let warned = false;
