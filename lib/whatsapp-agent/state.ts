@@ -4,7 +4,6 @@ import { Redis } from "@upstash/redis";
 const PREFIX = "erp:whatsapp-agent:v1";
 const INBOUND_TTL_SECONDS = 24 * 60 * 60;
 const PROCESSING_TTL_SECONDS = 90;
-const PENDING_TTL_SECONDS = 10 * 60;
 const CONVERSATION_TTL_SECONDS = 30 * 60;
 const CONVERSATION_TURNS = 10;
 
@@ -21,6 +20,7 @@ function client(): Redis | null {
 
 function inboundKey(messageId: string) { return `${PREFIX}:inbound:${messageId}`; }
 function pendingKey(phone: string) { return `${PREFIX}:pending:${phone}`; }
+function workingKey(phone: string) { return `${PREFIX}:working:${phone}`; }
 function conversationKey(phone: string) { return `${PREFIX}:conversation:${phone}`; }
 
 export type InboundClaim = "claimed" | "done" | "busy" | "unavailable";
@@ -71,8 +71,11 @@ export async function savePending(draft: PendingDraft): Promise<boolean> {
   const redis = client();
   if (!redis) return false;
   try {
-    await redis.set(pendingKey(draft.phone), draft, { ex: PENDING_TTL_SECONDS });
-    return true;
+    return await redis.eval<string[], number>(`
+      if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+      redis.call('SET', KEYS[1], ARGV[1])
+      return 1
+    `, [pendingKey(draft.phone), workingKey(draft.phone)], [JSON.stringify(draft)]) === 1;
   } catch {
     return false;
   }
@@ -80,8 +83,31 @@ export async function savePending(draft: PendingDraft): Promise<boolean> {
 
 export async function takePending(phone: string): Promise<PendingDraft | null> {
   const redis = client();
-  if (!redis) return null;
-  try { return await redis.getdel<PendingDraft>(pendingKey(phone)); } catch { return null; }
+  if (!redis) throw new Error("Confirmation storage unavailable");
+  // Consume the confirmation by atomically moving it to durable working
+  // storage. A crash/redelivery resumes the same draft and operation ID.
+  const draft = await redis.eval<[], PendingDraft | string | null>(`
+    local active = redis.call('GET', KEYS[2])
+    if active then return active end
+    local pending = redis.call('GET', KEYS[1])
+    if not pending then return nil end
+    redis.call('SET', KEYS[2], pending)
+    redis.call('DEL', KEYS[1])
+    return pending
+  `, [pendingKey(phone), workingKey(phone)], []);
+  return typeof draft === "string" ? JSON.parse(draft) as PendingDraft : draft;
+}
+
+export async function finishPending(phone: string, operationId: string, refused = false): Promise<void> {
+  const redis = client();
+  if (!redis) throw new Error("Confirmation storage unavailable");
+  await redis.eval(`
+    local active = redis.call('GET', KEYS[2])
+    if not active or cjson.decode(active).operationId ~= ARGV[1] then return 0 end
+    if ARGV[2] == 'refused' then redis.call('SET', KEYS[1], active) end
+    redis.call('DEL', KEYS[2])
+    return 1
+  `, [pendingKey(phone), workingKey(phone)], [operationId, refused ? "refused" : "confirmed"]);
 }
 
 export async function hasPending(phone: string): Promise<boolean> {
@@ -90,10 +116,12 @@ export async function hasPending(phone: string): Promise<boolean> {
   try { return Boolean(await redis.exists(pendingKey(phone))); } catch { return false; }
 }
 
-export async function clearPending(phone: string): Promise<void> {
+export async function clearPending(phone: string): Promise<boolean> {
   const redis = client();
-  if (!redis) return;
-  try { await redis.del(pendingKey(phone)); } catch { /* Expiry is safe. */ }
+  if (!redis) throw new Error("Confirmation storage unavailable");
+  // DEL and takePending's Lua move serialize in Redis. Only a draft actually
+  // removed here can be reported as cancelled before submission.
+  return (await redis.del(pendingKey(phone))) > 0;
 }
 
 export interface ConversationTurn {

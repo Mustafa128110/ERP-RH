@@ -1,5 +1,4 @@
-// Local drafts for the two forms someone spends real time typing into: a sale
-// and a stock purchase.
+// Local drafts preserve in-progress document and batch input on this device.
 //
 // A server action that fails keeps its form's state, so that case was never the
 // problem. The one that loses work is a *render* that throws — a database blip
@@ -8,14 +7,25 @@
 // that, and a browser closed by accident too.
 //
 // Not a sync feature and not a queue: the draft is what was on screen, on this
-// machine. It's cleared the moment the real record saves.
+// machine. It is cleared after an acknowledged transfer to the durable queue
+// or a confirmed server save.
 
 const PREFIX = "erp-draft:";
-// A week-old draft is not a draft, it's clutter someone abandoned. Offering it
-// back is worse than dropping it.
-const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export const DRAFT_STATUS_EVENT = "erp:draft-storage-status";
+const failedDrafts = new Set<string>();
+export function draftStorageFailures(): string[] { return [...failedDrafts]; }
+function storageStatus(key: string, failed: boolean) {
+  if (failed) failedDrafts.add(key); else failedDrafts.delete(key);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(DRAFT_STATUS_EVENT, { detail: { key, failed } }));
+}
+// Unsubmitted work has no automatic expiry. Only explicit discard or an
+// acknowledged transfer to the durable queue/server can remove it.
 
-type Envelope<T> = { savedAt: number; value: T };
+type Envelope<T> = { savedAt: number; value: T; operationId?: string };
+export function draftOperationId(key: string): string | undefined {
+  try { return (JSON.parse(localStorage.getItem(`${PREFIX}${key}`) ?? "null") as Envelope<unknown> | null)?.operationId; }
+  catch { return undefined; }
+}
 
 // Every call is wrapped: localStorage throws in private mode and when the quota
 // is full, and a draft failing to save must never take the form down with it.
@@ -23,10 +33,17 @@ type Envelope<T> = { savedAt: number; value: T };
 // a batch grid) say so out loud instead of silently claiming the work is safe.
 export function saveDraft(key: string, value: unknown): boolean {
   try {
-    localStorage.setItem(`${PREFIX}${key}`, JSON.stringify({ savedAt: Date.now(), value } satisfies Envelope<unknown>));
+    const raw = localStorage.getItem(`${PREFIX}${key}`);
+    if (raw) {
+      const prior = JSON.parse(raw);
+      if (!prior || typeof prior !== "object" || !("value" in prior)) throw new Error("Unreadable draft");
+    }
+    const operationId = draftOperationId(key) ?? crypto.randomUUID();
+    localStorage.setItem(`${PREFIX}${key}`, JSON.stringify({ savedAt: Date.now(), value, operationId } satisfies Envelope<unknown>));
+    storageStatus(key, false);
     return true;
   } catch {
-    // No draft is better than a broken form.
+    storageStatus(key, true);
     return false;
   }
 }
@@ -36,15 +53,14 @@ export function readDraft<T>(key: string): T | null {
     const raw = localStorage.getItem(`${PREFIX}${key}`);
     if (!raw) return null;
     const envelope = JSON.parse(raw) as Envelope<T>;
-    if (!envelope || typeof envelope.savedAt !== "number" || Date.now() - envelope.savedAt > MAX_AGE_MS) {
-      clearDraft(key);
+    if (!envelope || typeof envelope.savedAt !== "number" || !("value" in envelope)) {
       return null;
     }
     return envelope.value;
   } catch {
     // Written by an older version of the form, or half-written. Either way it
     // can't be restored, so it shouldn't keep being offered.
-    clearDraft(key);
+    // Preserve unreadable bytes for recovery rather than deleting user input.
     return null;
   }
 }
@@ -53,9 +69,9 @@ export function clearDraft(key: string): void {
   snapshots.delete(key);
   try {
     localStorage.removeItem(`${PREFIX}${key}`);
+    storageStatus(key, false);
   } catch {
-    // Nothing to do — a draft that won't delete is offered once more and then
-    // ages out.
+    storageStatus(key, true);
   }
 }
 
@@ -85,3 +101,5 @@ export function draftSnapshot<T>(key: string): T | null {
 // The server has no localStorage, so it has no draft. Must be a stable
 // reference — a fresh `null` is fine, a fresh `{}` would loop.
 export const noDraft = () => null;
+
+export function resetDraftSnapshot(key: string): void { snapshots.delete(key); }

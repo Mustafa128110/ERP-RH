@@ -1,9 +1,10 @@
 "use client";
+import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment, getRecentStockAdjustmentRates } from "@/lib/actions/stock-adjustments";
+import { approveStockAdjustment, createStockAdjustment, deleteStockAdjustment, getRecentStockAdjustmentRates } from "@/lib/client-actions/stock-adjustments";
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
@@ -161,7 +162,7 @@ export function StockAdjustmentFormPage({
   }
 
   return (
-    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-draft-key={adjustmentDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -172,6 +173,7 @@ export function StockAdjustmentFormPage({
       {/* An unfinished adjustment from before — a crash, a closed tab, a reload.
           Offered, never applied on its own. */}
       {offerDraft && <DraftBanner noun="stock adjustment" onRestore={restoreDraft} onDiscard={discardDraft} />}
+      <fieldset disabled={offerDraft} className="contents">
 
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Adjustment</span>
@@ -318,7 +320,7 @@ export function StockAdjustmentFormPage({
       {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
       {state?.success && (
         <p className={successTextClass}>
-          {state.status === "pending" ? "Adjustment saved for approval" : "Adjustment posted"} — form cleared for the next one.{" "}
+          {isQueuedSave(state) ? saveStatus(state) : state.status === "pending" ? "Adjustment saved for approval" : "Adjustment posted"} — form cleared for the next one.{" "}
           {state.id && (
             <Link href={`/inventory/stock-adjustments/${state.id}`} className="underline">
               View it
@@ -346,7 +348,8 @@ export function StockAdjustmentFormPage({
           </button>
         )}
       </div>
-    </form>
+    </fieldset>
+</form>
   );
 }
 

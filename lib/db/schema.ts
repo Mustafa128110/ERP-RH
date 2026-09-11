@@ -4,6 +4,7 @@ import {
   uuid,
   varchar,
   text,
+  jsonb,
   boolean,
   integer,
   smallint,
@@ -905,6 +906,15 @@ export const cashAccounts = pgTable(
   (table) => [
     unique().on(table.companyId, table.name),
   ],  );
+
+export const commandReceipts = pgTable("command_receipts", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  action: text("action").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  result: jsonb("result"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("command_receipts_user_created").on(table.userId, table.createdAt)]);
 
 export const chequeRegister = pgTable(
   "cheque_register",

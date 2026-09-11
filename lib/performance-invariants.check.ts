@@ -23,7 +23,7 @@ requires("lib/actions/stock-transfers.ts", ["resolveItemIds", "resolveUnitIds", 
 requires("lib/actions/stock-adjustments.ts", ["resolveItemIds", "resolveUnitIds", "averageCosts"]);
 requires("lib/actions/inter-company.ts", ["mirrorItemsToBuyer", "resolveItemIds", "resolveUnitIds"]);
 requires("lib/actions/products.ts", [
-  "groupBy(documentLines.itemId, documentLines.unitId)",
+  "groupBy(documentLines.itemId, items.baseUnitId)",
   "Promise.all([...groups.values()]",
   "onHandByItemUnit",
   "resolveProductReferences",
@@ -92,17 +92,7 @@ requires("next.config.ts", ["useOffline: true"]);
 // hydration where no event ever fires; useOffline() is what catches WiFi with a
 // dead upstream. Dropping either one makes the pill and the banner lie in one of
 // those two situations.
-requires("components/layout/SyncProvider.tsx", [
-  'from "next/offline"',
-  "getOnlineSnapshot",
-  "browserOnline && !detectedOffline",
-  // The drain is not a form: a submit Next is holding pending for a returning
-  // network would hold `syncing` and wedge every later drain behind it, with no
-  // backoff and no FAILED surfacing. Abandoning the attempt is safe — the entry
-  // keeps its operation id, so the loser of the race is refused as a duplicate.
-  "SUBMIT_DEADLINE_MS",
-  "withDeadline(sendEntry(entry))",
-]);
+requires("components/layout/SyncProvider.tsx", ["drainCommands", "AbortSignal.timeout(30_000)", "warnBeforeUnload", "getClientUserId() === userId"]);
 
 // One sentence explaining why a Save button is sitting still, in the place the
 // user is already looking. Reads the provider's value so it cannot disagree with

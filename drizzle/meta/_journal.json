@@ -512,6 +512,13 @@
       "when": 1788000264000,
       "tag": "0072_guard_party_fifo_settlements",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789084800000,
+      "tag": "0073_durable_commands",
+      "breakpoints": true
     }
   ]
 }

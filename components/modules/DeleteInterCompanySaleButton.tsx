@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteInterCompanySale } from "@/lib/actions/inter-company";
+import { deleteInterCompanySale } from "@/lib/client-actions/inter-company";
 import { errorTextClass } from "@/components/ui/form-styles";
 
 export function DeleteInterCompanySaleButton({ saleId }: { saleId: string }) {

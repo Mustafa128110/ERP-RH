@@ -1,4 +1,5 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useState } from "react";
 import {
@@ -15,7 +16,7 @@ import {
   deleteCheque,
   createChequesBatch,
   type ChequeBatchRow,
-} from "@/lib/actions/accounts";
+} from "@/lib/client-actions/accounts";
 import { CHEQUE_TYPES, CHEQUE_STATUSES } from "@/lib/cheque-constants";
 import { QuickAddButton } from "@/components/ui/QuickAddSelect";
 import { quickAddButtonClass } from "@/components/ui/form-styles";
@@ -143,7 +144,7 @@ export function BankAccountEditForm({
     <form action={action} className="flex flex-col gap-4">
       <BankAccountFields defaults={defaults} companyOptions={companyOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>
@@ -347,7 +348,7 @@ export function CashAccountEditForm({
     <form action={action} className="flex flex-col gap-4">
       <CashAccountFields defaults={defaults} companyOptions={companyOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>
@@ -850,7 +851,7 @@ export function ChequeEditForm({
     <form action={action} className="flex flex-col gap-4">
       <ChequeFields defaults={defaults} companyOptions={companyOptions} bankAccountOptions={bankAccountOptions} contactOptions={contactOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>

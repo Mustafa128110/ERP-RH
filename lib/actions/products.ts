@@ -3,6 +3,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { commandContext } from "@/lib/db/command-context";
 import {
   brands,
   categories,
@@ -845,7 +846,7 @@ async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProdu
     );
 
     const result = await createStockPurchase(undefined, purchaseForm);
-    if (result.error) return `${rowLabel(group)} saved, but the stock wasn't recorded: ${result.error}`;
+    if (result.error) return `${rowLabel(group)} ${commandContext.getStore() ? "could not be saved with its stock" : "saved, but the stock wasn't recorded"}: ${result.error}`;
     return null;
   }));
 
@@ -912,7 +913,7 @@ async function recordAdjustments(shared: ProductBatchEditShared, saved: SavedPro
     adjustForm.set("linesJson", JSON.stringify(group.lines));
 
     const result = await createStockAdjustment(undefined, adjustForm);
-    if (result.error) return `${rowLabel(group.rows)} saved, but the stock level wasn't set: ${result.error}`;
+    if (result.error) return `${rowLabel(group.rows)} ${commandContext.getStore() ? "could not be saved with its stock level" : "saved, but the stock level wasn't set"}: ${result.error}`;
   }
 
   return null;

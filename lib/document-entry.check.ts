@@ -71,7 +71,8 @@ assert.ok(remints >= REUSED_FORMS.length, "expected every stay-open form to re-m
 // a rolled-back save leave no claim behind, so retrying a genuine failure works.
 const operationId = read("lib/actions/operation-id.ts");
 assert.ok(operationId.includes("claimOperation(tx: Tx"), "the claim must run on the transaction handle");
-assert.ok(operationId.includes("ON CONFLICT (key) DO UPDATE"), "the stale-key arm must survive");
+assert.ok(operationId.includes("ON CONFLICT (key) DO NOTHING"), "a committed operation ID must never be reclaimed");
+assert.ok(!operationId.includes("DELETE FROM submitted_operations"), "offline replay protection cannot expire");
 
 // ---------------------------------------------------------------------------
 // 2. A missing unit conversion doesn't refuse a sale

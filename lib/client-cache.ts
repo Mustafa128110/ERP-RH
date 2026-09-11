@@ -100,19 +100,22 @@ export function resetCachedSnapshots(): void {
 }
 
 function cachedSnapshot<T>(kind: string): T | null {
-  if (!snapshots.has(kind)) snapshots.set(kind, readClientCache<T>(kind));
-  return (snapshots.get(kind) as T | null) ?? null;
+  const scoped = keyFor(kind);
+  if (!snapshots.has(scoped)) snapshots.set(scoped, readClientCache<T>(kind));
+  return (snapshots.get(scoped) as T | null) ?? null;
 }
 
-// Returns the live options when there are any (the normal, online case), and
-// falls back to the cached copy only when live is empty. Seeding happens in the
+// Returns authoritative live options, including an empty list, and
+// falls back to a cached copy only when live data is explicitly unavailable. Seeding happens in the
 // caller: pass live options and this hook saves them for the next offline
 // moment. `stale` is true only when the value came from the cache — a caller
 // can say so in the UI rather than present cached data as current.
 export function useCachedOptions<T>(kind: string, live: T): { value: T; stale: boolean } {
   const cached = useSyncExternalStore(noopSubscribe, () => cachedSnapshot<T>(kind), () => null);
 
-  const hasLive = Array.isArray(live) ? live.length > 0 : live !== undefined && live !== null;
+  // An empty live list is authoritative (including revoked access). Only an
+  // explicitly unavailable value may fall back to the user's cached copy.
+  const hasLive = live !== undefined && live !== null;
 
   // Seed the cache whenever live options arrive — the next offline moment will
   // read this copy. Writes only when the contents changed, so a parent that
@@ -124,7 +127,7 @@ export function useCachedOptions<T>(kind: string, live: T): { value: T; stale: b
       saveClientCache(kind, live);
       // The held snapshot is stale now — a later offline render should see what
       // was just seeded, not the older copy.
-      snapshots.set(kind, live);
+      snapshots.set(keyFor(kind), live);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, live]);

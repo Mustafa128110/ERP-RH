@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { HELP_TEXT, parseCommand } from "./commands";
 import { sessionForWhatsAppNumber, runAsWhatsAppUser } from "./identity";
 import { geminiConfigured, selectTool } from "./gemini";
-import { appendConversation, clearConversation, clearPending, finishInbound, getConversation, hasPending, releaseInbound, savePending, takePending, type InboundClaim, claimInbound } from "./state";
+import { appendConversation, clearConversation, clearPending, finishInbound, finishPending, getConversation, releaseInbound, savePending, takePending, type InboundClaim, claimInbound } from "./state";
 import { commitDraft, runTool, type ToolResult } from "./tools";
 import { normalizeWhatsAppNumber } from "./phone";
 import { todayISO } from "@/lib/format";
@@ -55,12 +55,13 @@ export async function handleInboundMessage(message: { id: string; from: string; 
           if (!draft) return "Nothing waiting to be confirmed.";
           if (draft.userId !== session.userId || draft.phone !== phone) return "That draft is no longer available.";
           const committed = await commitDraft(draft);
+          if (committed.outcome === "unknown") throw new Error("Save confirmation unavailable");
+          await finishPending(phone, draft.operationId, committed.outcome === "refused");
           await clearConversation(phone);
-          return committed;
+          return committed.reply;
         }
         case "cancel":
-          if (!(await hasPending(phone))) return "Nothing to cancel.";
-          await clearPending(phone);
+          if (!(await clearPending(phone))) return "No unsubmitted draft to cancel. A confirmed save may already be processing.";
           await clearConversation(phone);
           return "Cancelled — nothing was saved.";
         case "rate": return replyForTool(phone, session.userId, message.id, await runTool("item_rates", { item: command.query }));
@@ -90,6 +91,6 @@ export async function handleInboundMessage(message: { id: string; from: string; 
   } catch (error) {
     await releaseInbound(message.id);
     console.error("[whatsapp-agent] inbound processing failed", error instanceof Error ? error.message : "unknown");
-    return { reply: "I could not complete that. Nothing new was saved; please try again.", retry: false };
+    return { reply: null, retry: true };
   }
 }

@@ -1,4 +1,5 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
@@ -8,7 +9,7 @@ import {
   type PaymentDirection,
   type PaymentType,
   type PaymentBatchRow,
-} from "@/lib/actions/payments";
+} from "@/lib/client-actions/payments";
 import type { SettlementType } from "@/lib/actions/settlement";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
@@ -208,14 +209,14 @@ export function PaymentBatchAddDialog({
       onSubmit={async (rows) => {
         return createPaymentsBatch(toServerRows(rows, batchDate), operationId);
       }}
-      onQueue={(rows) => {
+      onQueue={async (rows) => {
         const values = toServerRows(rows, batchDate);
         // The stable operation id is minted here, inside the queue — a replayed
         // sync after a lost response is refused server-side, never doubled.
         // Returns whether the queue actually persisted: when the browser could
         // not write it, the dialog stays open with its rows instead of closing
         // as if the work were safe.
-        return enqueue("payment", `${values.length} payment(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values)?.persisted ?? false;
+        return (await enqueue("payment", `${values.length} payment(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values))?.persisted ?? false;
       }}
       renderRow={(row, _index, update) => (
         <>
@@ -511,7 +512,7 @@ export function PaymentEditForm({
   }, [state?.success]);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form data-command-record={paymentId} action={action} className="flex flex-col gap-4">
       <div className={labelClass}>
         <span className={labelTextClass}>Direction</span>
         <p className="text-sm text-ink">{direction === "made" ? "Payment Made" : "Payment Received"} (fixed after creation)</p>
@@ -531,7 +532,7 @@ export function PaymentEditForm({
         chequeOptions={chequeOptions}
       />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>

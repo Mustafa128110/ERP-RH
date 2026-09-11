@@ -3,6 +3,7 @@
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { commandContext } from "@/lib/db/command-context";
 import {
   bankAccounts,
   cashAccounts,
@@ -1802,7 +1803,7 @@ export async function importStockPurchasesCsv(
 
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
 
-    if (failure) return { error: `${failure}${created > 0 ? ` ${created} purchase(s) were saved before it.` : ""}` };
+    if (failure) return { error: `${failure}${created > 0 && !commandContext.getStore() ? ` ${created} purchase(s) were saved before it.` : ""}` };
     return { created };
   });
 }

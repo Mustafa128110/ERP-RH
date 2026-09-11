@@ -22,6 +22,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useSync } from "@/components/layout/SyncProvider";
 import { useOfflineReadiness } from "@/lib/offline-readiness";
+import { CommandReview } from "./PendingWork";
+import { canCancel } from "@/lib/command-sync";
 
 const KIND_LABEL: Record<string, string> = {
   quotation: "Quotation",
@@ -30,7 +32,9 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function SyncStatus() {
-  const { online, entries, syncing, retry, cancel, cancelled, restore, deleteCancelled, storageWarning, syncNow } = useSync();
+  const { online, entries, commands, syncing, retry, cancel, cancelled, restore, deleteCancelled, storageWarning, syncNow } = useSync();
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const reviewing = commands.find(row => row.id === reviewId);
   // Truthful offline readiness: "ready" only when every reference kind the
   // quotation/expense/payment forms need is in this browser's cache, "limited"
   // when some are missing, "preparing" while the prep fetch is in flight.
@@ -73,7 +77,7 @@ export function SyncStatus() {
   // prepared. (Online + limited is not a problem — the server is authoritative
   // and reachable — so the pill stays quiet; offline + limited is the honest
   // warning.)
-  if (online && readiness !== "preparing" && pending === 0 && failed === 0 && cancelled.length === 0) return null;
+  if (online && readiness !== "preparing" && entries.length === 0 && cancelled.length === 0 && !storageWarning && !reviewing) return null;
 
   const label = !online
     ? readiness === "ready"
@@ -164,11 +168,12 @@ export function SyncStatus() {
                     {entry.status === "pending" && <p className="mt-1 text-xs text-steel">Waiting…</p>}
                     {cancelArmedId === entry.id && (
                       <p className="mt-1 text-xs text-error">
-                        Cancelled work is kept recoverable for 30 days — you can restore it.
+                        Cancelled work stays recoverable until you explicitly delete it.
                       </p>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
+                    <button type="button" className="text-xs text-navy-800" onClick={() => { setReviewId(entry.id); setOpen(false); }}>Review</button>
                     {entry.status === "failed" && (
                       <button
                         type="button"
@@ -183,6 +188,7 @@ export function SyncStatus() {
                         Anything else (Retry, closing the tray) disarms it. */}
                     <button
                       type="button"
+                      disabled={!commands.some(row => row.id === entry.id && canCancel(row))}
                       onClick={() => {
                         if (cancelArmedId === entry.id) {
                           cancel(entry.id);
@@ -197,7 +203,7 @@ export function SyncStatus() {
                           ? "border-red-600 bg-red-100 font-semibold text-red-900"
                           : "border-sand text-steel hover:bg-ivory"
                       }`}
-                      title="Cancel this operation. It is not destroyed — it moves to a recoverable archive for 30 days."
+                      title="Cancellation is available before sending or after a confirmed refusal. Input stays recoverable."
                     >
                       {cancelArmedId === entry.id ? "Yes, cancel" : "Cancel"}
                     </button>
@@ -210,7 +216,7 @@ export function SyncStatus() {
           {cancelled.length > 0 && (
             <div className="border-t border-sand pt-2">
               <p className="pb-1 text-xs font-semibold uppercase tracking-wide text-steel">
-                Cancelled ({cancelled.length}) — kept 30 days
+                Cancelled ({cancelled.length}) — recoverable
               </p>
               <ul className="max-h-40 overflow-auto">
                 {cancelled.map((entry) => (
@@ -262,10 +268,11 @@ export function SyncStatus() {
           )}
 
           <p className="border-t border-sand pt-2 text-xs text-steel">
-            Queued work is sent exactly once — a retry after a lost response is refused by the server as a duplicate.
+            Saved work stays on this device until confirmed. Retries reuse the same save ID to prevent duplicate records.
           </p>
         </div>
       )}
+      {reviewing && <CommandReview key={reviewing.id} entry={reviewing} onClose={() => setReviewId(null)} />}
     </div>
   );
 }

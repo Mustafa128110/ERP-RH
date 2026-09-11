@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ConvertQuotationDialog } from "@/components/modules/ConvertQuotationDialog";
 import { QuotationForm, type QuotationDefaults } from "@/components/modules/QuotationForm";
 import { primaryActionClass } from "@/components/ui/form-styles";
-import type { QuotationLine } from "@/lib/actions/quotations";
+import type { QuotationLine } from "@/lib/client-actions/quotations";
 import type { UnitConversionOption } from "@/lib/unit-conversion";
 
 type Option = { id: string; name: string };

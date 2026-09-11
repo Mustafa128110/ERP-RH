@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import { getRolePermissionKeys, type PermissionCatalog, type RoleListItem } from "@/lib/actions/roles";
+import { getRolePermissionKeys, type PermissionCatalog, type RoleListItem } from "@/lib/client-actions/roles";
 import { RoleCreateForm, RoleEditForm, DeleteRoleButton } from "@/components/modules/RoleForm";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";

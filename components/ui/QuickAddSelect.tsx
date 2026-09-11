@@ -25,14 +25,14 @@ export function QuickAddButton<T extends SelectOption = SelectOption>({
       <button type="button" onClick={() => setOpen(true)} className={secondaryActionClass}>
         {label}
       </button>
-      {open &&
+      {open && <span className="contents" data-requires-confirmed-save="true">{
         renderDialog({
           onClose: () => setOpen(false),
           onCreated: (rows) => {
             if (rows.length > 0) onCreated(rows);
             setOpen(false);
           },
-        })}
+        })}</span>}
     </>
   );
 }
@@ -115,7 +115,7 @@ export function QuickAddSelect({
         </button>
       </div>
 
-      {open &&
+      {open && <span className="contents" data-requires-confirmed-save="true">{
         renderDialog({
           onClose: () => setOpen(false),
           onCreated: (rows) => {
@@ -125,7 +125,7 @@ export function QuickAddSelect({
             }
             setOpen(false);
           },
-        })}
+        })}</span>}
     </label>
   );
 }

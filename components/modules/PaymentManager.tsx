@@ -18,7 +18,7 @@ import {
   type CashOption,
   type ChequeOption,
 } from "@/components/modules/PaymentForm";
-import { getPayment, listChequesForPayments } from "@/lib/actions/payments";
+import { getPayment, listChequesForPayments } from "@/lib/client-actions/payments";
 import type { ContactBalanceHint } from "@/lib/payment-constants";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";

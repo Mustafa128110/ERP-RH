@@ -10,7 +10,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { CsvActions } from "@/components/ui/CsvActions";
-import { exportProductsCsv, importProductsCsv } from "@/lib/actions/products";
+import { exportProductsCsv, importProductsCsv } from "@/lib/client-actions/products";
 import { PRODUCT_CSV_COLUMNS } from "@/lib/csv-columns";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";

@@ -8,7 +8,7 @@ import {
   updateContactsBatch,
   type ContactBatchRow,
   type ContactEditRow,
-} from "@/lib/actions/contacts";
+} from "@/lib/client-actions/contacts";
 import { inputClass, labelClass, labelTextClass, submitClass, errorTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { Dialog } from "@/components/ui/Dialog";
@@ -50,7 +50,7 @@ export function ContactEditForm({
   }, [state?.success]);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form data-command-record={contactId} action={action} className="flex flex-col gap-4">
       <label className={labelClass}>
         <span className={labelTextClass}>Name</span>
         <input name="displayName" type="text" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputClass} />

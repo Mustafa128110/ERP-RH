@@ -6,6 +6,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { KeyboardShortcuts } from "@/components/layout/KeyboardShortcuts";
 import { SessionSeed } from "@/components/layout/SessionSeed";
 import { SyncProvider } from "@/components/layout/SyncProvider";
+import { PendingWork } from "@/components/layout/PendingWork";
 import { OfflineNotice } from "@/components/layout/OfflineNotice";
 import { OfflineReadiness } from "@/components/layout/OfflineReadiness";
 import { ExportShareProvider } from "@/components/ui/ExportShareSheet";
@@ -44,6 +45,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {/* Gutters are deliberately tight: a 24px frame consumes a sixth of a
                 360px screen. The bottom inset clears the iOS home indicator. */}
             <main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4 print:overflow-visible print:bg-white print:p-0">
+              <PendingWork />
               {children}
             </main>
           </div>

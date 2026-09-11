@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { listPurchaseMergeCandidates, mergeStockPurchases, type PurchaseMergeCandidate } from "@/lib/actions/purchases";
+import { listPurchaseMergeCandidates, mergeStockPurchases, type PurchaseMergeCandidate } from "@/lib/client-actions/purchases";
 import { Dialog } from "@/components/ui/Dialog";
 import { inputClass, submitClass, errorTextClass } from "@/components/ui/form-styles";
 import { formatDate, money } from "@/lib/format";

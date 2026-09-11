@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
-import { updateBrand, deleteBrand, createBrandsBatch, type BrandBatchRow } from "@/lib/actions/brands";
+import { updateBrand, deleteBrand, createBrandsBatch, type BrandBatchRow } from "@/lib/client-actions/brands";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { optimistically } from "@/lib/optimistic-records";
@@ -53,7 +54,7 @@ export function BrandEditForm({
     <form action={action} className="flex flex-col gap-4">
       <Fields defaults={defaults} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>

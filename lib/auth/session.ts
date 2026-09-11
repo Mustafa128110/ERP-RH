@@ -101,17 +101,17 @@ const getCookieSession = cache(async (): Promise<AuthSession | null> => {
   if (!authId) return null;
 
   const key = `${SESSION_KEY}:${authId}`;
-  const session = await cached(key, SESSION_TTL, async () => {
+  const row = await cached(key, SESSION_TTL, async () => {
     const [row] = await sessionQuery(authId);
     if (!row || row.status !== "active") return null;
-    return shapeSession(row);
+    return row;
   });
 
   // Deliberately no negative caching: a user who was just created or
   // reactivated must be able to sign in immediately, not in up to a minute.
   // Concurrent callers still share the in-flight lookup, they just don't keep it.
-  if (!session) await invalidate(key);
-  return session;
+  if (!row) await invalidate(key);
+  return row ? shapeSession(row) : null;
 });
 
 // The write-time session: the same shape, read fresh from the database on every

@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import { createOpeningBalanceEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/actions/ledger";
+import { createOpeningBalanceEntry, setContactBalance, type ContactLedgerBalance } from "@/lib/client-actions/ledger";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -17,7 +17,7 @@ import { ContactStatementDocument, SheetRenderer, type Letterhead } from "@/comp
 import { PartyLedgerDialog, PartyLedgerPrintDocument } from "@/components/modules/PartyLedgerDialog";
 import { useExportShare } from "@/components/ui/ExportShareSheet";
 import { inCompany } from "@/lib/contact-scope";
-import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/actions/ledger";
+import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/client-actions/ledger";
 
 const readOnlyClass = `${fieldClass} flex items-center bg-ivory text-steel`;
 

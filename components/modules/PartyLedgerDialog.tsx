@@ -15,11 +15,11 @@ import {
   type LedgerImpactPreview,
   type PartyLedgerEntry,
   type PartyLedgerResult,
-} from "@/lib/actions/ledger";
-import { getPayment } from "@/lib/actions/payments";
-import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
+} from "@/lib/client-actions/ledger";
+import { getPayment } from "@/lib/client-actions/payments";
+import { getStockPurchase, listChequesForPurchases } from "@/lib/client-actions/purchases";
 import type { AuditRow } from "@/lib/actions/audit";
-import type { PaymentDirection } from "@/lib/actions/payments";
+import type { PaymentDirection } from "@/lib/client-actions/payments";
 import { closingBalance, LEDGER_TYPE_LABELS, runningBalances, type SettlementState } from "@/lib/ledger-constants";
 import { openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { Dialog } from "@/components/ui/Dialog";

@@ -1,9 +1,10 @@
 "use client";
+import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createInterCompanySale, updateInterCompanySale, type InterCompanyResult } from "@/lib/actions/inter-company";
+import { createInterCompanySale, updateInterCompanySale, type InterCompanyResult } from "@/lib/client-actions/inter-company";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
@@ -156,8 +157,8 @@ export function InterCompanyFormPage({
     }
     if (result?.success) {
       // Saved — the local copy has nothing left to protect.
-      clearDraft(intercompanyDraftKey);
-      // Spent id: the server holds the claim for a day, so reusing it would have
+      if (!isEdit) clearDraft(intercompanyDraftKey);
+      // Spent id: the server keeps the claim permanently, so reusing it would have
       // the next transfer refused as a replay of this one — "already recorded",
       // nothing written. Safe to replace only here, where the response came back;
       // a failure keeps it so a lost response can't post both documents twice.
@@ -201,7 +202,7 @@ export function InterCompanyFormPage({
   const total = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.rate) || 0), 0);
 
   return (
-    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-command-record={saleId} data-draft-key={isEdit ? undefined : intercompanyDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -212,6 +213,7 @@ export function InterCompanyFormPage({
       {/* An unfinished inter-company sale from before — a crash, a closed tab, a
           reload. Offered, never applied on its own. */}
       {offerDraft && <DraftBanner noun="inter-company sale" onRestore={restoreDraft} onDiscard={discardDraft} />}
+      <fieldset disabled={offerDraft} className="contents">
 
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Companies</span>
@@ -398,7 +400,7 @@ export function InterCompanyFormPage({
 
       {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
       {state?.success &&
-        (isEdit ? (
+        (isQueuedSave(state) ? <p className={successTextClass}>{saveStatus(state)}</p> : isEdit ? (
           <p className={successTextClass}>Saved — both documents re-posted to match.</p>
         ) : (
           <p className={successTextClass}>
@@ -433,6 +435,7 @@ export function InterCompanyFormPage({
           </button>
         )}
       </div>
-    </form>
+    </fieldset>
+</form>
   );
 }

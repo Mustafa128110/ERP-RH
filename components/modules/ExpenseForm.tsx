@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useState } from "react";
-import { updateExpense, deleteExpense, createExpensesBatch, type ExpenseBatchRow } from "@/lib/actions/expenses";
+import { updateExpense, deleteExpense, createExpensesBatch, type ExpenseBatchRow } from "@/lib/client-actions/expenses";
 import type { SettlementType } from "@/lib/actions/settlement";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
@@ -167,14 +168,14 @@ export function ExpenseBatchAddDialog({
       onSubmit={async (rows) => {
         return createExpensesBatch(toServerRows(rows, batchDate), operationId);
       }}
-      onQueue={(rows) => {
+      onQueue={async (rows) => {
         const values = toServerRows(rows, batchDate);
         // The stable operation id is minted here, inside the queue — a replayed
         // sync after a lost response is refused server-side, never doubled.
         // Returns whether the queue actually persisted: when the browser could
         // not write it, the dialog stays open with its rows instead of closing
         // as if the work were safe.
-        return enqueue("expense", `${values.length} expense(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values)?.persisted ?? false;
+        return (await enqueue("expense", `${values.length} expense(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values))?.persisted ?? false;
       }}
       renderRow={(row, _index, update) => (
         <>
@@ -463,7 +464,7 @@ export function ExpenseEditForm({
   }, [state?.success]);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form data-command-record={expenseId} action={action} className="flex flex-col gap-4">
       <Fields
         defaults={defaults}
         companyOptions={companyOptions}
@@ -474,7 +475,7 @@ export function ExpenseEditForm({
         chequeOptions={chequeOptions}
       />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>

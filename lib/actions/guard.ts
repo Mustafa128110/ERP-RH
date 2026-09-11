@@ -77,7 +77,7 @@ export function describeDbError(e: unknown, fallback: string, messages?: ErrorMe
   if (code && messages?.[code]) return messages[code];
 
   if (code && CONNECT_CODES.has(code)) {
-    return "Couldn't reach the database. Nothing was saved — check the connection and try again.";
+    return "The database connection was interrupted. The save may have completed; check its status before entering it again.";
   }
 
   // A foreign key cuts both ways — inserting a child whose parent is gone, and
@@ -110,8 +110,8 @@ export function describeDbError(e: unknown, fallback: string, messages?: ErrorMe
 // how a form knows to turn its Save into a Confirm rather than treating this like
 // a validation failure. Set it wherever an action asks for `confirmAllocations`,
 // so no form has to recognise the refusal by reading its wording.
-export type ActionResult = { error?: string; success?: boolean; needsConfirmation?: boolean };
-export type CreateResult<C> = { error?: string; created?: C[] };
+export type ActionResult = { error?: string; success?: boolean; needsConfirmation?: boolean; queued?: boolean; operationId?: string };
+export type CreateResult<C> = { error?: string; created?: C[]; queued?: boolean; operationId?: string };
 
 // Wraps an action body. `fallback` is what the user sees when the failure isn't
 // one of the recognised ones — write it as a full sentence about *this*

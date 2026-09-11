@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { formatDate, money, todayISO } from "@/lib/format";
-import type { ContactLedgerBalance } from "@/lib/actions/ledger";
+import type { ContactLedgerBalance } from "@/lib/client-actions/ledger";
 
 // What the ledger looks like when it leaves the building: a balance sheet for
 // the business, and a statement of account for one contact.

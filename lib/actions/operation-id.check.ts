@@ -12,13 +12,9 @@ import { claimOperation } from "./operation-id";
 //
 //   npx tsx --conditions=react-server --env-file=.env lib/actions/operation-id.check.ts
 
-// One round trip, same as the claiming statement: prune anything the last run
-// left behind, then take the count.
+// Read only the check's own identities; never prune other operation receipts.
 async function countKeys(...keys: string[]): Promise<number> {
   const [row] = await db.execute<{ n: string }>(sql`
-    WITH pruned AS (
-      DELETE FROM submitted_operations WHERE created_at < now() - interval '24 hours'
-    )
     SELECT count(*)::text AS n FROM submitted_operations WHERE key IN (${sql.join(
       keys.map((k) => sql`${k}`),
       sql`, `,
@@ -60,23 +56,18 @@ async function main() {
   const retry = await db.transaction(async (tx) => claimOperation(tx, c));
   assert.equal(retry, true, "an id whose claim rolled back must be claimable again");
 
-  // --- Pruning: the 24-hour sweep is part of the claiming statement -----------
-  // A key older than the retention window is dead weight — it can never be a
-  // retry (the form that held it is long gone), so claiming under it again is a
-  // genuinely new operation, not a replay. The prune must also never touch a
-  // fresh claim: the DELETE is bounded to created_at < now() - 24h, so a claim
-  // made just now cannot be swept by the same statement that just made it.
+  // A reopened offline queue can retry months later; claims cannot expire.
   const d = crypto.randomUUID();
   await db.execute(sql`INSERT INTO submitted_operations (key, created_at) VALUES (${d}, now() - interval '25 hours')`);
   const staleReclaim = await db.transaction(async (tx) => claimOperation(tx, d));
-  assert.equal(staleReclaim, true, "an id older than the retention window is pruned and claimable again");
+  assert.equal(staleReclaim, false, "old operation IDs must still refuse offline retries");
   assert.equal(
     await countKeys(d),
     1,
-    "the prune must have deleted the stale row and left exactly the fresh claim",
+    "the original permanent claim must remain",
   );
 
-  // --- A fresh claim survives its own claiming statement's prune ---------------
+  // --- Fresh and old claims both remain permanent -----------------------------
   const e = crypto.randomUUID();
   await db.transaction(async (tx) => claimOperation(tx, e));
   assert.equal(await countKeys(e), 1, "a just-claimed id must not be pruned by the claiming statement");
@@ -99,7 +90,7 @@ async function main() {
 
   console.log("ok   claim: fresh id claimed, replay refused, fresh id claimed again");
   console.log("ok   claim: rolled-back claim vanishes, retry goes through");
-  console.log("ok   claim: 24h prune sweeps only stale keys; a fresh claim is untouched");
+  console.log("ok   claim: old and fresh claims both survive retries");
   console.log("ok   claim: concurrent claims of one id — exactly one wins");
   console.log("\nall operation-id checks passed");
 }

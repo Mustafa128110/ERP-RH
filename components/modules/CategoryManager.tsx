@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import type { CategoryNode } from "@/lib/actions/categories";
-import { saveCategoryTree, createCategoriesBatch } from "@/lib/actions/categories";
+import type { CategoryNode } from "@/lib/client-actions/categories";
+import { saveCategoryTree, createCategoriesBatch } from "@/lib/client-actions/categories";
 import { CategoryTree } from "@/components/modules/CategoryTree";
 import { CategoryEditForm, DeleteCategoryButton, CategoryBatchAddDialog } from "@/components/modules/CategoryForm";
 import { Dialog } from "@/components/ui/Dialog";

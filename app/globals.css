@@ -460,6 +460,16 @@ table[data-responsive] {
   min-width: max-content;
 }
 
+table[data-responsive] tr[data-virtual-spacer],
+table[data-responsive] tr[data-virtual-spacer] td {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-height: 0;
+  background: transparent;
+}
+table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
+
 /* Mobile lists keep the one shared DataTable component and its keyboard model,
  * but stop asking a 360px screen to impersonate a desktop spreadsheet. The
  * existing cells become labelled facts; no information is dropped and a
@@ -581,6 +591,8 @@ table[data-responsive] {
     min-width: 0;
   }
   .document-form > .flex > .h-12.w-fit,
+  .document-form > fieldset > .flex > .h-12.w-fit,
+  .document-form > fieldset > .flex button[type="submit"],
   .document-form > .flex button[type="submit"] {
     width: 100%;
   }

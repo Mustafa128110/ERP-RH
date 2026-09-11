@@ -58,7 +58,9 @@ for (const code of ["40001", "40P01", "57014", "53300"]) {
 }
 
 // --- A connection that never opened means the statement never ran ------------
-assert.match(describeDbError({ code: "EAI_AGAIN", syscall: "getaddrinfo" }, FALLBACK), /Nothing was saved/);
+for (const code of ["EAI_AGAIN", "ECONNRESET", "ETIMEDOUT"]) {
+  assert.match(describeDbError({ code }, FALLBACK), /may have completed/, "a transport error cannot promise that no write committed");
+}
 
 // --- Wrapped errors are unwrapped: drizzle nests the driver error in `cause` --
 assert.equal(

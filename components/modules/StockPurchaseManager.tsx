@@ -3,12 +3,12 @@
 import { useRef, useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { StockPurchaseCreateForm, DeleteStockPurchaseButton } from "@/components/modules/StockPurchaseForm";
-import { getStockPurchase, listChequesForPurchases } from "@/lib/actions/purchases";
+import { getStockPurchase, listChequesForPurchases } from "@/lib/client-actions/purchases";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CsvActions } from "@/components/ui/CsvActions";
-import { exportStockPurchasesCsv, importStockPurchasesCsv } from "@/lib/actions/purchases";
+import { exportStockPurchasesCsv, importStockPurchasesCsv } from "@/lib/client-actions/purchases";
 import { PURCHASE_CSV_COLUMNS } from "@/lib/csv-columns";
 import { iconButtonClass, primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";

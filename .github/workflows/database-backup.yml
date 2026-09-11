@@ -64,14 +64,20 @@ jobs:
           # These are ERP access roles, not PostgreSQL server roles. Hosted
           # Supabase does not grant the application account permission to dump
           # server-global roles; ERP roles/permissions are what restores access.
-          pg_dump_17 --data-only --no-owner --no-privileges \
-            --table=public.roles --table=public.permissions --table=public.role_permissions \
-            --table=public.user_roles --file=/backup/roles.sql
-          pg_dump_17 --schema-only --no-owner --no-privileges --file=/backup/schema.sql
-          pg_dump_17 --data-only --no-owner --no-privileges \
-            --exclude-table-data=public.roles --exclude-table-data=public.permissions \
-            --exclude-table-data=public.role_permissions --exclude-table-data=public.user_roles \
-            --file=/backup/data.sql
+          # One pg_dump means one consistent database snapshot. Extract the
+          # existing restore files locally; three separate dumps could disagree
+          # about records changed between their snapshots.
+          pg_dump_17 --format=custom --no-owner --no-privileges --file=/backup/snapshot.dump
+          pg_restore_17() {
+            docker run --rm --volume "$workdir:/backup" postgres:17 \
+              pg_restore --no-owner --no-privileges "$@" /backup/snapshot.dump
+          }
+          pg_restore_17 --data-only --table=roles --table=permissions --table=role_permissions \
+            --table=user_roles --file=/backup/roles.sql
+          pg_restore_17 --schema-only --file=/backup/schema.sql
+          pg_restore_17 --list > full.list
+          awk '!($4 == "TABLE" && $5 == "DATA" && $6 == "public" && $7 ~ /^(roles|permissions|role_permissions|user_roles)$/)' full.list > data.list
+          pg_restore_17 --data-only --use-list=/backup/data.list --file=/backup/data.sql
 
           test -s roles.sql && test -s schema.sql && test -s data.sql
           roles_sha="$(sha256sum roles.sql | awk '{print $1}')"

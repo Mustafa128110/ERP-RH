@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { createStockPurchase, updateStockPurchase, deleteStockPurchase } from "@/lib/actions/purchases";
+import { createStockPurchase, updateStockPurchase, deleteStockPurchase } from "@/lib/client-actions/purchases";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import type { SettlementType } from "@/lib/actions/settlement";
 import { ComboBox } from "@/components/ui/ComboBox";
@@ -151,7 +151,7 @@ export function StockPurchaseCreateForm({
   const purchaseDraftKey = userId ? `${PURCHASE_DRAFT_KEY}:${userId}` : PURCHASE_DRAFT_KEY;
   // One id per *save*, not per open form. It is claimed by the server inside the
   // same transaction as the purchase, so a replayed submit can't post twice — but
-  // the claim outlives the save by a day, so "Next Purchase" has to stop sending
+  // the claim is permanent, so "Next Purchase" has to stop sending
   // the spent one. Re-minted on a confirmed success only; see the effect below.
   const [operationId, setOperationId] = useState(() => crypto.randomUUID());
   // Reducing a purchase below what has already been paid against it releases the
@@ -287,7 +287,7 @@ export function StockPurchaseCreateForm({
   function resetForm() {
     // Cleared on purpose, so the draft goes with it rather than being offered
     // back on the next visit.
-    clearDraft(purchaseDraftKey);
+    if (!isEdit) clearDraft(purchaseDraftKey);
     setLines([emptyLine()]);
     setContactId("");
     setSupplierText("");
@@ -306,8 +306,8 @@ export function StockPurchaseCreateForm({
   useEffect(() => {
     if (!state?.success) return;
     // Saved — the local copy has nothing left to protect.
-    clearDraft(purchaseDraftKey);
-    // This purchase's id is spent: the server holds the claim for a day, so
+    if (!isEdit) clearDraft(purchaseDraftKey);
+    // This purchase's id is spent: the server keeps the claim permanently, so
     // sending it again would have the next purchase refused as a replay of this
     // one — saying "already recorded" while writing nothing. A confirmed success
     // is the one moment it is safe to mint a new one: the response came back, so
@@ -463,7 +463,7 @@ export function StockPurchaseCreateForm({
 
   return (
     <>
-    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-command-record={purchaseId} data-draft-key={isEdit ? undefined : purchaseDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
       <input
@@ -488,6 +488,7 @@ export function StockPurchaseCreateForm({
           Offered, never applied on its own: silently refilling the grid would
           have someone post a delivery they thought they had typed fresh. */}
       {offerDraft && <DraftBanner noun="purchase" onRestore={restoreDraft} onDiscard={discardDraft} />}
+      <fieldset disabled={offerDraft} className="contents">
 
       {/* --- documents header. Clear sits on the section heading's own line
           rather than in a strip of its own above it. --- */}
@@ -851,7 +852,8 @@ export function StockPurchaseCreateForm({
           </button>
         )}
       </div>
-    </form>
+    </fieldset>
+</form>
 
     </>
   );

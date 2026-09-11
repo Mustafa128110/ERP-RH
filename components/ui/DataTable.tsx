@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ColumnDef, Row } from "@/lib/table";
 import { StatusPill } from "./StatusPill";
 import { Icon } from "./Icon";
@@ -62,6 +64,7 @@ export function DataTable({
   storageKey,
   pendingIds,
   onRowIntent,
+  globalShortcuts = true,
 }: {
   columns: ColumnDef[];
   rows: Row[];
@@ -100,13 +103,17 @@ export function DataTable({
   // intent, and firing a round trip for each one would be worse than the wait it
   // was meant to remove. A keyboard open pays the same cost it always did.
   onRowIntent?: (row: Row) => void;
+  globalShortcuts?: boolean;
 }) {
+  "use no memo"; // The virtualizer owns mutable measurements and subscriptions.
   const router = useRouter();
   // Which row the highlight is on, and where a Shift-extended range started.
   // -1 until the list is actually used: an untouched page shouldn't already be
   // pointing at its first row.
   const [focused, setFocused] = useState(-1);
   const [query, setQuery] = useState("");
+  const [showAllRows, setShowAllRows] = useState(false);
+  const [printing, setPrinting] = useState(false);
   // The search box is a search icon until it is asked for. On a list screen the
   // box was permanently occupying a strip of the header for a thing that is
   // typed into occasionally; "/" and the icon both bring it back.
@@ -175,6 +182,33 @@ export function DataTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, index, query, sortKey, sortDir]);
 
+  const virtualized = visible.length > 150 && !showAllRows && !printing;
+  // Search, selection and keyboard navigation still use the full filtered set.
+  // Scrolling mounts every row when reached; no records are truncated.
+  // This component explicitly opts out of compiler memoization above.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: index => String(visible[index][idKey]),
+    estimateSize: () => 44,
+    initialRect: { width: 1000, height: 600 },
+    overscan: 8,
+    enabled: virtualized,
+    scrollPaddingStart: 44,
+    measureElement: element => element.getBoundingClientRect().height + (parseFloat(getComputedStyle(element).marginBottom) || 0),
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const rendered = virtualized ? virtualRows.map(item => ({ row: visible[item.index], rowIndex: item.index })) : visible.map((row, rowIndex) => ({ row, rowIndex }));
+  const paddingTop = virtualized ? virtualRows[0]?.start ?? 0 : 0;
+  const paddingBottom = virtualized ? Math.max(0, virtualizer.getTotalSize() - (virtualRows.at(-1)?.end ?? 0)) : 0;
+  useEffect(() => {
+    const before = () => flushSync(() => setPrinting(true));
+    const after = () => setPrinting(false);
+    window.addEventListener("beforeprint", before); window.addEventListener("afterprint", after);
+    return () => { window.removeEventListener("beforeprint", before); window.removeEventListener("afterprint", after); };
+  }, []);
+
   function toggleSort(key: string) {
     if (sortKey === key) {
       // Third click: clear sort
@@ -229,13 +263,14 @@ export function DataTable({
   function moveTo(index: number) {
     const clamped = Math.max(0, Math.min(visible.length - 1, index));
     setFocused(clamped);
+    if (virtualized) virtualizer.scrollToIndex(clamped, { align: "auto" });
     return clamped;
   }
 
   // Scrolling happens after the focused row has rendered.
   useEffect(() => {
     if (focused < 0) return;
-    bodyRef.current?.children[focused]?.scrollIntoView({ block: "nearest" });
+    bodyRef.current?.querySelector(`[data-row-index="${focused}"]`)?.scrollIntoView({ block: "nearest" });
   }, [focused]);
 
   function open(row: Row) {
@@ -324,7 +359,8 @@ export function DataTable({
         return;
       }
       if (document.querySelector('[role="dialog"]')) return;
-      if (document.querySelector("[data-list]") !== scrollRef.current) return;
+      if (!globalShortcuts && !scrollRef.current?.contains(target)) return;
+      if (globalShortcuts && document.querySelector('[data-list="global"]') !== scrollRef.current) return;
       onKeyDown(e);
     }
     document.addEventListener("keydown", handler);
@@ -423,13 +459,14 @@ export function DataTable({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {search}
+      {visible.length > 150 && <div className="flex shrink-0 items-center justify-between text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
       {/* tabIndex makes the list itself focusable, which is what gives the arrow
           keys somewhere to arrive. Clicking any row focuses it as a side effect. */}
       {/* Still focusable, so clicking the list is still a way to put the caret
           somewhere sane — but no longer the precondition for the arrow keys,
           which the document listener above handles. */}
       <div
-        data-list
+        data-list={globalShortcuts ? "global" : "local"}
         ref={scrollRef}
         tabIndex={0}
         className="scroll-thin mobile-data-list min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200 outline-none dark:border-zinc-800"
@@ -439,7 +476,7 @@ export function DataTable({
             Nothing matches “{query.trim()}”. Press Esc to clear the search.
           </p>
         ) : (
-          <table data-responsive className="w-full border-collapse text-sm md:min-w-max">
+          <table data-responsive aria-rowcount={visible.length + 1} className="w-full border-collapse text-sm md:min-w-max">
             <thead>
               <tr className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
                 {selectable && (
@@ -482,7 +519,8 @@ export function DataTable({
               </tr>
             </thead>
             <tbody ref={bodyRef}>
-              {visible.map((row, rowIndex) => {
+              {paddingTop > 0 && <tr data-virtual-spacer aria-hidden="true"><td colSpan={allColumns.length + (selectable ? 1 : 0)} style={{ height: paddingTop }} /></tr>}
+              {rendered.map(({ row, rowIndex }) => {
                 const id = String(row[idKey]);
                 const href = hrefBase ? `${hrefBase}/${id}` : null;
                 // A row flagged _incomplete gets a red dot before its first cell —
@@ -523,6 +561,10 @@ export function DataTable({
                   // tone plus a navy edge for the keyboard highlight (globals.css).
                   <tr
                     key={id}
+                    ref={virtualized ? virtualizer.measureElement : undefined}
+                    data-index={rowIndex}
+                    data-row-index={rowIndex}
+                    aria-rowindex={rowIndex + 2}
                     data-focused={rowIndex === focused}
                     // Absent rather than "false" when the row is settled: the
                     // style keys off the attribute being there at all.
@@ -573,6 +615,7 @@ export function DataTable({
                   </tr>
                 );
               })}
+              {paddingBottom > 0 && <tr data-virtual-spacer aria-hidden="true"><td colSpan={allColumns.length + (selectable ? 1 : 0)} style={{ height: paddingBottom }} /></tr>}
             </tbody>
           </table>
         )}

@@ -48,7 +48,7 @@ export function BatchAddDialog<T, C = unknown>({
   // don't. The caller maps rows to its server payload and calls useSync().
   // Must return true only when the work was DURABLY queued (written to local
   // storage); false keeps the dialog open so the rows are not lost.
-  onQueue?: (rows: T[]) => boolean;
+  onQueue?: (rows: T[]) => boolean | Promise<boolean>;
   onDone: (created?: C[]) => void;
   // Quick-add from inside another form usually means "I need one thing"; the
   // master-data pages mean "I'm entering a batch". Same dialog, different start.
@@ -195,16 +195,20 @@ export function BatchAddDialog<T, C = unknown>({
                 // the one thing the duplicate guard cannot catch. Exactly one
                 // in-flight copy of a batch, always.
                 disabled={pending}
-                onClick={() => {
+                onClick={async () => {
                   // The rows have moved out of this grid into the outbox — the
                   // local draft would otherwise offer them back next time and a
                   // restore could queue the same work twice. Only when the queue
                   // actually took them: a queue that couldn't be written leaves
                   // the dialog open, rows intact, and says so.
-                  if (onQueue(rows)) {
-                    if (draftKey) clearDraft(draftKey);
-                    onClose();
-                  }
+                  setPending(true);
+                  try {
+                    if (await onQueue(rows)) {
+                      if (draftKey) clearDraft(draftKey);
+                      onClose();
+                    }
+                  } catch { setQueueError("This browser could not store your work. Keep this form open."); }
+                  finally { setPending(false); }
                 }}
                 className="h-10 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"
                 title={
@@ -235,6 +239,7 @@ export function BatchAddDialog<T, C = unknown>({
         </div>
       }
     >
+      {draftKey && <input type="hidden" data-batch-draft-key={draftKey} />}
       {draftSaveFailed && draftKey && (
         <p className="mb-3 rounded border border-red-600 bg-red-100 px-3 py-2 text-sm text-red-900">
           This browser could not save a copy of this batch (storage is full or blocked). Keep this page open — the

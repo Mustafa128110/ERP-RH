@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteStockTransfer } from "@/lib/actions/stock-transfers";
+import { deleteStockTransfer } from "@/lib/client-actions/stock-transfers";
 import { errorTextClass } from "@/components/ui/form-styles";
 
 export function DeleteStockTransferButton({ transferId }: { transferId: string }) {

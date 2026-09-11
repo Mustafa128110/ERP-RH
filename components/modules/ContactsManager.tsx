@@ -5,7 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/ContactForm";
 import { MergeContactsDialog } from "@/components/modules/MergeContactsDialog";
-import { getContact } from "@/lib/actions/contacts";
+import { getContact } from "@/lib/client-actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";

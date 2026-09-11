@@ -1,6 +1,6 @@
 "use client";
 
-import type { ContactDocument } from "@/lib/actions/ledger";
+import type { ContactDocument } from "@/lib/client-actions/ledger";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { money } from "@/lib/format";
 

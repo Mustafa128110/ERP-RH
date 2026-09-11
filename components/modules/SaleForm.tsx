@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/actions/sales";
+import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/client-actions/sales";
 import type { SettlementType } from "@/lib/actions/settlement";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, confirmNoticeClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
@@ -91,7 +91,7 @@ const UNPAID_BY_DEFAULT_COMPANY = "M52";
 // createSale returns the new id, updateSale doesn't — one shape covers both so
 // the wrapped action has a single return type. `needsConfirmation` is the third
 // answer: not saved, not broken, waiting for a yes (see confirmNoticeClass).
-type SaleActionState = { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean } | undefined;
+type SaleActionState = { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean; queued?: boolean } | undefined;
 
 const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
   { value: "account", label: "Account" },
@@ -313,7 +313,7 @@ export function SaleFormPage({
     // nothing left to protect. Cleared before the state updates so a render that
     // throws on the way out can't leave the finished sale sitting there as an
     // unsaved draft.
-    clearDraft(saleDraftKey);
+    if (!isEdit) clearDraft(saleDraftKey);
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
     setContactId(counterId(companyId));
     setCustomerText(DEFAULT_CUSTOMER);
@@ -379,8 +379,8 @@ export function SaleFormPage({
     if (result?.success) {
       // Whatever happens next — a dialog closing, a route change, a page that
       // fails to re-render — this sale is saved, so its draft goes now.
-      clearDraft(saleDraftKey);
-      // This sale's id is spent: the server holds the claim for a day, so sending
+      if (!isEdit) clearDraft(saleDraftKey);
+      // This sale's id is spent: the server keeps the claim permanently, so sending
       // it again would have the next sale refused as a replay of this one — saying
       // "already recorded" while writing nothing. A confirmed success is the one
       // moment it is safe to mint a new one: the response came back, so there is
@@ -537,7 +537,7 @@ export function SaleFormPage({
 
   return (
     <>
-      <form ref={formRef} action={action} className="sale-form flex min-w-0 flex-col gap-5">
+      <form data-command-record={saleId} data-draft-key={isEdit ? undefined : saleDraftKey} ref={formRef} action={action} className="sale-form flex min-w-0 flex-col gap-5">
         <input type="hidden" name="operationId" value={operationId} />
         <input type="hidden" name="confirmAllocations" value={confirming ? "1" : ""} />
         <input
@@ -577,6 +577,7 @@ export function SaleFormPage({
         {/* An unfinished sale from before — a crash, a closed tab, a reload.
             Offered, never applied on its own. */}
         {offerDraft && <DraftBanner noun="sale" onRestore={restoreDraft} onDiscard={discardDraft} />}
+      <fieldset disabled={offerDraft} className="contents">
 
         {/* --- documents header --- */}
         <div className="flex flex-col gap-3">
@@ -884,7 +885,7 @@ export function SaleFormPage({
         )}
         {state?.success &&
           (isEdit ? (
-            <p role="status" aria-live="polite" className={successTextClass}>Saved.</p>
+            <p role="status" aria-live="polite" className={successTextClass}>{state?.queued ? "Saved on this device — waiting to sync." : "Saved."}</p>
           ) : (
             <p role="status" aria-live="polite" className={successTextClass}>
               Sale created — form cleared for the next one.{" "}
@@ -911,7 +912,8 @@ export function SaleFormPage({
             {onDone ? "Cancel" : "Back to Invoices"}
           </button>
         </div>
-      </form>
+      </fieldset>
+</form>
     </>
   );
 }

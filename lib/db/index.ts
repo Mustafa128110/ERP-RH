@@ -2,6 +2,7 @@ import "server-only";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
+import { commandContext } from "./command-context";
 
 // Session mode (DATABASE_URL_DIRECT, port 5432), not the transaction pooler.
 //
@@ -111,4 +112,16 @@ function preparing(sql: postgres.Sql): postgres.Sql {
   });
 }
 
-export const db = drizzle(preparing(client), { schema });
+export const database = drizzle(preparing(client), { schema });
+// A background command's receipt and every existing action write share one
+// transaction. Ordinary web reads/actions retain the usual database handle.
+export const db = new Proxy(database, {
+  get(target, property) {
+    const active = commandContext.getStore()?.database ?? target;
+    const value = Reflect.get(active, property, active);
+    // postgres.Sql is a callable object carrying end/begin/unsafe. Binding it
+    // like a Drizzle method strips those properties and breaks release tools.
+    if (property === "$client") return value;
+    return typeof value === "function" ? value.bind(active) : value;
+  },
+});

@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
-import { updateCategory, deleteCategory, createCategoriesBatch, type CategoryBatchRow } from "@/lib/actions/categories";
+import { updateCategory, deleteCategory, createCategoriesBatch, type CategoryBatchRow } from "@/lib/client-actions/categories";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 
@@ -56,7 +57,7 @@ export function CategoryEditForm({
     <form action={action} className="flex flex-col gap-4">
       <Fields defaults={defaults} parentOptions={parentOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { InputHTMLAttributes, KeyboardEvent } from "react";
 
 export type ComboOption = { id: string; name: string };
@@ -36,7 +36,7 @@ export function ComboBox({
   const listId = useId();
 
   const q = value.trim().toLowerCase();
-  const filtered = q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options;
+  const filtered = useMemo(() => !open ? [] : q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options, [open, q, options]);
 
   function place() {
     const r = inputRef.current?.getBoundingClientRect();

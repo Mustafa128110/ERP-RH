@@ -26,8 +26,8 @@ export function OfflineNotice() {
       role="status"
       className="border-b border-amber-600 bg-amber-100 px-3 py-1.5 text-xs text-amber-900 print:hidden"
     >
-      <span className="font-semibold">Offline</span> — you can keep working. A save you start now waits and is
-      sent automatically when the connection returns; keep this tab open until it does.
+      <span className="font-semibold">Offline</span> — work marked “Saved on this device” is kept in this browser
+      and retries when the connection returns. Keep the app open to sync, or reopen it later with the same account.
     </div>
   );
 }

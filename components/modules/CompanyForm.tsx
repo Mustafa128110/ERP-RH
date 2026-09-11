@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
-import { updateCompany, deleteCompany, createCompaniesBatch, type CompanyBatchRow } from "@/lib/actions/companies";
+import { updateCompany, deleteCompany, createCompaniesBatch, type CompanyBatchRow } from "@/lib/client-actions/companies";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { optimistically } from "@/lib/optimistic-records";
@@ -73,7 +74,7 @@ export function CompanyEditForm({
     <form action={action} className="flex flex-col gap-4">
       <Fields defaults={defaults} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button
         type="submit"
         disabled={pending}

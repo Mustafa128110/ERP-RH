@@ -10,7 +10,7 @@ import {
   type ProductBatchRow,
   type ProductEditData,
   type ProductEditRow,
-} from "@/lib/actions/products";
+} from "@/lib/client-actions/products";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { Dialog } from "@/components/ui/Dialog";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";

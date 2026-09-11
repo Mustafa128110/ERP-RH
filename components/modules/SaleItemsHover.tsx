@@ -1,6 +1,6 @@
 "use client";
 
-import type { SaleItemRow } from "@/lib/actions/sales";
+import type { SaleItemRow } from "@/lib/client-actions/sales";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { qty } from "@/lib/format";
 

@@ -23,7 +23,7 @@ import {
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
-import { CACHE, getAvailableCheques, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
+import { CACHE, getAvailableCheques, getSaleFormOptions, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalance, SettlementScopeError, type SettlementType } from "@/lib/actions/settlement";
 import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
@@ -73,6 +73,7 @@ export interface SalesFilters {
   // documents.sale_type — counter / balochistan / shopify. Anything that isn't
   // one of them is ignored rather than returning nothing.
   saleType?: string;
+  status?: string;
 }
 
 // Filtering in SQL rather than over the returned array: the lines query is driven
@@ -86,6 +87,9 @@ export async function listSales(filters: SalesFilters = {}) {
     filters.from ? gte(documents.documentDate, filters.from) : undefined,
     filters.to ? lte(documents.documentDate, filters.to) : undefined,
     filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : undefined,
+    filters.customer ? ilike(contacts.displayName, `%${filters.customer}%`) : undefined,
+    filters.status === "outstanding" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} > ${documents.paidAmount}`) : undefined,
+    filters.status === "paid" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} <= ${documents.paidAmount}`) : undefined,
   );
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
@@ -117,14 +121,11 @@ export async function listSales(filters: SalesFilters = {}) {
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(companies, eq(companies.id, documents.companyId))
       .leftJoin(contacts, eq(contacts.id, documents.contactId))
-      // The name filter lives here rather than in `scope`: the lines query below
-      // doesn't join contacts, and it doesn't need to — extra lines for filtered
-      // out sales are simply never looked up.
+      // Header and line queries share exactly the same filters.
       .where(
         and(
           eq(documentTypes.code, "SALES_INVOICE"),
           scope,
-          filters.customer ? ilike(contacts.displayName, `%${filters.customer}%`) : undefined,
         ),
       )
       // Newest first. createdAt breaks the tie because a day's sales all carry the
@@ -143,6 +144,7 @@ export async function listSales(filters: SalesFilters = {}) {
       })
       .from(documentLines)
       .innerJoin(documents, eq(documents.id, documentLines.documentId))
+      .leftJoin(contacts, eq(contacts.id, documents.contactId))
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
@@ -212,6 +214,11 @@ export async function getCustomerOutstanding(contactId: string, excludeSaleId?: 
     );
 
   return Math.max(0, round1(Number(row?.owed ?? 0)));
+}
+
+export async function getSaleEditorOptions(documentId: string) {
+  const [detail, options] = await Promise.all([getSale(documentId), getSaleFormOptions(documentId)]);
+  return detail ? { detail, options } : null;
 }
 
 export async function getSale(documentId: string) {

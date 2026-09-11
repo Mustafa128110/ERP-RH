@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState } from "react";
-import { saveSettings } from "@/lib/actions/settings";
+import { saveSettings } from "@/lib/client-actions/settings";
 import type { SettingDef } from "@/lib/setting-constants";
 import { errorTextClass, inputClass, labelClass, labelTextClass, submitClass, successTextClass } from "@/components/ui/form-styles";
 
@@ -53,7 +54,7 @@ export function SettingsForm({
       ))}
 
       {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p role="status" aria-live="polite" className={successTextClass}>Saved.</p>}
+      {state?.success && <p role="status" aria-live="polite" className={successTextClass}>{saveStatus(state)}</p>}
 
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save Settings"}

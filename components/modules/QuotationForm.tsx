@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createQuotation, updateQuotation, deleteQuotation, type QuotationLine } from "@/lib/actions/quotations";
+import { createQuotation, updateQuotation, deleteQuotation, type QuotationLine } from "@/lib/client-actions/quotations";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, submitClass, deleteButtonClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
@@ -157,12 +157,8 @@ export function QuotationForm({
     },
   });
 
-  const { enqueue, online } = useSync();
+  const { online } = useSync();
 
-  // Set when "Queue for later" could not be written to local storage — the
-  // quotation stays on screen (and in its draft) instead of the queue silently
-  // failing to take it.
-  const [queueError, setQueueError] = useState<string | null>(null);
 
   // One id per open form: sent with every submit, claimed by the server inside
   // the same transaction as the quotation, so a replayed submit can't post twice.
@@ -186,7 +182,7 @@ export function QuotationForm({
   useEffect(() => {
     if (state?.success) {
       // Saved — the local copy has nothing left to protect.
-      clearDraft(quotationDraftKey);
+      if (!isEdit) clearDraft(quotationDraftKey);
       if (onDone) onDone();
       else router.push("/sales/quotations");
     }
@@ -258,10 +254,7 @@ export function QuotationForm({
   // letting someone retype it and be told no at the end.
   const locked = lines.some((l) => Number(l.convertedQuantity) > 0);
 
-  // Queue for later: serialise exactly what the hidden inputs send, so the sync
-  // engine can rebuild the same FormData createQuotation reads. The queue mints
-  // its own stable operation id; the draft is cleared because the work now lives
-  // in the queue, not on screen.
+  // Save uses the same durable queue online and offline.
   const linesJson = JSON.stringify(
     filled.map((l) => ({
       itemId: l.itemId,
@@ -272,39 +265,9 @@ export function QuotationForm({
       unitPrice: l.unitPrice || "0",
     })),
   );
-  const queueQuotation = () => {
-    const result = enqueue(
-      "quotation",
-      `Quotation · ${money(grandTotal)}${contactText ? ` for ${contactText}` : ""}`,
-      {
-        companyId,
-        contactId,
-        contactName: contactId ? "" : contactText,
-        documentDate,
-        validUntil,
-        discountTotal: String(discountAmount),
-        taxId,
-        shippingTotal: String(shippingAmount),
-        linesJson,
-      },
-    );
-    // A queue that could not be written leaves the form exactly as it is: the
-    // draft stays (it is the only copy), nothing navigates away, and the user
-    // is told the work is not stored safely.
-    if (!result?.persisted) {
-      setQueueError(
-        "This browser could not save a copy of this quotation (storage is full or blocked). Keep this page open — it is not stored safely yet.",
-      );
-      return;
-    }
-    setQueueError(null);
-    clearDraft(quotationDraftKey);
-    if (onDone) onDone();
-    else router.push("/sales/quotations");
-  };
 
   return (
-    <form action={action} className="document-form flex h-full min-h-0 flex-col gap-4">
+    <form data-command-record={quotationId} data-draft-key={isEdit ? undefined : quotationDraftKey} action={action} className="document-form flex h-full min-h-0 flex-col gap-4">
       <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="companyId" value={companyId} />
       <input type="hidden" name="contactId" value={contactId} />
@@ -319,6 +282,7 @@ export function QuotationForm({
       {/* An unfinished quotation from before — a crash, a closed tab, a reload.
           Offered, never applied on its own. */}
       {offerDraft && <DraftBanner noun="quotation" onRestore={restoreDraft} onDiscard={discardDraft} />}
+      <fieldset disabled={offerDraft} className="contents">
 
       {locked && (
         <p className="shrink-0 rounded border border-warning/40 bg-warning-tint p-3 text-sm text-ink">
@@ -494,33 +458,8 @@ export function QuotationForm({
 
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
-            {queueError && <p role="alert" className={errorTextClass}>{queueError}</p>}
             {isEdit && !locked && <DeleteQuotationButton quotationId={quotationId} />}
-            {/* New quotations only: queueing an edit would send a copy of a
-                saved document, and a sync replay of that is a second quotation
-                nobody asked for. */}
-            {!isEdit && (
-              <button
-                type="button"
-                onClick={queueQuotation}
-                // `pending` is in here for a reason beyond tidiness. With
-                // experimental.useOffline a Create pressed offline does not fail
-                // — Next holds the request and re-runs it when the connection
-                // returns — so queueing on top of it would send this quotation
-                // twice under two different operation ids, which is the one case
-                // the duplicate guard cannot catch.
-                disabled={pending || locked || filled.length === 0}
-                className="h-11 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"
-                title={
-                  pending
-                    ? "A save is already in flight — it lands on its own when the connection returns"
-                    : "Keep this quotation locally and send it when the connection returns"
-                }
-              >
-                Queue for later
-              </button>
-            )}
-            <button type="submit" disabled={pending || locked} className={submitClass}>
+            <button type="submit" disabled={pending || locked || filled.length === 0} className={submitClass}>
               {pending
                 ? online
                   ? "Saving…"
@@ -532,7 +471,8 @@ export function QuotationForm({
           </div>
         </div>
       </div>
-    </form>
+    </fieldset>
+</form>
   );
 }
 

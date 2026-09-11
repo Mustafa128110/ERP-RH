@@ -10,7 +10,7 @@ import { Icon } from "@/components/ui/Icon";
 import { formatDate, money } from "@/lib/format";
 import { statusColumn, type ColumnDef, type Row } from "@/lib/table";
 import { useCachedOptions } from "@/lib/client-cache";
-import type { QuotationListRow } from "@/lib/actions/quotations";
+import type { QuotationListRow } from "@/lib/client-actions/quotations";
 import { QuotationForm } from "@/components/modules/QuotationForm";
 import type { UnitConversionOption } from "@/lib/unit-conversion";
 

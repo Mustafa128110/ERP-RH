@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { listContactMergeCandidates, mergeContacts, type ContactMergeCandidate } from "@/lib/actions/contacts";
+import { listContactMergeCandidates, mergeContacts, type ContactMergeCandidate } from "@/lib/client-actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
 import { inputClass, labelClass, labelTextClass, submitClass, errorTextClass } from "@/components/ui/form-styles";
 

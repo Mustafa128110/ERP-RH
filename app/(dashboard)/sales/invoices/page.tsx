@@ -1,5 +1,4 @@
 import { listSales } from "@/lib/actions/sales";
-import { getSaleFormOptions } from "@/lib/queries/lookups";
 import { InvoiceManager } from "@/components/modules/InvoiceManager";
 import { formatDate, money } from "@/lib/format";
 import { saleTypeLabel } from "@/lib/sale-constants";
@@ -26,7 +25,7 @@ export default async function Page({
   searchParams: Promise<{ customer?: string; status?: string; saleType?: string; from?: string; to?: string }>;
 }) {
   const { status, ...listFilters } = await searchParams;
-  const [sales, formOptions] = await Promise.all([listSales(listFilters), getSaleFormOptions()]);
+  const sales = await listSales({ ...listFilters, status });
   const filtered = Boolean(status) || Object.values(listFilters).some(Boolean);
 
   const invoices = sales
@@ -87,7 +86,6 @@ export default async function Page({
       count={invoices.length}
       outstanding={outstanding}
       filtered={filtered}
-      formOptions={formOptions}
       itemsBySaleId={itemsBySaleId}
     />
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { clearDraft, draftSnapshot, noDraft, saveDraft, subscribeDraft } from "@/lib/draft";
+import { clearDraft, draftSnapshot, noDraft, saveDraft, subscribeDraft, readDraft, resetDraftSnapshot } from "@/lib/draft";
 
 // Draft protection for any form someone spends real time typing into, in one
 // place. SaleForm and StockPurchaseForm each carried a copy of this — the same
@@ -35,13 +35,16 @@ export function useDraft<T>(key: string, opts: {
   // Write the draft's fields into the form's state. Runs only when the user
   // clicks Restore.
   apply: (draft: T) => void;
-}): { offerDraft: boolean; restore: () => void; discard: () => void } {
+}): { offerDraft: boolean; restore: () => void; discard: () => void; storageError: boolean } {
   const { state, enabled, apply } = opts;
 
   // The draft as it stood when this form opened — lib/draft.ts explains why
   // it's read through a store rather than in an effect or an initialiser.
   const savedDraft = useSyncExternalStore(subscribeDraft, () => draftSnapshot<T>(key), noDraft);
   const [dismissed, setDismissed] = useState(false);
+  const [storageError, setStorageError] = useState(false);
+  const lastSaved = useRef<string | null>(null);
+  const recovery = useRef<{ key: string; waiting: boolean } | null>(null);
   const offerDraft = enabled && !dismissed && !!savedDraft && (opts.hasContent ? opts.hasContent(savedDraft) : true);
 
   function restore() {
@@ -65,15 +68,29 @@ export function useDraft<T>(key: string, opts: {
   // a debounce would be code that exists to save microseconds.
   useEffect(() => {
     if (!enabled) return;
+    // The hydration frame can still see the server's null snapshot. Read the
+    // stored offer here too so that frame cannot overwrite it with blank input.
+    if (recovery.current?.key !== key) {
+      const original = readDraft<T>(key);
+      recovery.current = { key, waiting: original !== null && (!opts.hasContent || opts.hasContent(original)) };
+      lastSaved.current = null;
+    }
+    if (!dismissed && recovery.current.waiting) return;
     if (suppressNextSave.current) {
       suppressNextSave.current = false;
       return;
     }
-    saveDraft(key, state);
+    const serialized = JSON.stringify(state);
+    if (lastSaved.current === serialized) return;
+    const saved = saveDraft(key, state);
+    if (saved) lastSaved.current = serialized;
+    queueMicrotask(() => setStorageError(!saved));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, state]);
+  }, [enabled, state, dismissed, key]);
 
-  return { offerDraft, restore, discard };
+  useEffect(() => () => resetDraftSnapshot(key), [key]);
+
+  return { offerDraft, restore, discard, storageError };
 }
 
 // The banner every draft-offering form renders, so the offer reads and behaves
@@ -89,7 +106,7 @@ export function DraftBanner({
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-brass-600 bg-brass-100 px-3 py-2 text-sm text-ink">
-      <span>You have an unsaved {noun} from earlier.</span>
+      <span>You have an unsaved {noun} from earlier. Restore or discard it before starting another.</span>
       <span className="flex items-center gap-3">
         <button type="button" onClick={onRestore} className="font-semibold text-navy-800 hover:underline">
           Restore it

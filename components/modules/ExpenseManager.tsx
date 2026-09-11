@@ -10,7 +10,7 @@ import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
 import { ExpenseEditForm, DeleteExpenseButton, ExpenseBatchAddDialog, type BankOption, type CashOption, type ChequeOption } from "@/components/modules/ExpenseForm";
-import { listChequesForExpenses } from "@/lib/actions/expenses";
+import { listChequesForExpenses } from "@/lib/client-actions/expenses";
 import { formatDate, money } from "@/lib/format";
 import { groupSameDay, type DayGroup } from "@/lib/day-groups";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";

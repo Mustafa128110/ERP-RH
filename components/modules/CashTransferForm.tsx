@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { createCashTransfer, deleteCashTransfer } from "@/lib/actions/transfers";
+import { createCashTransfer, deleteCashTransfer } from "@/lib/client-actions/transfers";
 import { Dialog } from "@/components/ui/Dialog";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";

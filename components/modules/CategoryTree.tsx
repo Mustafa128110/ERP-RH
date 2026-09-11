@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { CategoryNode } from "@/lib/actions/categories";
+import type { CategoryNode } from "@/lib/client-actions/categories";
 
 type Handlers = {
   onSelect: (node: CategoryNode) => void;

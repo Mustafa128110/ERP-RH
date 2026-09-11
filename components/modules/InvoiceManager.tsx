@@ -2,14 +2,14 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { getInvoice, getSale, listChequesForSales } from "@/lib/actions/sales";
+import { getInvoice, getSaleEditorOptions } from "@/lib/client-actions/sales";
 import { SaleFormPage } from "@/components/modules/SaleForm";
 import { DataTable } from "@/components/ui/DataTable";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { money, todayISO } from "@/lib/format";
-import { cancelSalesReturn, createSalesReturn, getReturnableSale } from "@/lib/actions/returns";
+import { cancelSalesReturn, createSalesReturn, getReturnableSale } from "@/lib/client-actions/returns";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
 import { downloadInvoicePng } from "@/lib/invoice-png";
 import { useExportShare } from "@/components/ui/ExportShareSheet";
@@ -22,8 +22,7 @@ type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
 
-// Options the edit form needs. Loaded once with the page rather than on every
-// popup — they're the same lists for every invoice.
+// Options are loaded on edit intent, keeping them out of the invoice list payload.
 export type SaleFormOptions = {
   companyOptions: Option[];
   customerOptions: ScopedOption[];
@@ -37,8 +36,8 @@ export type SaleFormOptions = {
   taxSettings: Record<string, Record<string, string>>;
 };
 
-type SaleDetail = NonNullable<Awaited<ReturnType<typeof getSale>>>;
-type ChequeOptions = Awaited<ReturnType<typeof listChequesForSales>>;
+type SaleEditor = NonNullable<Awaited<ReturnType<typeof getSaleEditorOptions>>>;
+type SaleDetail = SaleEditor["detail"];
 type ReturnableSale = NonNullable<Awaited<ReturnType<typeof getReturnableSale>>>;
 
 // The invoice number column lives in the component — it needs the line items,
@@ -70,20 +69,19 @@ export function InvoiceManager({
   count,
   outstanding,
   filtered,
-  formOptions,
   itemsBySaleId,
 }: {
   rows: Row[];
   count: number;
   outstanding: number;
   filtered: boolean;
-  formOptions: SaleFormOptions;
   itemsBySaleId?: Map<string, InvoiceItem[]>;
 }) {
   const { presentExport } = useExportShare();
   const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<SaleDetail | null>(null);
-  const [chequeOptions, setChequeOptions] = useState(formOptions.chequeOptions);
+  const [formOptions, setFormOptions] = useState<SaleFormOptions | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [pdfId, setPdfId] = useState<string | null>(null);
   const [pngId, setPngId] = useState<string | null>(null);
@@ -107,15 +105,15 @@ export function InvoiceManager({
   // Details already fetched, keyed by sale id. Opening a row costs two round
   // trips to a database 170ms away; a pointer resting on the row is enough notice
   // to have made them already. Kept on a ref so warming never renders.
-  const warmed = useRef(new Map<string, { detail: SaleDetail; cheques: ChequeOptions }>());
+  const warmed = useRef(new Map<string, SaleEditor & { fetchedAt: number }>());
   const warming = useRef(new Set<string>());
 
   async function warm(id: string) {
-    if (warmed.current.has(id) || warming.current.has(id)) return;
+    if (Date.now() - (warmed.current.get(id)?.fetchedAt ?? 0) < 30_000 || warming.current.has(id)) return;
     warming.current.add(id);
     try {
-      const [detail, cheques] = await Promise.all([getSale(id), listChequesForSales(id)]);
-      if (detail) warmed.current.set(id, { detail, cheques });
+      const data = await getSaleEditorOptions(id);
+      if (data) warmed.current.set(id, { ...data, fetchedAt: Date.now() });
     } catch {
       // A failed warm is not a failure — the click below will ask again, and if
       // the network is genuinely gone that is where it belongs to be reported.
@@ -137,21 +135,18 @@ export function InvoiceManager({
   }
 
   async function openEdit(id: string) {
-    const ready = warmed.current.get(id);
-    if (ready) {
-      setChequeOptions(ready.cheques);
-      setEditing(ready.detail);
-      return;
-    }
+    setReadError(null);
     setLoadingId(id);
-    const [detail, cheques] = await Promise.all([getSale(id), listChequesForSales(id)]);
-    setLoadingId(null);
-    if (!detail) return;
-    // Worth keeping even though this open is already paid for: the same row is
-    // often opened twice in a row while a correction is being worked out.
-    warmed.current.set(id, { detail, cheques });
-    setChequeOptions(cheques);
-    setEditing(detail);
+    try {
+      const warm = warmed.current.get(id);
+      const ready = warm && Date.now() - warm.fetchedAt < 30_000 ? warm : await getSaleEditorOptions(id);
+      if (!ready) { setReadError("This invoice is no longer available."); return; }
+      warmed.current.set(id, { ...ready, fetchedAt: Date.now() });
+      setFormOptions(ready.options);
+      setEditing(ready.detail);
+    } catch (error) {
+      setReadError(error instanceof Error ? error.message : "Couldn't open this invoice. Try again.");
+    } finally { setLoadingId(null); }
   }
 
   // The list rows carry only what the table shows, so the line items and both
@@ -345,6 +340,7 @@ export function InvoiceManager({
         storageKey="sales-invoices"
       />
 
+      {readError && <p role="alert" className="shrink-0 text-sm text-error">{readError}</p>}
       {loadingId && <p className="shrink-0 text-sm text-steel">Opening…</p>}
 
       {imaging && <InvoiceImageRenderer invoice={imaging} onReady={(node) => void captureImage(node)} />}
@@ -369,7 +365,7 @@ export function InvoiceManager({
         </Dialog>
       )}
 
-      {editing && (
+      {editing && formOptions && (
         // Hidden rather than closed while this sale's write is in the air. The
         // server may still have something to say — a stock shortfall, a question
         // about receipts to release — and a hidden popup keeps every typed line
@@ -387,7 +383,7 @@ export function InvoiceManager({
               saleId={editing.id}
               defaults={editing}
               {...formOptions}
-              chequeOptions={chequeOptions}
+              chequeOptions={formOptions.chequeOptions}
               onDone={close}
               onSaving={() => {
                 forgetWarm(editing.id);

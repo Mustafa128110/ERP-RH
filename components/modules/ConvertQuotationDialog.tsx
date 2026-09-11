@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { isQueuedSave } from "@/lib/save-status";
 import { useRouter } from "next/navigation";
-import { convertQuotation, type QuotationLine } from "@/lib/actions/quotations";
+import { convertQuotation, type QuotationLine } from "@/lib/client-actions/quotations";
 import { Dialog } from "@/components/ui/Dialog";
 import { DateField } from "@/components/ui/DateField";
 import { errorTextClass, labelClass, labelTextClass, primaryActionClass, secondaryActionClass } from "@/components/ui/form-styles";
@@ -36,9 +37,10 @@ export function ConvertQuotationDialog({
   const [state, action, pending] = useActionState(convertQuotation.bind(null, quotationId), undefined);
 
   useEffect(() => {
+    if (isQueuedSave(state)) { onClose(); return; }
     if (state?.invoiceId) router.push(`/sales/invoices/${state.invoiceId}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.invoiceId]);
+  }, [state]);
 
   const chosen = Object.entries(take).filter(([i, v]) => Number(v) > 0 && remaining[Number(i)] > 0);
   const total = chosen.reduce((sum, [i, v]) => sum + Number(v) * Number(lines[Number(i)].unitPrice), 0);

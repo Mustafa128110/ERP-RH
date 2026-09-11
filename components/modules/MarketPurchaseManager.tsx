@@ -1,8 +1,9 @@
 "use client";
+import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cancelMarketPurchase, confirmMarketPurchases } from "@/lib/actions/market-purchases";
+import { cancelMarketPurchase, confirmMarketPurchases } from "@/lib/client-actions/market-purchases";
 import { DateField } from "@/components/ui/DateField";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -142,7 +143,7 @@ export function MarketPurchaseManager({
             <button type="submit" disabled={confirming || selected.length === 0 || payload.some((row) => !(Number(row.unitCost) > 0))} className={primaryActionClass}>{confirming ? "Confirming…" : "Confirm Purchase"}</button>
           </div>
           {state?.error && <p className={`mt-3 ${errorTextClass}`}>{state.error}</p>}
-          {state?.success && <p className={`mt-3 ${successTextClass}`}>Market purchase posted, stock balanced, and Item Purchase expense recorded.</p>}
+          {state?.success && <p className={`mt-3 ${successTextClass}`}>{isQueuedSave(state) ? saveStatus(state) : "Market purchase posted, stock balanced, and Item Purchase expense recorded."}</p>}
         </form>
       )}
 

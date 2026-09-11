@@ -1,12 +1,9 @@
 import "server-only";
 import { getSession } from "@/lib/auth/session";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
-import { createExpense } from "@/lib/actions/expenses";
 import { listLedgerBalances } from "@/lib/actions/ledger";
-import { createPayment } from "@/lib/actions/payments";
-import { createStockPurchase } from "@/lib/actions/purchases";
 import { runReport } from "@/lib/actions/reports";
-import { createSale, listSales } from "@/lib/actions/sales";
+import { listSales } from "@/lib/actions/sales";
 import { listStockLevels } from "@/lib/actions/stock";
 import { money, qty, todayISO } from "@/lib/format";
 import { isReportSlug, REPORT_TYPES, type ReportSlug } from "@/lib/report-constants";
@@ -16,6 +13,10 @@ import { getBankAccountOptions, getCashAccountOptions, getCompanies, getContactO
 import { bestMatches, chooseFrom, rankedMatches } from "./match";
 import type { PendingDraft } from "./state";
 import { OPERATION_ID_FIELD } from "@/lib/operation-constants";
+import { DUPLICATE_OPERATION_MESSAGE } from "@/lib/operation-constants";
+import { createHash } from "node:crypto";
+import { executeCommand } from "@/lib/command-executor";
+import { encodeArgument } from "@/lib/command-protocol";
 
 export type ToolResult = { reply: string } | { draft: { tool: string; fields: Record<string, string>; confirmation: string } };
 export type ToolArgs = Record<string, unknown>;
@@ -262,27 +263,33 @@ export async function runTool(name: string, args: ToolArgs): Promise<ToolResult>
 // Posting remains inside the same guarded Server Actions as the web forms. The
 // WhatsApp layer supplies only an already-reviewed FormData and the idempotency
 // key tied to the inbound provider message.
-export async function commitDraft(draft: PendingDraft): Promise<string> {
+export async function commitDraft(draft: PendingDraft): Promise<{ reply: string; outcome: "confirmed" | "refused" | "unknown" }> {
   const fields = { ...draft.fields, [OPERATION_ID_FIELD]: draft.operationId };
-  let result: { error?: string; success?: boolean };
+  let action: string;
+  let args: unknown[];
   switch (draft.tool) {
     case "create_sale":
-      result = await createSale(undefined, form(fields));
+      action = "sales.createSale"; args = [null, form(fields)];
       break;
     case "record_payment_received":
-      result = await createPayment("received", undefined, form(fields));
+      action = "payments.createPayment"; args = ["received", null, form(fields)];
       break;
     case "record_payment_made":
-      result = await createPayment("made", undefined, form(fields));
+      action = "payments.createPayment"; args = ["made", null, form(fields)];
       break;
     case "record_expense":
-      result = await createExpense(undefined, form(fields));
+      action = "expenses.createExpense"; args = [null, form(fields)];
       break;
     case "create_stock_purchase":
-      result = await createStockPurchase(undefined, form(fields));
+      action = "purchases.createStockPurchase"; args = [null, form(fields)];
       break;
     default:
-      return "That draft is no longer supported. Please start again.";
+      return { reply: "That draft is no longer supported. Please start again.", outcome: "refused" };
   }
-  return result.error ? `Not saved: ${result.error}` : "Saved successfully.";
+  const hex = createHash("sha256").update(draft.operationId).digest("hex").slice(0, 32);
+  const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  const reply = await executeCommand({ id, userId: draft.userId, action, args: args.map(encodeArgument), path: "/whatsapp", label: draft.confirmation,
+    version: 1, createdAt: Date.now(), updatedAt: Date.now(), status: "pending", attempts: 0 }, draft.userId);
+  if (reply.result.error === DUPLICATE_OPERATION_MESSAGE) return { reply: "This operation was already saved.", outcome: "confirmed" };
+  return { reply: reply.result.error || "Saved successfully.", outcome: reply.outcome };
 }

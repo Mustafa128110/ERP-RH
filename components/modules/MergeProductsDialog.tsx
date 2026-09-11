@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { listMergeCandidates, mergeProducts, type MergeCandidate } from "@/lib/actions/products";
+import { listMergeCandidates, mergeProducts, type MergeCandidate } from "@/lib/client-actions/products";
 import { Dialog } from "@/components/ui/Dialog";
 import { inputClass, labelClass, labelTextClass, submitClass, errorTextClass } from "@/components/ui/form-styles";
 

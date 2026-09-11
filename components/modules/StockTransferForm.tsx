@@ -1,9 +1,10 @@
 "use client";
+import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createStockTransfer, updateStockTransfer } from "@/lib/actions/stock-transfers";
+import { createStockTransfer, updateStockTransfer } from "@/lib/client-actions/stock-transfers";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { DateField } from "@/components/ui/DateField";
 import { todayISO } from "@/lib/format";
@@ -152,8 +153,8 @@ export function StockTransferFormPage({
     }
     if (result?.success) {
       // Saved — the local copy has nothing left to protect.
-      clearDraft(transferDraftKey);
-      // Spent id: the server holds the claim for a day, so reusing it would have
+      if (!isEdit) clearDraft(transferDraftKey);
+      // Spent id: the server keeps the claim permanently, so reusing it would have
       // the next transfer refused as a replay of this one — "already recorded",
       // nothing written. Safe to replace only here, where the response came back;
       // a failure keeps it so a lost response can't post the transfer twice.
@@ -183,7 +184,7 @@ export function StockTransferFormPage({
   }
 
   return (
-    <form ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-command-record={transferId} data-draft-key={isEdit ? undefined : transferDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -194,6 +195,7 @@ export function StockTransferFormPage({
       {/* An unfinished transfer from before — a crash, a closed tab, a reload.
           Offered, never applied on its own. */}
       {offerDraft && <DraftBanner noun="transfer" onRestore={restoreDraft} onDiscard={discardDraft} />}
+      <fieldset disabled={offerDraft} className="contents">
 
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Transfer</span>
@@ -326,7 +328,7 @@ export function StockTransferFormPage({
 
       {state?.error && <p role="alert" className={errorTextClass}>{state.error}</p>}
       {state?.success &&
-        (isEdit ? (
+        (isQueuedSave(state) ? <p className={successTextClass}>{saveStatus(state)}</p> : isEdit ? (
           <p className={successTextClass}>Saved — stock re-posted to match.</p>
         ) : (
           <p className={successTextClass}>
@@ -358,6 +360,7 @@ export function StockTransferFormPage({
           </button>
         )}
       </div>
-    </form>
+    </fieldset>
+</form>
   );
 }

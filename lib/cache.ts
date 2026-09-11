@@ -1,5 +1,7 @@
 import "server-only";
 import { Redis } from "@upstash/redis";
+import { encodeCacheValue, decodeCacheValue } from "@/lib/cache-codec";
+import { deferUntilCommit, commandContext } from "@/lib/db/command-context";
 
 // L1 coalesces duplicate work in one process.  Upstash is only the shared L2:
 // a quota, network, or service failure must make reads slower, never stale or
@@ -8,7 +10,7 @@ import { Redis } from "@upstash/redis";
 type Entry = { expires: number; value: Promise<unknown> };
 type CacheGlobals = {
   appCache?: Map<string, Entry>;
-  upstashClient?: Redis | null;
+  upstashRawClientV2?: Redis | null;
   circuitUntil?: number;
   epochRequired?: boolean;
 };
@@ -16,7 +18,7 @@ type CacheGlobals = {
 const globalForCache = globalThis as unknown as CacheGlobals;
 const store = (globalForCache.appCache ??= new Map<string, Entry>());
 const MAX_ENTRIES = 1000;
-const NAMESPACE = "erp:cache:v1";
+const NAMESPACE = "erp:cache:v2";
 const CIRCUIT_MS = 60_000;
 
 export const MINUTE = 60_000;
@@ -37,8 +39,8 @@ function client(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
   const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
   if (!url || !token) return null;
-  if (globalForCache.upstashClient === undefined) globalForCache.upstashClient = new Redis({ url, token });
-  return globalForCache.upstashClient;
+  if (globalForCache.upstashRawClientV2 === undefined) globalForCache.upstashRawClientV2 = new Redis({ url, token, automaticDeserialization: false });
+  return globalForCache.upstashRawClientV2;
 }
 
 function unavailable() {
@@ -80,6 +82,7 @@ async function versionsFor(redis: Redis, key: string) {
 }
 
 export async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  if (commandContext.getStore()) return load();
   const redis = client();
   if (!redis) return process.env.NODE_ENV === "production" ? load() : localCached(key, ttlMs, load);
   const versions = await shared((ready) => versionsFor(ready, key));
@@ -88,10 +91,10 @@ export async function cached<T>(key: string, ttlMs: number, load: () => Promise<
   return localCached(sharedKey, ttlMs, async () => {
     const serialized = await shared((ready) => ready.get<string>(sharedKey));
     if (serialized !== null && serialized !== undefined) {
-      try { return JSON.parse(serialized) as T; } catch { /* corrupted cache is a miss */ }
+      try { return decodeCacheValue<T>(serialized); } catch { /* corrupted cache is a miss */ }
     }
     const value = await load();
-    await shared((ready) => ready.set(sharedKey, JSON.stringify(value), { px: ttlMs }));
+    await shared((ready) => ready.set(sharedKey, encodeCacheValue(value), { px: ttlMs }));
     return value;
   });
 }
@@ -104,6 +107,7 @@ function clearLocal(keys: string[]) {
 }
 
 export async function invalidate(...keys: string[]) {
+  if (deferUntilCommit(() => invalidate(...keys))) return;
   clearLocal(keys);
   if (keys.length === 0) return;
   const result = await shared((ready) => Promise.all(keys.map((key) => ready.incr(versionKey(key)))));
@@ -114,6 +118,7 @@ export async function invalidate(...keys: string[]) {
 }
 
 export async function invalidateAll() {
+  if (deferUntilCommit(() => invalidateAll())) return;
   store.clear();
   await shared((ready) => ready.incr(versionKey("all")));
 }

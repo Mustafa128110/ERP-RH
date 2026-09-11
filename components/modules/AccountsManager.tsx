@@ -23,7 +23,7 @@ import {
   type ChequeValues,
 } from "@/components/modules/AccountForms";
 import { CashTransferDialog, DeleteCashTransferButton, transferAccounts } from "@/components/modules/CashTransferForm";
-import type { CashTransferRow } from "@/lib/actions/transfers";
+import type { CashTransferRow } from "@/lib/client-actions/transfers";
 import { formatDate } from "@/lib/format";
 import { patchFromFormData } from "@/lib/optimistic-records";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";

@@ -3,8 +3,8 @@
 import { useState, useTransition } from "react";
 import { Dialog } from "@/components/ui/Dialog";
 import { errorTextClass, inputClass, labelClass, labelTextClass, submitClass } from "@/components/ui/form-styles";
-import { assignBaseUnitToProducts } from "@/lib/actions/products";
-import { assignUnitConversionRuleToItems } from "@/lib/actions/unit-conversions";
+import { assignBaseUnitToProducts } from "@/lib/client-actions/products";
+import { assignUnitConversionRuleToItems } from "@/lib/client-actions/unit-conversions";
 
 type Option = { id: string; name: string };
 

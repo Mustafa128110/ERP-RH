@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { createRole, updateRole, deleteRole, type PermissionCatalog } from "@/lib/actions/roles";
+import { createRole, updateRole, deleteRole, type PermissionCatalog } from "@/lib/client-actions/roles";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 
 // The role editor: a name plus the permission grid — one row per module, one
@@ -211,7 +212,7 @@ export function RoleEditForm({
         onToggleAction={toggleAction}
       />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>
         {pending ? "Saving…" : "Save"}
       </button>

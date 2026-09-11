@@ -298,9 +298,9 @@ export function cancelOutboxEntry(store: OutboxStore, id: string): CancelledEntr
   const entries = store.list();
   const entry = entries.find((e) => e.id === id);
   if (!entry) return null;
-  store.save(entries.filter((e) => e.id !== id));
   const cancelled: CancelledEntry = { ...entry, cancelledAt: Date.now() };
-  store.saveCancelled([...store.listCancelled(), cancelled]);
+  if (!store.saveCancelled([...store.listCancelled().filter((e) => e.id !== id), cancelled])) return null;
+  if (!store.save(entries.filter((e) => e.id !== id))) return null;
   return cancelled;
 }
 
@@ -308,7 +308,6 @@ export function restoreCancelledOutbox(store: OutboxStore, id: string): OutboxEn
   const cancelled = store.listCancelled();
   const entry = cancelled.find((e) => e.id === id);
   if (!entry) return null;
-  store.saveCancelled(cancelled.filter((e) => e.id !== id));
   // Back into the live queue as a fresh pending attempt. The operation id is
   // REUSED on purpose: if the server already committed the original send (a
   // lost response), the replay is refused as a duplicate and the entry
@@ -324,7 +323,8 @@ export function restoreCancelledOutbox(store: OutboxStore, id: string): OutboxEn
     attempts: 0,
     status: "pending",
   };
-  store.save([...store.list(), restored]);
+  if (!store.save([...store.list().filter((e) => e.id !== id), restored])) return null;
+  if (!store.saveCancelled(cancelled.filter((e) => e.id !== id))) return null;
   return restored;
 }
 

@@ -1,7 +1,8 @@
 "use client";
+import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useState } from "react";
-import { createUnitConversion, deleteUnitConversion, setUnitConversionRuleItems, updateUnitConversion } from "@/lib/actions/unit-conversions";
+import { createUnitConversion, deleteUnitConversion, setUnitConversionRuleItems, updateUnitConversion } from "@/lib/client-actions/unit-conversions";
 import { UnitBatchAddDialog } from "@/components/modules/UnitForm";
 import { QuickAddSelect } from "@/components/ui/QuickAddSelect";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
@@ -70,7 +71,7 @@ export function UnitConversionEditForm({ conversionId, defaults, unitOptions, on
     <form action={action} className="flex flex-col gap-4">
       <RuleFields defaults={defaults} unitOptions={unitOptions} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
-      {state?.success && <p className={successTextClass}>Saved.</p>}
+      {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
       <button type="submit" disabled={pending} className={submitClass}>{pending ? "Saving…" : "Save rule"}</button>
     </form>
   );
