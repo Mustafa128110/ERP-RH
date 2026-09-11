@@ -1,4 +1,5 @@
 "use client";
+import { useClientUserId } from "@/lib/client-user";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
@@ -96,8 +97,10 @@ export function LocationBatchAddDialog({
   onDone: (created?: CreatedLocation[]) => void;
   initialRows?: number;
 }) {
+  const userId = useClientUserId();
   return (
     <BatchAddDialog<BatchRow, CreatedLocation>
+      draftKey={userId && initialRows !== 1 ? `batch:locations:${userId}` : undefined}
       title="Add Locations"
       onClose={onClose}
       onDone={onDone}

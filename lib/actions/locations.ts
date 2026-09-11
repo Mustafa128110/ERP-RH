@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { locations, locationTypeEnum } from "@/lib/db/schema";
@@ -15,7 +15,7 @@ const locationTypes = locationTypeEnum.enumValues;
 export async function listLocations() {
   const session = await getSession();
   requireGlobalPermission(session, "locations", "view");
-  return db.select().from(locations);
+  return db.select({ ...getTableColumns(locations), _revision: sql<string>`${locations}.xmin::text` }).from(locations);
 }
 
 function readLocationForm(formData: FormData) {

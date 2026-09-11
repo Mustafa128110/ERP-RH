@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { companies, userCompanyAccess } from "@/lib/db/schema";
@@ -33,8 +33,8 @@ export async function listCompanies() {
   // can never share a page-read entry. invalidateReads drops this on every write
   // that can touch it (the READS constant above).
   const [scope, where] = await Promise.all([getScopeCompanyIds(), companyInPermissionScope(companies.id, session, "companies")]);
-  return cachedPageRead(READ_DOMAIN.companies, `companies:${session.userId}:${scope.sort().join(",")}`, () =>
-    db.select().from(companies).where(where),
+  return cachedPageRead(READ_DOMAIN.companies, `companies:v2:${session.userId}:${scope.sort().join(",")}`, () =>
+    db.select({ ...getTableColumns(companies), _revision: sql<string>`${companies}.xmin::text` }).from(companies).where(where),
   );
 }
 

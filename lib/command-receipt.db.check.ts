@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { database, db } from "./db";
 import { commandContext } from "./db/command-context";
 import { withCommandReceipt, ReceiptConflict } from "./command-receipt";
+import { commandRevisionsMatch } from "./command-revisions";
 
 // Temporary tables shadow the production table names on this connection only.
 // The enclosing transaction is rolled back; no business records are touched.
@@ -41,6 +42,15 @@ async function main() {
       const [count] = await tx.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM command_receipts WHERE id = ${failing.id}::uuid`);
       assert.equal(count.n, 0, "a failed action cannot leave a committed receipt");
       await withCommandReceipt(tx, failing, actor, work);
+      await tx.execute(sql`CREATE TEMP TABLE revision_probe (id uuid PRIMARY KEY, name text) ON COMMIT DROP`);
+      const recordId = crypto.randomUUID();
+      await tx.execute(sql`INSERT INTO revision_probe VALUES (${recordId}::uuid, 'original')`);
+      const [base] = await tx.execute<{ revision: string }>(sql`SELECT xmin::text AS revision FROM revision_probe`);
+      const expected: [string, string][] = [[`revision_probe:${recordId}`, base.revision]];
+      assert.equal(await commandRevisionsMatch(tx, "revision_probe", expected), true);
+      await tx.transaction(async nested => { await nested.execute(sql`UPDATE revision_probe SET name = 'newer edit'`); });
+      assert.equal(await commandRevisionsMatch(tx, "revision_probe", expected), false, "stale master edits must be refused after another row version exists");
+      assert.equal(await commandRevisionsMatch(tx, "revision_probe", [[`revision_probe:${crypto.randomUUID()}`, base.revision]]), false, "deleted records cannot be silently recreated by an edit");
       console.log("Database receipt checks passed: canonical replay, payload/account isolation, nested action transactions, atomic rollback and retry");
       throw rollback;
     });

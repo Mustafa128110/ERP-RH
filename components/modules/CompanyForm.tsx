@@ -1,4 +1,5 @@
 "use client";
+import { useClientUserId } from "@/lib/client-user";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
@@ -98,8 +99,10 @@ type BatchRow = {
 const emptyBatchRow = (): BatchRow => ({ name: "", shortName: "", phone: "", email: "", taxNumber: "", address: "" });
 
 export function CompanyBatchAddDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const userId = useClientUserId();
   return (
     <BatchAddDialog<BatchRow>
+      draftKey={userId ? `batch:companies:${userId}` : undefined}
       title="Batch Add Companies"
       onClose={onClose}
       onDone={onDone}

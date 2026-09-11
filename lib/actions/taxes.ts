@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { taxes } from "@/lib/db/schema";
@@ -14,7 +14,7 @@ import { parseTaxRate } from "@/lib/tax-rate";
 export async function listTaxes() {
   const session = await getSession();
   requireGlobalPermission(session, "taxes", "view");
-  return db.select().from(taxes);
+  return db.select({ ...getTableColumns(taxes), _revision: sql<string>`${taxes}.xmin::text` }).from(taxes);
 }
 
 export async function getTax(taxId: string) {

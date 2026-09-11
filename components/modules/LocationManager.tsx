@@ -20,6 +20,7 @@ const columns: ColumnDef[] = [
 export function LocationManager({ locations }: { locations: Location[] }) {
   return (
     <RecordManager
+      commandDomain="locations"
       title="Warehouses & Locations"
       noun="location"
       records={locations}

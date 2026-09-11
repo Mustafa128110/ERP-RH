@@ -22,6 +22,7 @@ export function UnitManager({ units }: { units: Unit[] }) {
   return (
     <>
       <RecordManager
+        commandDomain="units"
         title="Units"
         noun="unit"
         records={units}

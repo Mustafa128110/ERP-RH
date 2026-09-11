@@ -7,6 +7,7 @@ import { decodeArgument, type SavedCommand, type CommandValue } from "@/lib/comm
 import { withCommandReceipt, ReceiptConflict } from "@/lib/command-receipt";
 import { tableForCommand } from "@/lib/command-tables";
 import type { CommandReply } from "@/lib/command-sync";
+import { commandRevisionsMatch } from "@/lib/command-revisions";
 
 type Result = { error?: string; success?: boolean; needsConfirmation?: boolean; [key: string]: unknown };
 class Refused extends Error { constructor(public result: Result) { super(result.error ?? "Save refused"); } }
@@ -45,11 +46,7 @@ export async function executeCommand(command: SavedCommand, userId: string): Pro
       const table = tableForCommand(command.action);
       const expected = Object.entries(command.revisions ?? {}).filter(([key]) => table && key.startsWith(`${table}:`));
       if (table && expected.length) {
-        const ids = expected.map(([key]) => key.slice(table.length + 1));
-        if (ids.some(id => !uuid.test(id))) throw new Refused({ error: "Invalid record revision." });
-        const current = await tx.execute<{ id: string; revision: string }>(sql`SELECT id, xmin::text AS revision FROM ${sql.identifier(table)} WHERE id IN (${sql.join(ids.map(id => sql`${id}::uuid`), sql`, `)}) ORDER BY id FOR UPDATE`);
-        const versions = new Map(current.map(row => [`${table}:${row.id}`, row.revision]));
-        if (expected.some(([key, revision]) => versions.get(key) !== revision)) throw new Refused({ error: "This record changed after you opened it. Your input is preserved; open the latest record and review your changes." });
+        if (!await commandRevisionsMatch(tx, table, expected)) throw new Refused({ error: "This record changed after you opened it. Your input is preserved; open the latest record and review your changes." });
       }
       const work = commandActions[command.action as keyof typeof commandActions] as (...args: unknown[]) => Promise<Result>;
       const response = await commandContext.run({ database: tx, afterCommit }, () => work(...command.args.map(decodeArgument)));

@@ -1,4 +1,5 @@
 "use client";
+import { useClientUserId } from "@/lib/client-user";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
@@ -81,8 +82,10 @@ export function UnitBatchAddDialog({
   onDone: (created?: CreatedUnit[]) => void;
   initialRows?: number;
 }) {
+  const userId = useClientUserId();
   return (
     <BatchAddDialog<BatchRow, CreatedUnit>
+      draftKey={userId && initialRows !== 1 ? `batch:units:${userId}` : undefined}
       title="Add Units"
       onClose={onClose}
       onDone={onDone}

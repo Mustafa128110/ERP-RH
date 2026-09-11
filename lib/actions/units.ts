@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, getTableColumns, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { documentLines, items, marketPurchaseRequests, unitConversions, units } from "@/lib/db/schema";
@@ -18,7 +18,7 @@ const READS = [READ_DOMAIN.sales, READ_DOMAIN.purchases, READ_DOMAIN.products, R
 export async function listUnits() {
   const session = await getSession();
   requireGlobalPermission(session, "units", "view");
-  return db.select().from(units);
+  return db.select({ ...getTableColumns(units), _revision: sql<string>`${units}.xmin::text` }).from(units);
 }
 
 export async function getUnit(unitId: string) {

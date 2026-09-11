@@ -17,6 +17,7 @@ const columns: ColumnDef[] = [{ key: "name", label: "Name" }];
 export function BrandManager({ brands }: { brands: Brand[] }) {
   return (
     <RecordManager
+      commandDomain="brands"
       title="Brands"
       noun="brand"
       records={brands}

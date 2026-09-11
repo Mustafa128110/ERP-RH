@@ -1,4 +1,5 @@
 "use client";
+import { useClientUserId } from "@/lib/client-user";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
@@ -77,8 +78,10 @@ export function BrandBatchAddDialog({
   onDone: (created?: CreatedBrand[]) => void;
   initialRows?: number;
 }) {
+  const userId = useClientUserId();
   return (
     <BatchAddDialog<BatchRow, CreatedBrand>
+      draftKey={userId && initialRows !== 1 ? `batch:brands:${userId}` : undefined}
       title="Add Brands"
       onClose={onClose}
       onDone={onDone}

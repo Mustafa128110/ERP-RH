@@ -4,7 +4,7 @@ import { addCommand, listCommands, requestWorkPersistence } from "@/lib/command-
 import { COMMAND_EVENT, COMMAND_LIMIT_BYTES, encodeArgument, commandLabel, type SavedCommand, type CommandValue } from "@/lib/command-protocol";
 import { tableForCommand } from "@/lib/command-tables";
 import { decodeCacheValue } from "@/lib/cache-codec";
-import { draftOperationId } from "@/lib/draft";
+import { clearDraft, draftOperationId } from "@/lib/draft";
 
 const revisions = new Map<string, string>();
 let revisionUser: string | null = null;
@@ -46,9 +46,16 @@ export async function queueBackgroundAction(action: string, rawArgs: unknown[], 
     if (formIndex > 0) args[formIndex - 1] = null;
     const table = tableForCommand(action);
     const ids = referencedIds(args);
+    const editor = [...document.querySelectorAll<HTMLElement>('[data-command-table][data-command-record]')]
+      .find(node => node.dataset.commandTable === table && ids.has(node.dataset.commandRecord!));
+    if (editor && !editor.dataset.commandRevision) return { error: "Refresh this page to load the record version before saving." };
+    // A queued delete does not contain the unsaved edit fields. Retain that
+    // draft in case deletion is refused; only an update transfers its input.
+    const recoveryKey = action.split(".")[1].startsWith("update") ? editor?.dataset.recoveryKey : undefined;
     const expected = Object.fromEntries([...revisions].filter(([key]) => table && key.startsWith(`${table}:`) && ids.has(key.slice(table.length + 1))));
+    if (editor?.dataset.commandRevision) expected[`${table}:${editor.dataset.commandRecord}`] = editor.dataset.commandRevision;
     const command: SavedCommand = {
-      id: draftKey && draftOperationId(draftKey) || crypto.randomUUID(), userId, action, args, path,
+      id: recoveryKey && draftOperationId(recoveryKey) || draftKey && draftOperationId(draftKey) || crypto.randomUUID(), userId, action, args, path,
       label: commandLabel(action, args), version: 1, createdAt: Date.now(), updatedAt: Date.now(),
       status: "pending", attempts: 0, revisions: expected,
     };
@@ -62,6 +69,7 @@ export async function queueBackgroundAction(action: string, rawArgs: unknown[], 
     if (["expenses.createExpensesBatch", "payments.createPaymentsBatch", "accounts.createChequesBatch"].includes(action)) args[1] = command.id;
     if (new TextEncoder().encode(JSON.stringify(command)).length > COMMAND_LIMIT_BYTES - 1000) return { error: "This batch is too large. Split it before saving." };
     await addCommand(command);
+    if (recoveryKey) clearDraft(recoveryKey);
     pendingHint++;
     void requestWorkPersistence();
     return { success: true, queued: true, operationId: command.id };

@@ -24,6 +24,7 @@ const columns: ColumnDef[] = [
 export function CompanyManager({ companies }: { companies: Company[] }) {
   return (
     <RecordManager
+      commandDomain="companies"
       title="Companies"
       noun="company"
       plural="companies"

@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
@@ -13,7 +13,7 @@ import { recordAudit } from "@/lib/actions/audit";
 export async function listBrands() {
   const session = await getSession();
   requireGlobalPermission(session, "brands", "view");
-  return db.select().from(brands);
+  return db.select({ ...getTableColumns(brands), _revision: sql<string>`${brands}.xmin::text` }).from(brands);
 }
 
 function readBrandForm(formData: FormData) {

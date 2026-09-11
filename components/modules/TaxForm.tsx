@@ -1,4 +1,5 @@
 "use client";
+import { useClientUserId } from "@/lib/client-user";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
@@ -74,8 +75,10 @@ type BatchRow = { name: string; rate: string; isActive: boolean };
 const emptyBatchRow = (): BatchRow => ({ name: "", rate: "0", isActive: true });
 
 export function TaxBatchAddDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const userId = useClientUserId();
   return (
     <BatchAddDialog<BatchRow>
+      draftKey={userId ? `batch:taxes:${userId}` : undefined}
       title="Add Taxes"
       onClose={onClose}
       onDone={onDone}

@@ -20,6 +20,7 @@ const columns: ColumnDef[] = [
 export function TaxManager({ taxes }: { taxes: Tax[] }) {
   return (
     <RecordManager
+      commandDomain="taxes"
       title="Taxes"
       noun="tax"
       plural="taxes"

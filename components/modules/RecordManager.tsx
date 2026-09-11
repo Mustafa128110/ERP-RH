@@ -10,6 +10,7 @@ import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { patchFromFormData } from "@/lib/optimistic-records";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
+import { RecordEditRecovery } from "@/components/ui/RecordEditRecovery";
 
 // The master-data list screen, written once.
 //
@@ -29,7 +30,8 @@ import type { ColumnDef, Row } from "@/lib/table";
 // Anything that doesn't fit that shape (products' batch edit, contacts' scope
 // column, the ledger's per-row balance form) keeps its own component — this is
 // the template for the plain ones, not a framework for all of them.
-export function RecordManager<T extends { id: string }>({
+export function RecordManager<T extends { id: string; _revision?: string }>({
+  commandDomain,
   title,
   noun,
   plural,
@@ -43,6 +45,7 @@ export function RecordManager<T extends { id: string }>({
   renderBatchDialog,
   renderEditBody,
 }: {
+  commandDomain: string;
   title: string;
   // Used in the "+ Add …" button and the record count: "brand" -> "+ Add
   // Brands", "3 brand(s)".
@@ -157,14 +160,14 @@ export function RecordManager<T extends { id: string }>({
         // refusal brings the popup straight back; a success closes it for real
         // from the form's own onDone.
         <Dialog title={dialogTitle(modal.record)} onClose={close} hidden={pending.includes(modal.record.id)}>
-          <div className="flex flex-col gap-4">
+          <RecordEditRecovery domain={commandDomain} record={modal.record}>
             {renderEditBody({
               record: modal.record,
               onDone: close,
               onSaving: (formData) => patch(modal.record.id, patchFromFormData(modal.record, formData)),
               onDeleting: () => remove(modal.record.id),
             })}
-          </div>
+          </RecordEditRecovery>
         </Dialog>
       )}
     </div>
