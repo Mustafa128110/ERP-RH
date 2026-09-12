@@ -1,4 +1,6 @@
-import { listStockMovements } from "@/lib/actions/stock-movements";
+import {HistoryProvider} from "@/components/ui/HistoryProvider";
+import {historyRequest} from "@/lib/history-window";
+import { listStockMovementsPage } from "@/lib/actions/stock-movements";
 import { StockMovementsManager } from "@/components/modules/StockMovementsManager";
 import { ListFilters } from "@/components/ui/ListFilters";
 
@@ -7,17 +9,17 @@ export const dynamic = "force-dynamic";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ reference?: string; item?: string; location?: string; company?: string; type?: string; from?: string; to?: string }>;
+  searchParams: Promise<Record<string,string|undefined>>;
 }) {
   const filters = await searchParams;
-  const movements = await listStockMovements(filters);
+  const movements = await listStockMovementsPage(filters,historyRequest(filters));
 
   return (
-    <StockMovementsManager
-      movements={movements}
+    <HistoryProvider info={movements.info}><StockMovementsManager
+      movements={movements.records}
       filters={
         <ListFilters key="filters" />
       }
-    />
+    /></HistoryProvider>
   );
 }

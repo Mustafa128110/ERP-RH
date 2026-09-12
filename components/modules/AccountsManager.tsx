@@ -333,7 +333,7 @@ export function AccountsManager({
       )}
 
       {tab === "transfers" && (
-        <DataTable
+        <DataTable history
           columns={transferColumns}
           rows={transferRows}
           idKey="id"

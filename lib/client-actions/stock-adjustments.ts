@@ -5,6 +5,7 @@ import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/stock-adjustments";
 export const getRecentStockAdjustmentRates: typeof server.getRecentStockAdjustmentRates = backgroundRead("stock-adjustments.getRecentStockAdjustmentRates", server.getRecentStockAdjustmentRates);
 export const listStockAdjustments: typeof server.listStockAdjustments = backgroundRead("stock-adjustments.listStockAdjustments", server.listStockAdjustments);
+export const listStockAdjustmentsPage: typeof server.listStockAdjustmentsPage = backgroundRead("stock-adjustments.listStockAdjustmentsPage", server.listStockAdjustmentsPage);
 export const getStockAdjustment: typeof server.getStockAdjustment = backgroundRead("stock-adjustments.getStockAdjustment", server.getStockAdjustment);
 export const createStockAdjustment: typeof server.createStockAdjustment = backgroundAction("stock-adjustments.createStockAdjustment", server.createStockAdjustment);
 export const approveStockAdjustment: typeof server.approveStockAdjustment = backgroundAction("stock-adjustments.approveStockAdjustment", server.approveStockAdjustment);

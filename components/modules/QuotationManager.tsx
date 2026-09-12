@@ -79,7 +79,7 @@ export function QuotationManager({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title="Quotations" subtitle={`${quotations.length} quotation(s) · ${openCount} still open`}>
+      <PageHeader title="Quotations" subtitle={`${quotations.length} quotation(s) on this page · ${openCount} still open`}>
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -91,7 +91,7 @@ export function QuotationManager({
         </button>
       </PageHeader>
 
-      <DataTable
+      <DataTable history
         columns={columns}
         rows={rows}
         idKey="id"

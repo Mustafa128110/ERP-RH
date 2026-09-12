@@ -1,4 +1,5 @@
 "use client";
+import {HistoryControls} from "@/components/ui/HistoryProvider";
 import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
@@ -92,7 +93,8 @@ function MarketPurchaseManagerBody({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) waiting for confirmation`} />
+      <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) on this page waiting for confirmation`} />
+      <HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/>
       <div className="overflow-x-auto rounded border border-sand bg-white">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-ivory text-left text-xs uppercase tracking-wide text-steel">
@@ -122,7 +124,7 @@ function MarketPurchaseManagerBody({
                 </tr>
               );
             })}
-            {pendingRows.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-steel">No market-purchase items are waiting.</td></tr>}
+            {pendingRows.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-steel">No pending items on this page.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -149,6 +151,7 @@ function MarketPurchaseManagerBody({
         </form>
       )}
 
+      {requests.some(row=>row.status==="cancelled") && <div className="rounded border border-sand p-4 text-sm"><h2 className="font-semibold">Cancelled requests</h2>{requests.filter(row=>row.status==="cancelled").map(row=><p key={row.id}>{row.saleNumber} · {row.item} · {qty(row.quantity)} {row.unit}</p>)}</div>}
       {confirmedDocuments.length > 0 && <div className="rounded border border-sand bg-white p-4"><h2 className="mb-3 font-semibold text-navy-800">Confirmed purchases</h2><div className="flex flex-col divide-y divide-sand">{confirmedDocuments.map((doc) => <ConfirmedPurchase key={doc.id} {...doc} />)}</div></div>}
     </div>
   );

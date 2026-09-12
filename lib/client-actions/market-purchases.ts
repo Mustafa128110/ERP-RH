@@ -4,5 +4,6 @@ import * as server from "@/lib/actions/market-purchases";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/market-purchases";
 export const listMarketPurchaseRequests: typeof server.listMarketPurchaseRequests = backgroundRead("market-purchases.listMarketPurchaseRequests", server.listMarketPurchaseRequests);
+export const listMarketPurchaseRequestsPage: typeof server.listMarketPurchaseRequestsPage = backgroundRead("market-purchases.listMarketPurchaseRequestsPage", server.listMarketPurchaseRequestsPage);
 export const confirmMarketPurchases: typeof server.confirmMarketPurchases = backgroundAction("market-purchases.confirmMarketPurchases", server.confirmMarketPurchases);
 export const cancelMarketPurchase: typeof server.cancelMarketPurchase = backgroundAction("market-purchases.cancelMarketPurchase", server.cancelMarketPurchase);

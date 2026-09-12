@@ -1,5 +1,8 @@
 "use server";
-import { withReadSnapshot } from "@/lib/db/read-snapshot";
+import type {HistoryRequest} from '@/lib/history-window';
+import {withReadSnapshot} from '@/lib/db/read-snapshot';
+import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
+import {paymentHistory} from '@/lib/queries/history-configs';
 
 import { and, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -92,7 +95,7 @@ export interface PaymentFilters {
 // Filtered in SQL rather than over the returned array: the list is unbounded and
 // grows with every payment ever recorded, so a JS filter would drag all of it
 // back before throwing most away.
-export async function listPayments(filters: PaymentFilters = {}) {
+async function readPayments(filters: PaymentFilters = {}, request?: HistoryRequest) {
   const session = await getSession();
   requirePermission(session, "payments", "view");
 
@@ -100,11 +103,13 @@ export async function listPayments(filters: PaymentFilters = {}) {
     filters.direction === "made" ? (["PAYMENT_MADE"] as const) : filters.direction === "received" ? (["PAYMENT_RECEIVED"] as const) : (["PAYMENT_MADE", "PAYMENT_RECEIVED"] as const);
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(READ_DOMAIN.payments, `${session.userId}:payments:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.payments, `${session.userId}:payments:paged:${cacheScope}:${stableReadKey(filters)}:${stableReadKey(request)}`, async () => withReadSnapshot(async () => {
 
-  const rows = await db
+  const scope = await companyInPermissionScope(documents.companyId, session, "payments");
+  const load = (ids?: string[]) => db
     .select({
       id: documents.id,
+      createdAt: documents.createdAt,
       number: documents.number,
       documentDate: documents.documentDate,
       // Purchase rows represent only money paid inside the purchase. Freight is
@@ -154,7 +159,8 @@ export async function listPayments(filters: PaymentFilters = {}) {
                 or(isNotNull(documents.bankAccountId), isNotNull(documents.cashAccountId), isNotNull(chequeRegister.id)),
               ),
         ),
-        await companyInPermissionScope(documents.companyId, session, "payments"),
+        scope,
+        ids ? (ids.length ? inArray(documents.id,ids) : sql`false`) : undefined,
         eq(documents.status, "posted"),
         // Narrows within the scope, never widens it — the permission scope still gates
         // every row.
@@ -169,7 +175,10 @@ export async function listPayments(filters: PaymentFilters = {}) {
     // returns, so one just entered could land mid-list.
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
-  return rows.map(({ bankAccountName, cashAccountName, chequeNumber, ...rest }) => ({
+  const window = request ? await listHistoryWindow(load(),request,paymentHistory) : null;
+  const fetched = await load(window?.ids);
+  const rows = window ? orderHistoryRecords(fetched,window.ids) : fetched;
+  return {info:window?.info,records:rows.map(({ bankAccountName, cashAccountName, chequeNumber, ...rest }) => ({
     ...rest,
     paymentMethod: bankAccountName
       ? `Account: ${bankAccountName}`
@@ -178,9 +187,12 @@ export async function listPayments(filters: PaymentFilters = {}) {
         : chequeNumber
           ? `Cheque: ${chequeNumber}`
           : null,
+  }))};
   }));
-  });
 }
+
+export async function listPayments(filters: PaymentFilters = {}) { return (await readPayments(filters)).records; }
+export async function listPaymentsPage(filters: PaymentFilters = {},request:HistoryRequest={}) { const result=await readPayments(filters,request);return {...result,info:result.info!}; }
 
 // Cheques available to settle a payment: unlinked, plus (when editing) the
 // one already linked to this payment so it doesn't vanish from the dropdown.

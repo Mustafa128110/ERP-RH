@@ -1,10 +1,11 @@
 "use client";
+import {HistoryPager} from "@/components/ui/HistoryProvider";
 
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
+import { useActionState, useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
 import { formatDate, formatTimestamp, money, todayISO } from "@/lib/format";
 import {
-  getPartyLedger,
+  getPartyLedgerPage,
   deleteLedgerRow,
   getPartyOpeningBalance,
   setPartyOpeningBalance,
@@ -20,7 +21,7 @@ import { getPayment } from "@/lib/client-actions/payments";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/client-actions/purchases";
 import type { AuditRow } from "@/lib/actions/audit";
 import type { PaymentDirection } from "@/lib/client-actions/payments";
-import { closingBalance, LEDGER_TYPE_LABELS, runningBalances, type SettlementState } from "@/lib/ledger-constants";
+import { LEDGER_TYPE_LABELS, type SettlementState } from "@/lib/ledger-constants";
 import { openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHover } from "@/components/ui/DetailHover";
@@ -320,6 +321,9 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [search, setSearch] = useState("");
+  const [page,setPage]=useState(1);
+  const [all,setAll]=useState(false);
+  const [exporting,setExporting]=useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
   const [desc, setDesc] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -417,32 +421,27 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     return onSelectionChange((stats) => setSelectionStats(stats));
   }, []);
 
-  // One way back to the server for everything on this screen. Both invariants are
-  // derived and recomputed from scratch on any change, so after a write there is
-  // no patching a row in place — the statement is re-read whole.
-  const reload = useCallback(async () => {
-    const fresh = await getPartyLedger(contactId, companyId);
-    if (fresh) setData(fresh);
+  const request=useMemo(()=>({page,all,from:fromDate,to:toDate,query:search,showCancelled,direction:desc?"desc":"asc"}),[page,all,fromDate,toDate,search,showCancelled,desc]);
+  const requestRef=useRef(request);
+  useLayoutEffect(()=>{requestRef.current=request;},[request]);
+  const reload=useCallback(async()=>{
+    const current=requestRef.current;
+    const fresh=await getPartyLedgerPage(contactId,companyId,current);
+    if(fresh&&current===requestRef.current)setData(fresh);
     return fresh;
-  }, [contactId, companyId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await getPartyLedger(contactId, companyId);
-        if (!cancelled) {
-          if (!result) setError("Contact not found.");
-          else setData(result);
-        }
-      } catch {
-        if (!cancelled) setError("Failed to load ledger.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [contactId, companyId]);
+  },[contactId,companyId]);
+  useEffect(()=>{
+    let cancelled=false;
+    const timer=setTimeout(async()=>{
+      setLoading(true);setError(null);
+      try{
+        const result=await getPartyLedgerPage(contactId,companyId,request);
+        if(!cancelled){if(!result)setError("Contact not found.");else setData(result);}
+      }catch{if(!cancelled)setError("Failed to load ledger.");}
+      finally{if(!cancelled)setLoading(false);}
+    },180);
+    return ()=>{cancelled=true;clearTimeout(timer);};
+  },[contactId,companyId,request]);
 
   // Opened once, then kept. A trail is history: it doesn't change while the
   // statement is on screen except by an edit made here, which refetches it.
@@ -463,60 +462,9 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     return () => { cancelled = true; };
   }, [historyOpen, history, contactId, companyId]);
 
-  const activeEntries = useMemo(
-    () => (data?.entries ?? []).filter((entry) => showCancelled || entry.documentStatus !== "cancelled"),
-    [data, showCancelled],
-  );
-
-  const processedEntries = useMemo(() => {
-    let filtered = [...activeEntries];
-    if (fromDate) filtered = filtered.filter((e) => e.date >= fromDate);
-    if (toDate) filtered = filtered.filter((e) => e.date <= toDate);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      filtered = filtered.filter((e) => {
-        const refMatch = e.reference && e.reference.toLowerCase().includes(q);
-        const lineMatch = e.lineItems?.some((l) => l.itemName.toLowerCase().includes(q));
-        return refMatch || lineMatch;
-      });
-    }
-    filtered.sort((a, b) =>
-      desc
-        ? b.date.localeCompare(a.date) || b.id.localeCompare(a.id)
-        : a.date.localeCompare(b.date) || a.id.localeCompare(b.id),
-    );
-    return filtered;
-  }, [activeEntries, fromDate, toDate, search, desc]);
-
-  // What the Balance column starts from. The opening-balance row is now rendered
-  // as the first line of the statement (see lib/actions/ledger.ts), so it is part
-  // of `entries` and walks the running balance forward itself — the seed is only
-  // what happened *before* the rows on screen, dated strictly before the window.
-  //
-  // Date only — not "everything the filters hid". Narrowing to a date range is a
-  // statement for that period and its opening figure has to carry the account
-  // forward to it; typing in the search box is a way of finding a row, and it must
-  // not move the balance the statement opens with.
-  const effectiveOpening = useMemo(() => {
-    if (!fromDate) return 0;
-    const before = activeEntries.filter((e) => e.date < fromDate);
-    return before.reduce((sum, e) => sum + e.debit - e.credit, 0);
-  }, [activeEntries, fromDate]);
-
-  const entriesWithBalance = useMemo(() => {
-    return runningBalances(effectiveOpening, processedEntries);
-  }, [processedEntries, effectiveOpening]);
-
-  const summary = useMemo(() => {
-    const filteredDebit = processedEntries.reduce((s, e) => s + e.debit, 0);
-    const filteredCredit = processedEntries.reduce((s, e) => s + e.credit, 0);
-    return {
-      opening: effectiveOpening,
-      totalDebit: filteredDebit,
-      totalCredit: filteredCredit,
-      closing: closingBalance(effectiveOpening, filteredDebit, filteredCredit),
-    };
-  }, [processedEntries, effectiveOpening]);
+  const effectiveOpening=data?.summary?.opening??0;
+  const entriesWithBalance=useMemo(()=>(data?.entries??[]).map(entry=>({...entry,balance:entry.balance!})),[data]);
+  const summary=data?.summary??{opening:0,totalDebit:0,totalCredit:0,closing:0};
 
   // Delete with double confirmation
   const [confirmDelete, setConfirmDelete] = useState<{ entry: PartyLedgerEntry & { balance: number } } | null>(null);
@@ -567,9 +515,14 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     }
   }
 
-  function handleExport(fmt: "pdf" | "png") {
-    if (!data || entriesWithBalance.length === 0) return;
-    onExport(fmt, data, entriesWithBalance, summary);
+  async function handleExport(fmt: "pdf" | "png") {
+    if(exporting)return;
+    setExporting(true);setError(null);
+    try{
+      const full=await getPartyLedgerPage(contactId,companyId,{...request,all:true});
+      if(full?.summary)onExport(fmt,full,full.entries.map(entry=>({...entry,balance:entry.balance!})),full.summary);
+    }catch{setError("Could not load the complete statement for export. Please retry.");}
+    finally{setExporting(false);}
   }
 
   return (
@@ -662,15 +615,15 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
           <div className="flex flex-wrap items-end gap-2 rounded border border-sand bg-white p-2">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">From</span>
-              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 w-32 rounded border border-sand px-1.5 text-xs text-ink" />
+              <input type="date" value={fromDate} onChange={(e) => {setPage(1);setFromDate(e.target.value);}} className="h-8 w-32 rounded border border-sand px-1.5 text-xs text-ink" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">To</span>
-              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 w-32 rounded border border-sand px-1.5 text-xs text-ink" />
+              <input type="date" value={toDate} onChange={(e) => {setPage(1);setToDate(e.target.value);}} className="h-8 w-32 rounded border border-sand px-1.5 text-xs text-ink" />
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">Search</span>
-              <input type="text" placeholder="Item or ref…" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 w-36 rounded border border-sand px-1.5 text-xs text-ink" />
+              <input type="text" placeholder="Item or ref…" value={search} onChange={(e) => {setPage(1);setSearch(e.target.value);}} className="h-8 w-36 rounded border border-sand px-1.5 text-xs text-ink" />
             </label>
             <div className="ml-auto flex gap-1.5">
               <button
@@ -682,15 +635,15 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               </button>
               <button
                 type="button"
-                onClick={() => setShowCancelled((v) => !v)}
+                onClick={() => {setPage(1);setShowCancelled((v) => !v);}}
                 className={`h-8 rounded border px-2 text-[10px] font-medium ${showCancelled ? "border-navy-800 bg-navy-800 text-white" : "border-sand text-steel hover:bg-ivory"}`}
               >
                 {showCancelled ? "Hide cancelled" : "Show cancelled"}
               </button>
-              <button type="button" onClick={() => handleExport("png")} className="h-8 rounded border border-sand px-2 text-[10px] font-medium text-steel hover:bg-ivory">
+              <button type="button" disabled={exporting || loading} onClick={() => handleExport("png")} className="h-8 rounded border border-sand px-2 text-[10px] font-medium text-steel hover:bg-ivory">
                 PNG
               </button>
-              <button type="button" onClick={() => handleExport("pdf")} className="h-8 rounded border border-sand px-2 text-[10px] font-medium text-steel hover:bg-ivory">
+              <button type="button" disabled={exporting || loading} onClick={() => handleExport("pdf")} className="h-8 rounded border border-sand px-2 text-[10px] font-medium text-steel hover:bg-ivory">
                 PDF
               </button>
             </div>
@@ -699,6 +652,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
           {/* §7 — what was changed on this account, and by whom. Field-level
               old → new comes from `changeSummary`, so it reads the same here as
               it does on the audit page. */}
+          {data.history&&<HistoryPager history={{info:data.history,pending:loading,change:values=>{if(values.page!==undefined)setPage(Number(values.page));if(Object.hasOwn(values,"all"))setAll(values.all==="1");}}}/>}
           {historyOpen && (
             <div className="rounded border border-sand bg-white">
               {history === null ? (
@@ -759,7 +713,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               <table className="w-full min-w-[76rem] border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">
-                    <th className="w-40 cursor-pointer select-none py-2.5 pl-8 pr-8 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => setDesc((d) => !d)}>
+                    <th className="w-40 cursor-pointer select-none py-2.5 pl-8 pr-8 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => {setPage(1);setDesc((d) => !d);}}>
                       Date {desc ? "↓" : "↑"}
                     </th>
                     <th className="w-64 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description</th>

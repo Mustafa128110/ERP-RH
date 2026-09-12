@@ -1,6 +1,10 @@
 "use server";
+import type {HistoryRequest} from '@/lib/history-window';
+import {withReadSnapshot} from '@/lib/db/read-snapshot';
+import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
+import {expenseHistory} from '@/lib/queries/history-configs';
 
-import { and, eq, desc, gte, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, desc, gte, lte, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -33,16 +37,18 @@ export interface ExpenseFilters {
 // Filtered in SQL rather than over the returned array: the list is unbounded and
 // grows with every expense ever recorded, so a JS filter would drag all of it
 // across the wire to throw most of it away.
-export async function listExpenses(filters: ExpenseFilters = {}) {
+async function readExpenses(filters: ExpenseFilters = {}, request?: HistoryRequest) {
   const session = await getSession();
   requirePermission(session, "expenses", "view");
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(READ_DOMAIN.expenses, `${session.userId}:expenses:v2:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.expenses, `${session.userId}:expenses:v2:paged:${cacheScope}:${stableReadKey(filters)}:${stableReadKey(request)}`, async () => withReadSnapshot(async () => {
 
-  const rows = await db
+  const scope = await companyInPermissionScope(expenses.companyId, session, "expenses");
+  const load = (ids?: string[]) => db
     .select({
       id: expenses.id,
+      createdAt: expenses.createdAt,
       _revision: sql<string>`${expenses}.xmin::text`,
       companyId: expenses.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
@@ -73,7 +79,8 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
     .leftJoin(users, eq(users.id, expenses.createdBy))
     .where(
       and(
-        await companyInPermissionScope(expenses.companyId, session, "expenses"),
+        scope,
+        ids ? (ids.length ? inArray(expenses.id,ids) : sql`false`) : undefined,
         // Narrows within the scope, never widens it — companyInScope still gates
         // every row.
         filters.company ? eq(expenses.companyId, filters.company) : undefined,
@@ -86,7 +93,10 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
     // returns, so one just entered could land mid-list.
     .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt));
 
-  return rows.map(({ bankAccountName, cashAccountName, chequeNumber, ...rest }) => ({
+  const window = request ? await listHistoryWindow(load(),request,expenseHistory) : null;
+  const fetched = await load(window?.ids);
+  const rows = window ? orderHistoryRecords(fetched,window.ids) : fetched;
+  return {info:window?.info,records:rows.map(({ bankAccountName, cashAccountName, chequeNumber, ...rest }) => ({
     ...rest,
     paymentMethod: bankAccountName
       ? `Account: ${bankAccountName}`
@@ -95,9 +105,12 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
         : chequeNumber
           ? `Cheque: ${chequeNumber}`
           : null,
+  }))};
   }));
-  });
 }
+
+export async function listExpenses(filters: ExpenseFilters = {}) { return (await readExpenses(filters)).records; }
+export async function listExpensesPage(filters: ExpenseFilters = {},request:HistoryRequest={}) { const result=await readExpenses(filters,request);return {...result,info:result.info!}; }
 
 // Cheques available to settle an expense: unlinked everywhere, plus (when
 // editing) the one already linked to this expense. Kept as an action because

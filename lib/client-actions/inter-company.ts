@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/inter-company";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/inter-company";
 export const listInterCompanySales: typeof server.listInterCompanySales = backgroundRead("inter-company.listInterCompanySales", server.listInterCompanySales);
+export const listInterCompanySalesPage: typeof server.listInterCompanySalesPage = backgroundRead("inter-company.listInterCompanySalesPage", server.listInterCompanySalesPage);
 export const getInterCompanySale: typeof server.getInterCompanySale = backgroundRead("inter-company.getInterCompanySale", server.getInterCompanySale);
 export const createInterCompanySale: typeof server.createInterCompanySale = backgroundAction("inter-company.createInterCompanySale", server.createInterCompanySale);
 export const updateInterCompanySale: typeof server.updateInterCompanySale = backgroundAction("inter-company.updateInterCompanySale", server.updateInterCompanySale);

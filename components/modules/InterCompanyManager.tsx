@@ -48,7 +48,7 @@ export function InterCompanyManager({
     <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Inter-Company Sales"
-        subtitle={`${rows.length} sale(s) — one company selling to the other, both sides booked together`}
+        subtitle={`${rows.length} sale(s) on this page — one company selling to the other, both sides booked together`}
       >
         <button
           type="button"
@@ -61,7 +61,7 @@ export function InterCompanyManager({
         </button>
       </PageHeader>
 
-      <DataTable
+      <DataTable history
         columns={columns}
         rows={rows}
         idKey="id"

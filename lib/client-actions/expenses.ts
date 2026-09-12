@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/expenses";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/expenses";
 export const listExpenses: typeof server.listExpenses = backgroundRead("expenses.listExpenses", server.listExpenses);
+export const listExpensesPage: typeof server.listExpensesPage = backgroundRead("expenses.listExpensesPage", server.listExpensesPage);
 export const listChequesForExpenses: typeof server.listChequesForExpenses = backgroundRead("expenses.listChequesForExpenses", server.listChequesForExpenses);
 export const createExpensesBatch: typeof server.createExpensesBatch = backgroundAction("expenses.createExpensesBatch", server.createExpensesBatch);
 export const createExpense: typeof server.createExpense = backgroundAction("expenses.createExpense", server.createExpense);

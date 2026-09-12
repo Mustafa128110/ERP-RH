@@ -66,14 +66,14 @@ export function StockMovementsManager({ movements, filters }: { movements: Stock
     <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Stock Movements"
-        subtitle={`${movements.length} movement(s) · ${qty(inQty)} in, ${qty(Math.abs(outQty))} out`}
+        subtitle={`${movements.length} movement(s) on this page · ${qty(inQty)} in, ${qty(Math.abs(outQty))} out`}
       >
         {filters}
       </PageHeader>
 
       {/* Read-only by design: a movement is the consequence of a document, and
           the way to change one is to change the document that caused it. */}
-      <DataTable
+      <DataTable history
         columns={columns}
         rows={rows}
         idKey="id"
@@ -82,7 +82,7 @@ export function StockMovementsManager({ movements, filters }: { movements: Stock
       />
 
       <p className="shrink-0 text-xs text-steel">
-        Capped at the 500 most recent movements. Narrow the date range or pick a location to reach further back.
+        Search covers the full movement history. Load all matches before printing or exporting.
       </p>
     </div>
   );

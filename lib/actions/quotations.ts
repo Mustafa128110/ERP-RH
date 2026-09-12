@@ -1,4 +1,8 @@
 "use server";
+import type {HistoryRequest} from '@/lib/history-window';
+import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
+import {quotationHistory} from '@/lib/queries/history-configs';
+
 
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -90,7 +94,8 @@ function statusOf(quoted: number, converted: number, validUntil: string | null, 
   return "Open";
 }
 
-export async function listQuotations(): Promise<QuotationListRow[]> {
+async function readQuotations(request?:HistoryRequest) {
+ return withReadSnapshot(async()=>{
   const session = await getSession();
   requirePermission(session, "quotations", "view");
   const scope = await companyInPermissionScope(documents.companyId, session, "quotations");
@@ -98,9 +103,10 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
   // The line totals come back as an aggregate rather than as rows: the list only
   // needs "how much of this is converted", and pulling every line of every
   // quotation to add them up in JS is the same answer for a great deal more wire.
-  const rows = await db
+  const load=(ids?:string[])=>db
     .select({
       id: documents.id,
+      createdAt: documents.createdAt,
       number: documents.number,
       companyId: documents.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
@@ -130,11 +136,15 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
     .leftJoin(contacts, eq(contacts.id, documents.contactId))
     .leftJoin(documentLines, eq(documentLines.documentId, documents.id))
     .leftJoin(items, eq(items.id, documentLines.itemId))
-    .where(and(eq(documentTypes.code, "QUOTATION"), scope))
+    .where(and(eq(documentTypes.code, "QUOTATION"), scope,ids ? (ids.length?inArray(documents.id,ids):sql`false`):undefined))
     .groupBy(documents.id, companies.shortName, companies.name, contacts.displayName)
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
 
-  return rows.map((r) => ({
+
+  const window=request?await listHistoryWindow(load(),request,quotationHistory):null;
+  const fetched=await load(window?.ids);
+  const rows=window?orderHistoryRecords(fetched,window.ids):fetched;
+  return {info:window?.info,records:rows.map((r) => ({
     id: r.id,
     number: r.number,
     companyId: r.companyId,
@@ -149,8 +159,12 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
       quantity: l.quantity,
       converted: l.converted ?? "0",
     })),
-  }));
+  }))};
+ });
 }
+
+export async function listQuotations() {return (await readQuotations()).records;}
+export async function listQuotationsPage(request:HistoryRequest={}) {const result=await readQuotations(request);return {...result,info:result.info!};}
 
 export async function getQuotation(documentId: string) {
   return withReadSnapshot(async () => {

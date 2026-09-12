@@ -1,4 +1,7 @@
 "use server";
+import {stockDocumentHistory} from "@/lib/queries/stock-document-history";
+import {orderHistoryRecords} from "@/lib/queries/list-history";
+import type {HistoryRequest} from "@/lib/history-window";
 
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -41,7 +44,7 @@ export interface TransferItemRow {
   unitSymbol: string | null;
 }
 
-export async function listStockTransfers() {
+async function readStockTransfers(ids?:string[]) {
   const session = await getSession();
   requirePermission(session, "stock_transfers", "view");
   const scope = await companyInPermissionScope(documents.companyId, session, "stock_transfers");
@@ -60,7 +63,7 @@ export async function listStockTransfers() {
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(companies, eq(companies.id, documents.companyId))
-      .where(and(eq(documentTypes.code, "STOCK_TRANSFER"), scope))
+      .where(and(eq(documentTypes.code, "STOCK_TRANSFER"), scope,ids?(ids.length?inArray(documents.id,ids):sql`false`):undefined))
       .orderBy(desc(documents.documentDate)),
     db
       .select({
@@ -79,7 +82,7 @@ export async function listStockTransfers() {
       .leftJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
-      .where(and(eq(documentTypes.code, "STOCK_TRANSFER"), scope))
+      .where(and(eq(documentTypes.code, "STOCK_TRANSFER"), scope,ids?(ids.length?inArray(documents.id,ids):sql`false`):undefined))
       .orderBy(documentLines.lineNo),
   ]);
 
@@ -104,6 +107,15 @@ export async function listStockTransfers() {
     to: byDoc.get(d.id)?.to ?? "—",
     items: byDoc.get(d.id)?.items ?? [],
   }));
+}
+
+export async function listStockTransfers() {return readStockTransfers();}
+export async function listStockTransfersPage(request:HistoryRequest={}){
+ return withReadSnapshot(async()=>{
+  const session=await getSession();requirePermission(session,"stock_transfers","view");
+  const window=await stockDocumentHistory("STOCK_TRANSFER",await companyInPermissionScope(documents.companyId,session,"stock_transfers"),request);
+  return {records:orderHistoryRecords(await readStockTransfers(window.ids),window.ids),info:window.info};
+ });
 }
 
 export async function getStockTransfer(documentId: string) {

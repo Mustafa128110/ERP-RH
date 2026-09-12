@@ -46,7 +46,7 @@ export function StockTransfersManager({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title="Stock Transfers" subtitle={`${rows.length} transfer(s)`}>
+      <PageHeader title="Stock Transfers" subtitle={`${rows.length} transfer(s) on this page`}>
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -58,7 +58,7 @@ export function StockTransfersManager({
         </button>
       </PageHeader>
 
-      <DataTable
+      <DataTable history
         columns={columns}
         rows={rows}
         idKey="id"

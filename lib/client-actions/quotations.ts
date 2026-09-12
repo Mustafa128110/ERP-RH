@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/quotations";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/quotations";
 export const listQuotations: typeof server.listQuotations = backgroundRead("quotations.listQuotations", server.listQuotations);
+export const listQuotationsPage: typeof server.listQuotationsPage = backgroundRead("quotations.listQuotationsPage", server.listQuotationsPage);
 export const getQuotation: typeof server.getQuotation = backgroundRead("quotations.getQuotation", server.getQuotation);
 export const createQuotation: typeof server.createQuotation = backgroundAction("quotations.createQuotation", server.createQuotation);
 export const updateQuotation: typeof server.updateQuotation = backgroundAction("quotations.updateQuotation", server.updateQuotation);

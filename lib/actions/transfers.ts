@@ -1,16 +1,19 @@
 "use server";
+import {pairedHistory} from "@/lib/queries/paired-history";
+import {withReadSnapshot} from "@/lib/db/read-snapshot";
+import type {HistoryRequest} from "@/lib/history-window";
 
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { bankAccounts, cashAccounts, chequeRegister, companies, documentNumberLedger, documentTypes, documents } from "@/lib/db/schema";
+import { chequeRegister, documentNumberLedger, documents } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumberRange } from "@/lib/actions/document-numbering";
 import { adjustSettlementBalancesBatch } from "@/lib/actions/settlement";
-import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
+
 import { guard, DUPLICATE, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
@@ -58,57 +61,12 @@ export interface CashTransferRow {
   amount: string;
 }
 
-export async function listCashTransfers(): Promise<CashTransferRow[]> {
-  const session = await getSession();
-  requirePermission(session, "accounts", "view");
-
-  const rows = await db
-    .select({
-      id: documents.id,
-      number: documents.number,
-      reason: documents.reason,
-      documentDate: documents.documentDate,
-      amount: documents.grandTotal,
-      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
-      // Bank, branch and account title, as everywhere else an account is named.
-      bankAccount: sql<string>`${sql.raw(BANK_ACCOUNT_LABEL_SQL())}`,
-      cashAccount: cashAccounts.name,
-    })
-    .from(documents)
-    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .innerJoin(companies, eq(companies.id, documents.companyId))
-    .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
-    .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-    .where(and(like(documents.reason, `${TRANSFER_REASON} %`), eq(documents.status, "posted"), await companyInPermissionScope(documents.companyId, session, "accounts")))
-    .orderBy(desc(documents.documentDate), desc(documents.createdAt));
-
-  // "Cash Transfer <side> <key>" — the key pairs the two halves, the side says
-  // which is which.
-  const pairs = new Map<string, { out?: (typeof rows)[number]; in?: (typeof rows)[number] }>();
-  for (const r of rows) {
-    const [, , side, key] = r.reason!.split(" ");
-    if (!key) continue;
-    const pair = pairs.get(key) ?? {};
-    if (side === "out") pair.out = r;
-    else pair.in = r;
-    pairs.set(key, pair);
-  }
-
-  const label = (r: (typeof rows)[number] | undefined) => r?.bankAccount ?? r?.cashAccount ?? "—";
-
-  return [...pairs.values()]
-    .filter((p) => p.out)
-    .map((p) => ({
-      // The list is addressed by the outgoing half — that's the row a delete
-      // starts from, and it finds its partner through the shared key.
-      id: p.out!.id,
-      number: p.out!.number,
-      documentDate: p.out!.documentDate,
-      company: p.out!.company,
-      from: label(p.out),
-      to: label(p.in),
-      amount: p.out!.amount,
-    }));
+export async function listCashTransfers():Promise<CashTransferRow[]> {return (await listCashTransfersPage({all:true})).records;}
+export async function listCashTransfersPage(request:HistoryRequest={}) {
+ return withReadSnapshot(async()=>{
+  const session=await getSession();requirePermission(session,"accounts","view");
+  return pairedHistory<CashTransferRow>("cash",await companyInPermissionScope(documents.companyId,session,"accounts"),request);
+ });
 }
 
 export async function createCashTransfer(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {

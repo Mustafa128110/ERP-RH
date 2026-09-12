@@ -1,4 +1,9 @@
 "use server";
+import {withReadSnapshot} from "@/lib/db/read-snapshot";
+import {ledgerHistoryWindow} from "@/lib/queries/ledger-history";
+import {orderHistoryRecords} from "@/lib/queries/list-history";
+import type {LedgerHistoryRequest,LedgerHistorySummary} from "@/lib/ledger-history";
+import type {HistoryInfo} from "@/lib/history-window";
 
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -450,6 +455,7 @@ export type PartyLedgerLineItem = {
 };
 
 export type PartyLedgerEntry = {
+  balance?:number;
   id: string; // ledger entry id
   documentId: string; // document id (for deletion)
   date: string;
@@ -487,6 +493,8 @@ export type PartyLedgerSettlementLink = {
 };
 
 export type PartyLedgerResult = {
+  history?:HistoryInfo;
+  summary?:LedgerHistorySummary;
   contactId: string;
   displayName: string;
   companyName: string | null;
@@ -510,9 +518,10 @@ export type PartyLedgerResult = {
   advancePaid: number;
 };
 
-export async function getPartyLedger(
+async function readPartyLedger(
   contactId: string,
   companyId?: string,
+  request?: LedgerHistoryRequest,
 ): Promise<PartyLedgerResult | null> {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
@@ -540,7 +549,7 @@ export async function getPartyLedger(
   const [contact] = contactRows;
   if (!contact) return null;
 
-  const rows = await db
+  const load=(ids?:string[])=>db
     .select({
       ledgerId: ledgerEntries.id,
       documentId: documents.id,
@@ -561,8 +570,16 @@ export async function getPartyLedger(
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
     .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
     .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-    .where(and(eq(documents.contactId, contactId), companyId ? eq(ledgerEntries.companyId, companyId) : undefined, docScope))
+    .where(and(eq(documents.contactId, contactId), companyId ? eq(ledgerEntries.companyId, companyId) : undefined, docScope,
+      ids?(ids.length?inArray(ledgerEntries.id,ids):sql`false`):undefined,
+      sql`(${documentTypes.code} NOT IN ('PAYMENT_MADE','PAYMENT_RECEIVED') OR
+        (${documents.bankAccountId} IS NOT NULL AND (${bankAccounts.companyId} IS NULL OR ${bankAccounts.companyId}=${ledgerEntries.companyId})) OR
+        (${documents.bankAccountId} IS NULL AND ${documents.cashAccountId} IS NOT NULL AND ${cashAccounts.companyId}=${ledgerEntries.companyId}) OR
+        (${documents.bankAccountId} IS NULL AND ${documents.cashAccountId} IS NULL AND EXISTS(SELECT 1 FROM cheque_register q WHERE q.document_id=${documents.id} AND q.company_id=${ledgerEntries.companyId})))`))
     .orderBy(desc(documents.documentDate), desc(documents.createdAt));
+
+  const window=request?await ledgerHistoryWindow(load(),request):null;
+  const rows=await load(window?.ids);
 
   // Filter out payments with invalid settlement accounts (wrong company).
   // This mirrors the validation in adjustSettlementBalancesBatch:
@@ -739,8 +756,9 @@ export async function getPartyLedger(
   // opening figure — it just carries no paid/partial marks.
   let advanceReceived = 0;
   let advancePaid = 0;
-  if (companyId) {
-    const settlement = await readPartySettlement(db, companyId, contactId);
+  if (companyId && (await getScopeCompanyIds()).includes(companyId)) {
+    requirePermission(session,"accounts","view",{companyId});
+    const settlement = await readPartySettlement(db, companyId, contactId,request?docIds:undefined);
     const docById = new Map(settlement.documents.map((d) => [d.id, d]));
     const linksByDocument = new Map<string, PartyLedgerSettlementLink[]>();
     const push = (from: string, toId: string, amount: number) => {
@@ -771,9 +789,10 @@ export async function getPartyLedger(
       if (links && links.length > 0) entry.settledAgainst = links;
     }
 
+    if(settlement.advances){advanceReceived=settlement.advances.received;advancePaid=settlement.advances.paid;}
     // What a payment could not place is an advance on the party's account — not
     // an error, and not handed back. The next invoice on that side absorbs it.
-    for (const payment of settlement.payments) {
+    for (const payment of settlement.advances?[]:settlement.payments) {
       const doc = docById.get(payment.id);
       if (!doc) continue;
       const unplaced = Math.max(0, doc.grandTotal - doc.allocated);
@@ -790,15 +809,19 @@ export async function getPartyLedger(
     email: contact.email,
     address: contact.address,
     city: contact.city,
-    entries,
-    openingBalance,
+    entries:window?orderHistoryRecords(entries,window.ids).map(entry=>({...entry,balance:window.balances.get(entry.id)!})):entries,
+    history:window?.info,summary:window?.summary,
+    openingBalance:window?.openingBalance??openingBalance,
     // Only when there is exactly one to point at — an all-companies statement can
     // be summing several, and editing "the" opening balance then has no meaning.
-    openingBalanceDocumentId: openingDocumentIds.length === 1 ? openingDocumentIds[0] : null,
+    openingBalanceDocumentId: window?window.openingDocumentId:openingDocumentIds.length === 1 ? openingDocumentIds[0] : null,
     advanceReceived,
     advancePaid,
   };
 }
+
+export async function getPartyLedger(contactId:string,companyId?:string):Promise<PartyLedgerResult|null>{return withReadSnapshot(()=>readPartyLedger(contactId,companyId));}
+export async function getPartyLedgerPage(contactId:string,companyId:string|undefined,request:LedgerHistoryRequest={}):Promise<PartyLedgerResult|null>{return withReadSnapshot(()=>readPartyLedger(contactId,companyId,request));}
 
 // Cancel a document behind a ledger row. Delegates to the owning module's
 // delete logic so inventory, settlements, cheques and allocations are all

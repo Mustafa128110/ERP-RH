@@ -1,6 +1,11 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
+import type {HistoryRequest} from '@/lib/history-window';
+import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
+import {movementHistory} from '@/lib/queries/history-configs';
 
-import { and, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
+
+import { and, desc, eq, inArray, gte, ilike, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { companies, contacts, documentLines, documentTypes, documents, inventoryTransactions, items, locations, units, users } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
@@ -46,13 +51,15 @@ export type MovementFilters = {
   to?: string;
 };
 
-const PAGE = 500;
 
-export async function listStockMovements(filters: MovementFilters = {}): Promise<StockMovementRow[]> {
+
+async function readStockMovements(filters: MovementFilters = {}, request?:HistoryRequest) {
+ return withReadSnapshot(async()=>{
   const session = await getSession();
   requirePermission(session, "stock", "view");
 
-  const rows = await db
+  const scope=await companyInPermissionScope(inventoryTransactions.companyId, session, "stock");
+  const load=(ids?:string[])=>db
     .select({
       id: inventoryTransactions.id,
       createdAt: inventoryTransactions.createdAt,
@@ -84,7 +91,7 @@ export async function listStockMovements(filters: MovementFilters = {}): Promise
     .leftJoin(users, eq(users.id, documents.createdBy))
     .where(
       and(
-        await companyInPermissionScope(inventoryTransactions.companyId, session, "stock"),
+        scope,ids?(ids.length?inArray(inventoryTransactions.id,ids):sql`false`):undefined,
         // Narrows within the scope, never widens it.
         filters.company ? eq(inventoryTransactions.companyId, filters.company) : undefined,
         filters.location ? eq(documentLines.locationId, filters.location) : undefined,
@@ -99,9 +106,13 @@ export async function listStockMovements(filters: MovementFilters = {}): Promise
     // the same document_date, so without it today's order is whatever the
     // planner happens to return.
     .orderBy(desc(documents.documentDate), desc(inventoryTransactions.createdAt))
-    .limit(PAGE);
+    ;
 
-  return rows.map((r) => ({
+
+  const window=request?await listHistoryWindow(load(),request,movementHistory):null;
+  const fetched=await load(window?.ids);
+  const rows=window?orderHistoryRecords(fetched,window.ids):fetched;
+  return {info:window?.info,records:rows.map((r) => ({
     id: r.id,
     date: r.date,
     createdAt: r.createdAt ?? new Date(),
@@ -119,8 +130,12 @@ export async function listStockMovements(filters: MovementFilters = {}): Promise
     contact: r.contact,
     user: r.user,
     value: r.totalCost,
-  }));
+  }))};
+ });
 }
+
+export async function listStockMovements(filters:MovementFilters={}) {return (await readStockMovements(filters)).records;}
+export async function listStockMovementsPage(filters:MovementFilters={},request:HistoryRequest={}) {const result=await readStockMovements(filters,request);return {...result,info:result.info!};}
 
 // The document types that have actually moved stock, for the type filter —
 // offering every type in the enum when most have never been used is a filter

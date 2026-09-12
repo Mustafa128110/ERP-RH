@@ -8,6 +8,7 @@ export const listPaymentLedgerBalances: typeof server.listPaymentLedgerBalances 
 export const createOpeningBalanceEntry: typeof server.createOpeningBalanceEntry = backgroundAction("ledger.createOpeningBalanceEntry", server.createOpeningBalanceEntry);
 export const setContactBalance: typeof server.setContactBalance = backgroundAction("ledger.setContactBalance", server.setContactBalance);
 export const getPartyLedger: typeof server.getPartyLedger = backgroundRead("ledger.getPartyLedger", server.getPartyLedger);
+export const getPartyLedgerPage: typeof server.getPartyLedgerPage = backgroundRead("ledger.getPartyLedgerPage", server.getPartyLedgerPage);
 export const deleteLedgerRow: typeof server.deleteLedgerRow = backgroundAction("ledger.deleteLedgerRow", server.deleteLedgerRow);
 export const getPartyOpeningBalance: typeof server.getPartyOpeningBalance = backgroundRead("ledger.getPartyOpeningBalance", server.getPartyOpeningBalance);
 export const setPartyOpeningBalance: typeof server.setPartyOpeningBalance = backgroundAction("ledger.setPartyOpeningBalance", server.setPartyOpeningBalance);

@@ -40,6 +40,7 @@ export type SettlementDocument = {
 };
 
 export type PartySettlement = SettlementSnapshot & {
+  advances?:{received:number;paid:number};
   items: SettleableItem[];
   payments: SettlingPayment[];
   allocations: FifoAllocation[];
@@ -70,10 +71,11 @@ export async function readPartySettlement(
   runner: Runner,
   companyId: string,
   contactId: string,
+  documentIds?:string[],
 ): Promise<PartySettlement> {
   // Two statements, not one per document: this runs inside the same transaction
   // as the write that follows it, where every round trip is ~170ms.
-  const rows = await runner.execute<Row>(sql`
+  const source=sql`
     SELECT d.id::text AS id,
            dt.code::text AS code,
            d.number,
@@ -114,7 +116,14 @@ export async function readPartySettlement(
         ))
       )
     ORDER BY d.document_date, d.created_at, d.id
-  `);
+  `;
+  const selected=documentIds?.length?sql`IN (${sql.join(documentIds.map(id=>sql`${id}::uuid`),sql`,`)})`:sql`IN (SELECT null::uuid WHERE false)`;
+  const related=sql`SELECT payment_document_id AS id FROM payment_allocations WHERE invoice_document_id ${selected}
+    UNION SELECT invoice_document_id FROM payment_allocations WHERE payment_document_id ${selected}`;
+  const rows=await runner.execute<Row>(documentIds?sql`SELECT * FROM (${source}) source WHERE id::uuid ${selected} OR id::uuid IN (${related})`:source);
+  const advances=documentIds?(await runner.execute<{received:number;paid:number}>(sql`SELECT
+    coalesce(sum(greatest(0,grand_total-allocated)) FILTER(WHERE code='PAYMENT_RECEIVED'),0)::float8 AS received,
+    coalesce(sum(greatest(0,grand_total-allocated)) FILTER(WHERE code='PAYMENT_MADE'),0)::float8 AS paid FROM (${source}) source`))[0]:undefined;
 
   const allocationRows = await runner.execute<{ payment_id: string; item_id: string; amount: number }>(sql`
     SELECT pa.payment_document_id::text AS payment_id,
@@ -124,6 +133,7 @@ export async function readPartySettlement(
     JOIN documents pd ON pd.id = pa.payment_document_id
     WHERE pd.company_id = ${companyId}::uuid
       AND pd.contact_id = ${contactId}::uuid
+      AND ${documentIds?sql`(pa.payment_document_id ${selected} OR pa.invoice_document_id ${selected})`:sql`true`}
   `);
 
   const items: SettleableItem[] = [];
@@ -198,7 +208,7 @@ export async function readPartySettlement(
     amount: Number(a.amount ?? 0),
   }));
 
-  return { items, payments, allocations, documents, openingDocumentId, openingSigned };
+  return { items, payments, allocations, documents, openingDocumentId, openingSigned, advances };
 }
 
 // The queue-facing value of an item after its grand total is edited: the queue

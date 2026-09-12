@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/payments";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/payments";
 export const listPayments: typeof server.listPayments = backgroundRead("payments.listPayments", server.listPayments);
+export const listPaymentsPage: typeof server.listPaymentsPage = backgroundRead("payments.listPaymentsPage", server.listPaymentsPage);
 export const listChequesForPayments: typeof server.listChequesForPayments = backgroundRead("payments.listChequesForPayments", server.listChequesForPayments);
 export const createPayment: typeof server.createPayment = backgroundAction("payments.createPayment", server.createPayment);
 export const getPayment: typeof server.getPayment = backgroundRead("payments.getPayment", server.getPayment);

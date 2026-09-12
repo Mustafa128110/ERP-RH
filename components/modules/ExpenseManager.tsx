@@ -271,7 +271,7 @@ export function ExpenseManager({
     <div className="flex h-full flex-col gap-2">
       <PageHeader
         title="Expenses"
-        subtitle={`${shown.length} expense(s)${shown.length !== groups.length ? ` on ${groups.length} line(s)` : ""}${filtered ? " matching" : ""}`}
+        subtitle={`${shown.length} expense(s) on this page${shown.length !== groups.length ? ` on ${groups.length} line(s)` : ""}${filtered ? " matching" : ""}`}
       >
         {filters}
         <button
@@ -285,7 +285,7 @@ export function ExpenseManager({
         </button>
       </PageHeader>
 
-      <DataTable
+      <DataTable history
         columns={columns}
         rows={rows}
         idKey="id"

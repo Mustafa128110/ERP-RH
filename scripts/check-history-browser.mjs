@@ -6,7 +6,7 @@ const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const navigation=`
  import {useSyncExternalStore} from 'react';
- let url='/history?company=one', version=0; const listeners=new Set();
+ let url='/history?company=one&direction=made', version=0; const listeners=new Set();
  const subscribe=fn=>{listeners.add(fn);return()=>listeners.delete(fn)};
  window.navigate=next=>{version++;url=next;listeners.forEach(fn=>fn())};
  export const usePathname=()=>'/history';
@@ -21,7 +21,7 @@ const bundled=await build({stdin:{contents:`
  const records=Array.from({length:350},(_,i)=>({id:String(i),name:'Record '+String(i+1).padStart(4,'0'),amount:i+1}));
  function App(){
   const params=useSearchParams(),[selected,setSelected]=useState([]);
-  const query=params.get('q')||'',sort=params.get('sort')||'',direction=params.get('direction')||'desc',all=params.get('all')==='1';
+  const query=params.get('q')||'',sort=params.get('sort')||'',direction=params.get('order')||params.get('direction')||'desc',all=params.get('all')==='1';
   let matched=records.filter(row=>row.name.toLowerCase().includes(query.toLowerCase()));
   if(sort==='amount')matched.sort((a,b)=>direction==='asc'?a.amount-b.amount:b.amount-a.amount);
   const page=Math.min(Math.max(1,Math.ceil(matched.length/100)),Number(params.get('page')||1));
@@ -48,6 +48,8 @@ try{
  await page.getByRole('columnheader',{name:'Amount'}).click();
  await page.getByText('Record 0350',{exact:true}).waitFor();
  assert.ok((await page.locator('#url').textContent()).includes('company=one'),'paging preserves company scope');
+ assert.ok((await page.locator('#url').textContent()).includes('direction=made'),'sorting preserves the payment direction filter');
+ assert.ok((await page.locator('#url').textContent()).includes('order='),'table sorting has its own direction parameter');
  await page.locator('[data-list]').focus();await page.keyboard.press('/');
  await page.getByPlaceholder('Search history').fill('Record 0349');
  await page.getByText('1 matching records',{exact:false}).waitFor();

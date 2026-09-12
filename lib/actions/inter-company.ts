@@ -1,6 +1,8 @@
 "use server";
+import {pairedHistory} from "@/lib/queries/paired-history";
+import type {HistoryRequest} from "@/lib/history-window";
 
-import { and, desc, eq, getTableColumns, inArray, like, sql } from "drizzle-orm";
+import { and, or, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { withReadSnapshot } from "@/lib/db/read-snapshot";
@@ -16,7 +18,7 @@ import {
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
-import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
+import { companyInPermissionScope, companyInScope } from "@/lib/auth/scope";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { ensureDocumentType, nextDocumentNumber } from "@/lib/actions/document-numbering";
 import { resolveContactId, resolveItemIds, resolveUnitIds } from "@/lib/actions/resolve-refs";
@@ -256,54 +258,13 @@ async function invalidateInterCompanyViews() {
 
 // --- Reads ---
 
-export async function listInterCompanySales() {
-  const session = await getSession();
-  requirePermission(session, "sales", "view");
-
-  // Both halves are pulled unscoped and the pair filtered afterwards: a sale in
-  // Royal and its purchase in M52 can't both pass a single company filter, and
-  // dropping one half would leave the row with no buyer or seller to show.
-  const rows = await db
-    .select({
-      id: documents.id,
-      reason: documents.reason,
-      number: documents.number,
-      companyId: documents.companyId,
-      company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
-      documentDate: documents.documentDate,
-      status: documents.status,
-      grandTotal: documents.grandTotal,
-      code: documentTypes.code,
-    })
-    .from(documents)
-    .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-    .innerJoin(companies, eq(companies.id, documents.companyId))
-    .where(like(documents.reason, `${IC_REASON} %`))
-    .orderBy(desc(documents.documentDate));
-
-  const scopeIds = await getScopeCompanyIds();
-  const canView = (companyId: string, key: string) =>
-    scopeIds.includes(companyId) && (session.globalPermissions.has(key) || Boolean(session.permissionsByCompany.get(companyId)?.has(key)));
-  const pairs = new Map<string, { sale?: (typeof rows)[number]; purchase?: (typeof rows)[number] }>();
-  for (const r of rows) {
-    const pair = pairs.get(r.reason!) ?? {};
-    if (r.code === "SALES_INVOICE") pair.sale = r;
-    else pair.purchase = r;
-    pairs.set(r.reason!, pair);
-  }
-
-  return [...pairs.values()]
-    .filter((p) => p.sale && p.purchase && canView(p.sale.companyId, "sales.view") && canView(p.purchase.companyId, "purchases.view"))
-    .map((p) => ({
-      id: p.sale!.id,
-      saleNumber: p.sale!.number,
-      purchaseNumber: p.purchase?.number ?? "—",
-      seller: p.sale!.company,
-      buyer: p.purchase?.company ?? "—",
-      documentDate: p.sale!.documentDate,
-      status: p.sale!.status,
-      grandTotal: p.sale!.grandTotal,
-    }));
+export async function listInterCompanySales() {return (await listInterCompanySalesPage({all:true})).records;}
+export async function listInterCompanySalesPage(request:HistoryRequest={}) {
+ return withReadSnapshot(async()=>{
+  const session=await getSession();requirePermission(session,"sales","view");
+  const scope=or(and(eq(documentTypes.code,"SALES_INVOICE"),await companyInPermissionScope(documents.companyId,session,"sales")),and(eq(documentTypes.code,"PURCHASE_INVOICE"),await companyInPermissionScope(documents.companyId,session,"purchases")));
+  return pairedHistory<{id:string;saleNumber:string;purchaseNumber:string;seller:string;buyer:string;documentDate:string;status:string;grandTotal:string}>("inter",scope,request);
+ });
 }
 
 // The pair, read back by the seller's document id — that's what the list links to

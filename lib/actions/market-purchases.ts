@@ -1,4 +1,9 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
+import type {HistoryRequest} from '@/lib/history-window';
+import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
+import {marketHistory} from '@/lib/queries/history-configs';
+
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -46,12 +51,15 @@ const READS = [
 ] as const;
 const confirmationDocuments = alias(documents, "confirmation_documents");
 
-export async function listMarketPurchaseRequests() {
+async function readMarketPurchaseRequests(request?:HistoryRequest) {
+ return withReadSnapshot(async()=>{
   const session = await getSession();
   requirePermission(session, "purchases", "view");
-  return db
+  const scope=await companyInPermissionScope(marketPurchaseRequests.companyId, session, "purchases");
+  const load=(ids?:string[])=>db
     .select({
       id: marketPurchaseRequests.id,
+      createdAt: marketPurchaseRequests.createdAt,
       _revision: sql<string>`${marketPurchaseRequests}.xmin::text`,
       companyId: marketPurchaseRequests.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
@@ -74,12 +82,20 @@ export async function listMarketPurchaseRequests() {
     .leftJoin(units, eq(units.id, marketPurchaseRequests.unitId))
     .leftJoin(contacts, eq(contacts.id, documents.contactId))
     .leftJoin(confirmationDocuments, eq(confirmationDocuments.id, marketPurchaseRequests.confirmationDocumentId))
-    .where(await companyInPermissionScope(marketPurchaseRequests.companyId, session, "purchases"))
+    .where(and(scope,ids?(ids.length?inArray(marketPurchaseRequests.id,ids):sql`false`):undefined))
     // Enum order is pending, confirmed, cancelled, so this is the same pending-
     // first presentation as the former boolean expression and can use the
     // company/status/created_at index directly.
     .orderBy(marketPurchaseRequests.status, desc(marketPurchaseRequests.createdAt));
+  const window=request?await listHistoryWindow(load(),request,marketHistory):null;
+  const fetched=await load(window?.ids);
+  const rows=window?orderHistoryRecords(fetched,window.ids):fetched;
+  return {records:rows,info:window?.info};
+ });
 }
+
+export async function listMarketPurchaseRequests() {return (await readMarketPurchaseRequests()).records;}
+export async function listMarketPurchaseRequestsPage(request:HistoryRequest={}) {const result=await readMarketPurchaseRequests(request);return {...result,info:result.info!};}
 
 function marketPurchaseDocumentType(companyId: string) {
   return ensureDocumentType({

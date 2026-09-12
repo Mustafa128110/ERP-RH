@@ -1,4 +1,6 @@
-import { listStockTransfers } from "@/lib/actions/stock-transfers";
+import {HistoryProvider} from "@/components/ui/HistoryProvider";
+import {historyRequest} from "@/lib/history-window";
+import { listStockTransfersPage } from "@/lib/actions/stock-transfers";
 import { getCompanies, getItemOptions, getLocations, getUnits } from "@/lib/queries/lookups";
 import { StockTransfersManager } from "@/components/modules/StockTransfersManager";
 import { getSession } from "@/lib/auth/session";
@@ -7,9 +9,10 @@ import type { Row } from "@/lib/table";
 
 export const dynamic = "force-dynamic";
 
-export default async function Page() {
+export default async function Page({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}) {
+  const params=await searchParams;
   const [transfers, companyOptions, itemRows, unitRows, locationRows, session] = await Promise.all([
-    listStockTransfers(),
+    listStockTransfersPage(historyRequest(params)),
     getCompanies(),
     getItemOptions(),
     getUnits(),
@@ -23,7 +26,7 @@ export default async function Page() {
     ? locationRows.filter((l) => warehouseIds.includes(l.id))
     : locationRows;
 
-  const rows: Row[] = transfers.map((t) => ({
+  const rows: Row[] = transfers.records.map((t) => ({
     id: t.id,
     number: t.number,
     company: t.company,
@@ -35,12 +38,12 @@ export default async function Page() {
   }));
 
   return (
-    <StockTransfersManager
+    <HistoryProvider info={transfers.info}><StockTransfersManager
       rows={rows}
       companyOptions={companyOptions.map((c) => ({ id: c.id, name: c.name }))}
       itemOptions={itemRows.map((i) => ({ id: i.id, name: `${i.name} (${i.sku})`, companyId: i.companyId }))}
       unitOptions={unitRows.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name }))}
       locationOptions={accessibleLocations.map((l) => ({ id: l.id, name: l.name }))}
-    />
+    /></HistoryProvider>
   );
 }

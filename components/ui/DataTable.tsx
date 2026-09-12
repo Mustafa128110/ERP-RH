@@ -234,7 +234,7 @@ export function DataTable({
       const nextKey = sortKey === key && sortDir === "asc" ? null : key;
       const nextDirection = sortKey === key && sortDir === "desc" ? "asc" : "desc";
       setSortKey(nextKey); setSortDir(nextDirection);
-      remote.change({sort:nextKey,direction:nextDirection,page:1});
+      remote.change({sort:nextKey,order:nextDirection,page:1});
       return;
     }
     if (sortKey === key) {

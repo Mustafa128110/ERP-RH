@@ -47,7 +47,7 @@ export function StockAdjustmentsManager({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title="Stock Adjustments" subtitle={`${rows.length} adjustment(s)`}>
+      <PageHeader title="Stock Adjustments" subtitle={`${rows.length} adjustment(s) on this page`}>
         <StockFilter param="company" allLabel="All Companies" options={companyOptions} />
         <button
           type="button"
@@ -60,7 +60,7 @@ export function StockAdjustmentsManager({
         </button>
       </PageHeader>
 
-      <DataTable
+      <DataTable history
         columns={columns}
         rows={rows}
         idKey="id"

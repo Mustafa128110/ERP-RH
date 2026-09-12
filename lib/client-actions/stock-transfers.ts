@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/stock-transfers";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/stock-transfers";
 export const listStockTransfers: typeof server.listStockTransfers = backgroundRead("stock-transfers.listStockTransfers", server.listStockTransfers);
+export const listStockTransfersPage: typeof server.listStockTransfersPage = backgroundRead("stock-transfers.listStockTransfersPage", server.listStockTransfersPage);
 export const getStockTransfer: typeof server.getStockTransfer = backgroundRead("stock-transfers.getStockTransfer", server.getStockTransfer);
 export const createStockTransfer: typeof server.createStockTransfer = backgroundAction("stock-transfers.createStockTransfer", server.createStockTransfer);
 export const updateStockTransfer: typeof server.updateStockTransfer = backgroundAction("stock-transfers.updateStockTransfer", server.updateStockTransfer);

@@ -1,7 +1,11 @@
 "use server";
+import {stockDocumentHistory} from "@/lib/queries/stock-document-history";
+import {orderHistoryRecords} from "@/lib/queries/list-history";
+import type {HistoryRequest} from "@/lib/history-window";
 
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import {withReadSnapshot} from "@/lib/db/read-snapshot";
 import { db } from "@/lib/db";
 import {
   companies,
@@ -80,7 +84,7 @@ export async function getRecentStockAdjustmentRates(itemId: string): Promise<str
   return rates;
 }
 
-export async function listStockAdjustments(companyId?: string) {
+async function readStockAdjustments(companyId: string|undefined, ids?:string[]) {
   const session = await getSession();
   requirePermission(session, "stock_adjustments", "view");
   const scope = and(await companyInPermissionScope(documents.companyId, session, "stock_adjustments"), companyId ? eq(documents.companyId, companyId) : undefined);
@@ -98,7 +102,7 @@ export async function listStockAdjustments(companyId?: string) {
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .innerJoin(companies, eq(companies.id, documents.companyId))
-      .where(and(eq(documentTypes.code, "STOCK_ADJUSTMENT"), scope))
+      .where(and(eq(documentTypes.code, "STOCK_ADJUSTMENT"), scope,ids?(ids.length?inArray(documents.id,ids):sql`false`):undefined))
       .orderBy(desc(documents.documentDate)),
     db
       .select({
@@ -118,7 +122,7 @@ export async function listStockAdjustments(companyId?: string) {
       .leftJoin(items, eq(items.id, documentLines.itemId))
       .leftJoin(units, eq(units.id, documentLines.unitId))
       .leftJoin(locations, eq(locations.id, documentLines.locationId))
-      .where(and(eq(documentTypes.code, "STOCK_ADJUSTMENT"), scope))
+      .where(and(eq(documentTypes.code, "STOCK_ADJUSTMENT"), scope,ids?(ids.length?inArray(documents.id,ids):sql`false`):undefined))
       .orderBy(documentLines.lineNo),
   ]);
 
@@ -138,6 +142,15 @@ export async function listStockAdjustments(companyId?: string) {
     items: byDoc.get(d.id)?.items ?? [],
     net: byDoc.get(d.id)?.net ?? 0,
   }));
+}
+
+export async function listStockAdjustments(companyId?: string) {return readStockAdjustments(companyId);}
+export async function listStockAdjustmentsPage(companyId:string|undefined,request:HistoryRequest={}){
+ return withReadSnapshot(async()=>{
+  const session=await getSession();requirePermission(session,"stock_adjustments","view");
+  const window=await stockDocumentHistory("STOCK_ADJUSTMENT",and(await companyInPermissionScope(documents.companyId,session,"stock_adjustments"),companyId?eq(documents.companyId,companyId):undefined),request);
+  return {records:orderHistoryRecords(await readStockAdjustments(companyId, window.ids),window.ids),info:window.info};
+ });
 }
 
 export async function getStockAdjustment(documentId: string) {

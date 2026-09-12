@@ -1,4 +1,6 @@
-import { listExpenses } from "@/lib/actions/expenses";
+import {HistoryProvider} from '@/components/ui/HistoryProvider';
+import {historyRequest} from '@/lib/history-window';
+import { listExpensesPage } from "@/lib/actions/expenses";
 import {
   getBankAccountOptions,
   getCashAccountOptions,
@@ -13,11 +15,11 @@ import { ListFilters } from "@/components/ui/ListFilters";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ company?: string; from?: string; to?: string }>;
+  searchParams: Promise<Record<string,string|undefined>>;
 }) {
   const filters = await searchParams;
   const [expenses, companyRows, categoryRows, contactRows, bankAccountOptions, cashAccountOptions, chequeOptions] = await Promise.all([
-    listExpenses(filters),
+    listExpensesPage(filters,historyRequest(filters)),
     getCompanies(),
     getExpenseCategories(),
     getContactOptions(),
@@ -29,8 +31,8 @@ export default async function Page({
   const companyCodeMap = new Map(companyRows.map((c) => [c.id, c.shortName ?? c.name]));
 
   return (
-    <ExpenseManager
-      expenses={expenses}
+    <HistoryProvider info={expenses.info}><ExpenseManager
+      expenses={expenses.records}
       filtered={Object.values(filters).some(Boolean)}
       companyOptions={companyRows}
       companyCodeMap={companyCodeMap}
@@ -42,6 +44,6 @@ export default async function Page({
       filters={
         <ListFilters key="filters" />
       }
-    />
+    /></HistoryProvider>
   );
 }

@@ -1,4 +1,6 @@
-import { listPayments } from "@/lib/actions/payments";
+import {HistoryProvider} from '@/components/ui/HistoryProvider';
+import {historyRequest} from '@/lib/history-window';
+import { listPaymentsPage } from "@/lib/actions/payments";
 import { listPaymentLedgerBalances } from "@/lib/actions/ledger";
 import {
   getAvailableCheques,
@@ -14,11 +16,11 @@ import { getSession } from "@/lib/auth/session";
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ contact?: string; direction?: string; company?: string; from?: string; to?: string }>;
+  searchParams: Promise<Record<string,string|undefined>>;
 }) {
   const filters = await searchParams;
   const [payments, companyRows, contactRows, bankAccountOptions, cashAccountOptions, chequeOptions, ledgerBalances, session] = await Promise.all([
-    listPayments(filters),
+    listPaymentsPage(filters,historyRequest(filters)),
     getCompanies(),
     getContactOptions(),
     getBankAccountOptions(),
@@ -31,8 +33,8 @@ export default async function Page({
   ]);
 
   return (
-    <PaymentManager
-      payments={payments}
+    <HistoryProvider info={payments.info}><PaymentManager
+      payments={payments.records}
       filtered={Object.values(filters).some(Boolean)}
       companyOptions={companyRows}
       contactOptions={contactRows.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId ?? "" }))}
@@ -44,6 +46,6 @@ export default async function Page({
       filters={
         <ListFilters key="filters" />
       }
-    />
+    /></HistoryProvider>
   );
 }
