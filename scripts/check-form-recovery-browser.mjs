@@ -67,6 +67,14 @@ try {
  assert.equal((await page.evaluate(key=>work.readDraft(key),key)).revision,'300');
  await page.getByRole('button',{name:'Discard edit',exact:true}).click();
  assert.equal(await page.locator('[name="name"]').isDisabled(),false);
+ // A malformed collection must be rejected before React receives it as state.
+ await page.evaluate(({key,saved})=>{work.saveDraft(key,{...saved,revision:'301',states:{...saved.states,granted:JSON.stringify(['value','not a permission set'])}});window.mount('301')},{key,saved});
+ await page.getByRole('button',{name:'Restore edit',exact:true}).click();
+ await page.getByRole('alert').waitFor();
+ assert.equal(await page.locator('[name="name"]').inputValue(),'Original');
+ assert.equal(await page.locator('[name="name"]').isDisabled(),true);
+ assert.ok(await page.evaluate(key=>work.readDraft(key),key),'malformed input remains downloadable');
+ await page.getByRole('button',{name:'Discard edit',exact:true}).click();
  // Real IndexedDB compaction keeps every unresolved input and every receipt.
  const result=await page.evaluate(async()=>{
   const now=Date.now(),base={userId:'compact',action:'sales.createSale',version:1,path:'/',label:'Sale',attempts:0,createdAt:now-9*86400000,updatedAt:now-8*86400000};

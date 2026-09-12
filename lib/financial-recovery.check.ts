@@ -6,6 +6,7 @@ import { encodeArgument, type SavedCommand } from "./command-protocol";
 import { runAsWhatsAppUser } from "./whatsapp-agent/context";
 import { sessionQuery } from "./db/session-query";
 import type { AuthSession } from "./auth/session";
+import { listLedgerBalances } from "./actions/ledger";
 
 async function main() {
   const target = new URL(process.env.DATABASE_URL_DIRECT!);
@@ -98,6 +99,12 @@ async function main() {
   } finally {
     if (removed.length) await db.execute(sql`INSERT INTO role_permissions(role_id,permission_id) VALUES ${sql.join(removed.map(row=>sql`(${row.role_id}::uuid,${row.permission_id}::uuid)`),sql`, `)}`);
   }
-  console.log("Financial recovery checks passed on disposable restore: real sale, purchase, payment and expense actions; concurrent same-operation saves; lost acknowledgements; interrupted transaction rollback and retry; permission revocation");
+  const balances = await runAsWhatsAppUser(await currentSession(), () => listLedgerBalances());
+  const party = balances.find(row => row.contactId === contactId && row.companyId === company);
+  assert.ok(party);
+  assert.ok(party.recentInvoices.length > 0 && party.recentInvoices.length <= 6, "ledger response retains its bounded invoice hover history");
+  assert.ok(party.recentPurchases.length > 0 && party.recentPurchases.length <= 6, "ledger response retains its bounded purchase hover history");
+  assert.ok(party.recentInvoices.every(invoice => invoice.items.length > 0), "actual invoice lines reach the hover panel");
+  console.log("Financial recovery checks passed on disposable restore: real sale, purchase, payment and expense actions; concurrent same-operation saves; lost acknowledgements; interrupted transaction rollback and retry; permission revocation; ledger hover history");
 }
 main().finally(() => db.$client.end()).catch(error => { console.error(error); process.exitCode=1; });

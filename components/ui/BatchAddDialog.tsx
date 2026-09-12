@@ -57,11 +57,9 @@ export function BatchAddDialog<T, C = unknown>({
   // Quick-add from inside another form usually means "I need one thing"; the
   // master-data pages mean "I'm entering a batch". Same dialog, different start.
   initialRows?: number;
-  // When set, the rows are kept in localStorage as they're typed and offered
-  // back the next time the dialog opens — a crash, a closed tab or an offline
-  // blip costs nothing. Used by the dialogs people paste many rows into
-  // (expenses, payments); the master-data dialogs don't pass it. Clearing on a
-  // successful save is handled here, inside submit().
+  // Override the account/title draft key when a caller needs a stable custom
+  // identity. Batch drafts are preserved by default; password-bearing user
+  // creation opts out. Clearing after a successful save is handled in submit().
   draftKey?: string;
   preserveDraft?: boolean;
   draftMetadata?: Record<string, string>;

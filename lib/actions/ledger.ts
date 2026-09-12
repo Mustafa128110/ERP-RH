@@ -1,9 +1,9 @@
 "use server";
 
-import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, companies, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister, contactOpeningBalances, paymentAllocations, auditLogs } from "@/lib/db/schema";
+import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister, contactOpeningBalances, paymentAllocations, auditLogs } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission, PermissionError } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
@@ -16,6 +16,7 @@ import { recordAudit, type AuditRow } from "@/lib/actions/audit";
 import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment-allocation";
 import { changeSummary } from "@/lib/audit-constants";
 import { cachedPageRead } from "@/lib/read-cache";
+import { ledgerSummaryRows, recentLedgerDocuments } from "@/lib/queries/ledger-summary";
 import {
   codeToLedgerType,
   closingBalance,
@@ -110,162 +111,36 @@ async function loadLedgerBalances(
 ): Promise<ContactLedgerBalance[]> {
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(READ_DOMAIN.ledger, `${session.userId}:ledger:${permissionModule}:${cacheScope}`, async () => {
+  return cachedPageRead(READ_DOMAIN.ledger, `${session.userId}:ledger:v2:${permissionModule}:${cacheScope}`, async () => {
 
   // Neither query depends on the other's rows, so they share one round trip.
   const docScope = await companyInPermissionScope(documents.companyId, session, permissionModule);
   const [rows, paymentRows, invoiceHeaders, purchaseHeaders] = await Promise.all([
-    db
-      .select({
-        contactId: contacts.id,
-        _revision: sql<string>`${contacts}.xmin::text`,
-        displayName: contacts.displayName,
-        companyId: ledgerEntries.companyId,
-        company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
-        credit: ledgerEntries.credit,
-        debit: ledgerEntries.debit,
-        code: documentTypes.code,
-        bankAccountId: documents.bankAccountId,
-        cashAccountId: documents.cashAccountId,
-        bankCompanyId: bankAccounts.companyId,
-        cashCompanyId: cashAccounts.companyId,
-        chequeCompanyId: chequeRegister.companyId,
-      })
-      .from(ledgerEntries)
-      .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
-      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .innerJoin(companies, eq(companies.id, ledgerEntries.companyId))
-      .leftJoin(contacts, eq(contacts.id, documents.contactId))
-      .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
-      .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-      .leftJoin(chequeRegister, eq(chequeRegister.documentId, documents.id))
-      // This used to read every company's entries regardless of who was signed in
-      // or what the topbar was set to — the only list in the app that didn't scope.
-      .where(await companyInPermissionScope(ledgerEntries.companyId, session, permissionModule)),
-
-    // Every payment against a contact, newest first — sliced to five per contact
-    // below. Both directions: a contact can be owed money on one invoice and owe
-    // it on another, and "what has moved between us lately" is the question.
-    // Filter out payments with invalid settlement accounts (wrong company).
-    db
-      .select({
-        companyId: documents.companyId,
-        contactId: documents.contactId,
-        date: documents.documentDate,
-        number: documents.number,
-        amount: documents.grandTotal,
-        code: documentTypes.code,
-        bankAccountId: documents.bankAccountId,
-        cashAccountId: documents.cashAccountId,
-        bankCompanyId: bankAccounts.companyId,
-        cashCompanyId: cashAccounts.companyId,
-      })
-      .from(documents)
-      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .leftJoin(bankAccounts, eq(bankAccounts.id, documents.bankAccountId))
-      .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
-      .where(
-        and(
-          inArray(documentTypes.code, ["PAYMENT_MADE", "PAYMENT_RECEIVED"]),
-          eq(documents.status, "posted"),
-          isNotNull(documents.contactId),
-          await companyInPermissionScope(documents.companyId, session, permissionModule),
-        ),
-      )
-      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
-
-    // Last 6 sales invoices per contact for "Owes Us" hover.
-    db
-      .select({
-        companyId: documents.companyId,
-        contactId: documents.contactId,
-        id: documents.id,
-        number: documents.number,
-        status: documents.status,
-        grandTotal: documents.grandTotal,
-        paidAmount: documents.paidAmount,
-        isPaid: documents.isPaid,
-        documentDate: documents.documentDate,
-        createdAt: documents.createdAt,
-      })
-      .from(documents)
-      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(
-        eq(documentTypes.code, "SALES_INVOICE"),
-        eq(documents.status, "posted"),
-        isNotNull(documents.contactId),
-        docScope,
-      ))
-      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
-
-    // Last 6 purchases per contact for "We Owe" hover.
-    db
-      .select({
-        companyId: documents.companyId,
-        contactId: documents.contactId,
-        id: documents.id,
-        number: documents.number,
-        status: documents.status,
-        grandTotal: documents.grandTotal,
-        paidAmount: documents.paidAmount,
-        isPaid: documents.isPaid,
-        documentDate: documents.documentDate,
-        createdAt: documents.createdAt,
-      })
-      .from(documents)
-      .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
-      .where(and(
-        eq(documentTypes.code, "PURCHASE_INVOICE"),
-        eq(documents.status, "posted"),
-        isNotNull(documents.contactId),
-        docScope,
-      ))
-      .orderBy(desc(documents.documentDate), desc(documents.createdAt)),
+    ledgerSummaryRows(await companyInPermissionScope(ledgerEntries.companyId, session, permissionModule)),
+    recentLedgerDocuments(docScope, ["PAYMENT_MADE", "PAYMENT_RECEIVED"], true),
+    recentLedgerDocuments(docScope, ["SALES_INVOICE"]),
+    recentLedgerDocuments(docScope, ["PURCHASE_INVOICE"]),
   ]);
-
-  // Filter out payments with invalid settlement accounts (wrong company).
-  // Mirrors adjustSettlementBalancesBatch validation:
-  // - bank accounts: global (company_id IS NULL) or matching document's company
-  // - cash accounts: must match document's company
-  // - cheques: validated on delete (rare, and we don't have documentId here)
-  const validPaymentRows = paymentRows.filter((p) => {
-    if (p.bankAccountId) {
-      if (p.bankCompanyId !== null && p.bankCompanyId !== p.companyId) return false;
-    } else if (p.cashAccountId) {
-      if (p.cashCompanyId !== p.companyId) return false;
-    }
-    return true;
-  });
 
   // Split payments into made/received, 6 per direction per contact.
   const paymentsMadeByContact = new Map<string, ContactPayment[]>();
   const paymentsReceivedByContact = new Map<string, ContactPayment[]>();
-  for (const p of validPaymentRows) {
+  for (const p of paymentRows) {
     const key = `${p.companyId}:${p.contactId}`;
     const dir = p.code === "PAYMENT_MADE" ? "made" : "received";
     const map = dir === "made" ? paymentsMadeByContact : paymentsReceivedByContact;
     const list = map.get(key) ?? [];
     if (list.length < 6) {
-      list.push({ date: p.date, number: p.number, amount: p.amount, direction: dir });
+      list.push({ date: p.documentDate, number: p.number, amount: p.grandTotal, direction: dir });
     }
     map.set(key, list);
   }
-
-  // Apply the same settlement-ownership rule as the individual statement and
-  // FIFO engine. A malformed historical payment cannot affect one surface while
-  // being correctly excluded from the other.
-  const validBalanceRows = rows.filter((r) => {
-    if (r.code !== "PAYMENT_MADE" && r.code !== "PAYMENT_RECEIVED") return true;
-    if (r.bankAccountId) return r.bankCompanyId === null || r.bankCompanyId === r.companyId;
-    if (r.cashAccountId) return r.cashCompanyId === r.companyId;
-    return r.chequeCompanyId === r.companyId;
-  });
 
   // Keyed by company as well as contact: a contact belongs to one company, but
   // the same supplier is often set up in both, and their balances are separate
   // sets of books that must not be summed into one row.
   const byContact = new Map<string, ContactLedgerBalance>();
-  for (const r of validBalanceRows) {
+  for (const r of rows) {
     const key = `${r.companyId}:${r.contactId ?? "unknown"}`;
     const entry = byContact.get(key) ?? {
       contactId: r.contactId ?? "unknown",
@@ -284,11 +159,6 @@ async function loadLedgerBalances(
     entry.debit += Number(r.debit ?? 0);
     byContact.set(key, entry);
   }
-
-  // One sign everywhere: the list and statement both use debit - credit.
-  const balances = Array.from(byContact.values())
-    .map((e) => ({ ...e, balance: closingBalance(0, e.debit, e.credit) }))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
 
   // Group invoice headers by contact, top 6 per contact.
   const invoicesByContact = new Map<string, typeof invoiceHeaders>();
@@ -348,8 +218,11 @@ async function loadLedgerBalances(
     if (entry) entry.recentPurchases = docs.map((d) => ({ id: d.id, number: d.number, status: d.status, grandTotal: String(d.grandTotal), paidAmount: String(d.paidAmount), isPaid: d.isPaid, items: itemsByDoc.get(d.id) ?? [] }));
   }
 
-  // A-Z by contact.
-  return balances;
+  // Copy only after the recent documents are attached. Copying earlier left
+  // the returned hover arrays empty even when the database held invoices.
+  return Array.from(byContact.values())
+    .map((e) => ({ ...e, balance: closingBalance(0, e.debit, e.credit) }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.company.localeCompare(b.company));
   });
 }
 
