@@ -39,6 +39,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <QuotationDetail
         quotationId={quotation.id}
         defaults={{
+          _revision: quotation._revision,
           companyId: quotation.companyId,
           contactId: quotation.contactId,
           documentDate: quotation.documentDate,

@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, revisionOf } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
@@ -35,7 +36,7 @@ function Fields({ defaults, parentOptions }: { defaults?: CategoryValues; parent
   );
 }
 
-export function CategoryEditForm({
+function CategoryEditFormBody({
   categoryId,
   defaults,
   parentOptions,
@@ -142,4 +143,8 @@ export function DeleteCategoryButton({ categoryId, onDone }: { categoryId: strin
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>
   );
+}
+
+export function CategoryEditForm(props: Parameters<typeof CategoryEditFormBody>[0]) {
+  return <FormRecovery domain="categories" id={props.categoryId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><CategoryEditFormBody {...props} /></FormRecovery>;
 }

@@ -1,4 +1,7 @@
 "use client";
+import { useBatchEditDraft } from "@/components/ui/useBatchEditDraft";
+import { DraftBanner } from "@/components/ui/useDraft";
+import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import {
@@ -29,7 +32,7 @@ type ContactDefaults = {
   isActive: boolean | null;
 };
 
-export function ContactEditForm({
+function ContactEditFormBody({
   companyOptions,
   contactId,
   defaults,
@@ -41,7 +44,7 @@ export function ContactEditForm({
   onDone: () => void;
 }) {
   const [state, action, pending] = useActionState(updateContact.bind(null, contactId), undefined);
-  const [displayName, setDisplayName] = useState(defaults?.displayName ?? "");
+  const [displayName, setDisplayName] = useRecoveryState("displayName", defaults?.displayName ?? "");
 
   useEffect(() => {
     if (!state?.success) return;
@@ -255,10 +258,13 @@ export function ContactsBatchEditDialog({
   onDone: () => void;
 }) {
   const [rows, setRows] = useState<ContactEditRow[] | null>(null);
+  const [baseRows, setBaseRows] = useState<ContactEditRow[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
+
+  const recovery = useBatchEditDraft("contacts", contactIds, baseRows, { rows }, value => setRows(value.rows));
 
   useEffect(() => {
     let cancelled = false;
@@ -266,7 +272,7 @@ export function ContactsBatchEditDialog({
       .then((loaded) => {
         if (cancelled) return;
         if (loaded.length === 0) setLoadError(true);
-        else setRows(loaded);
+        else { setRows(loaded); setBaseRows(loaded); }
       })
       .catch(() => {
         if (!cancelled) setLoadError(true);
@@ -289,6 +295,7 @@ export function ContactsBatchEditDialog({
   }
 
   async function submit() {
+    if (!recovery.ready || recovery.offerDraft) return;
     if (!rows || rows.length === 0) return;
     setPending(true);
     setError(null);
@@ -317,7 +324,7 @@ export function ContactsBatchEditDialog({
           <button
             type="button"
             onClick={submit}
-            disabled={pending || !rows || rows.length === 0}
+            disabled={!recovery.ready || recovery.offerDraft || pending || !rows || rows.length === 0}
             // data-dialog-submit: this dialog has no form (Save calls a
             // function), so the app-wide Ctrl+Enter handler clicks this
             // button from anywhere in the dialog body.
@@ -329,6 +336,10 @@ export function ContactsBatchEditDialog({
         </div>
       }
     >
+      <div {...recovery.attributes}>
+        {recovery.offerDraft && <DraftBanner noun="batch edit" onRestore={recovery.restore} onDiscard={recovery.discard} canRestore={recovery.canRestore} onDownload={recovery.download} />}
+        {recovery.storageError && <p role="alert">This browser could not preserve the batch. Keep it open until saved.</p>}
+        <fieldset className="contents" disabled={!recovery.ready || recovery.offerDraft}>
       {loadError ? (
         <p className={errorTextClass}>Couldn&apos;t load the selected contacts.</p>
       ) : !rows ? (
@@ -420,7 +431,13 @@ export function ContactsBatchEditDialog({
           </table>
         </div>
       )}
+        </fieldset>
+      </div>
     </Dialog>
   );
 }
 
+
+export function ContactEditForm(props: Parameters<typeof ContactEditFormBody>[0]) {
+  return <FormRecovery domain="contacts" id={props.contactId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><ContactEditFormBody {...props} /></FormRecovery>;
+}

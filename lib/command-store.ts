@@ -1,5 +1,6 @@
 "use client";
 import { COMMAND_EVENT, canonicalJson, type SavedCommand } from "@/lib/command-protocol";
+import { commandInputHash, compactionCandidates } from "@/lib/command-compaction";
 
 const DATABASE = "erp-work-v1";
 let opening: Promise<IDBDatabase> | undefined;
@@ -51,18 +52,40 @@ export function listCommands(userId: string): Promise<SavedCommand[]> {
     request.onsuccess = () => done((request.result as SavedCommand[]).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)));
   });
 }
-export function addCommand(command: SavedCommand): Promise<void> {
+export async function addCommand(command: SavedCommand): Promise<void> {
+  const inputHash = await commandInputHash(command.args);
   return transaction("readwrite", (store, done) => {
     const request = store.get(command.id);
     request.onsuccess = () => {
       const prior = request.result as SavedCommand | undefined;
       if (!prior) store.add(command);
-      else if (prior.userId !== command.userId || prior.action !== command.action || canonicalJson(prior.args) !== canonicalJson(command.args)) {
+      else if (prior.userId !== command.userId || prior.action !== command.action || (prior.compactedAt ? prior.inputHash !== inputHash : canonicalJson(prior.args) !== canonicalJson(command.args))) {
         store.transaction.abort();
         return;
       }
       done(undefined);
     };
+  });
+}
+export async function compactConfirmedCommands(userId: string, now = Date.now()): Promise<number> {
+  const candidates = compactionCandidates(await listCommands(userId), now);
+  if (!candidates.length) return 0;
+  // Hash outside the IndexedDB transaction: awaiting WebCrypto inside it would
+  // let the browser auto-commit before the compacted records were written.
+  const hashes = await Promise.all(candidates.map(row => commandInputHash(row.args)));
+  return transaction("readwrite", (store, done) => {
+    let count = 0;
+    candidates.forEach((candidate, index) => {
+      const request = store.get(candidate.id);
+      request.onsuccess = () => {
+        const current = request.result as SavedCommand | undefined;
+        if (current?.userId === userId && current.status === "confirmed" && !current.compactedAt && current.updatedAt === candidate.updatedAt && canonicalJson(current.args) === canonicalJson(candidate.args)) {
+          store.put({ ...current, args: [], inputHash: hashes[index], compactedAt: now });
+          count++;
+        }
+        done(count);
+      };
+    });
   });
 }
 export function changeCommand(userId: string, id: string, change: (entry: SavedCommand) => SavedCommand): Promise<SavedCommand | undefined> {

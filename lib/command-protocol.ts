@@ -6,6 +6,8 @@ export type SavedCommand = {
   status: CommandState; attempts: number; error?: string; needsConfirmation?: boolean;
   result?: CommandValue;
   revisions?: Record<string, string>;
+  compactedAt?: number;
+  inputHash?: string;
 };
 export const COMMAND_LIMIT_BYTES = 900_000;
 export const COMMAND_EVENT = "erp:commands-changed";

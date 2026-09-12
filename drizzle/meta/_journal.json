@@ -519,6 +519,13 @@
       "when": 1789084800000,
       "tag": "0073_durable_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789171200000,
+      "tag": "0074_cache_revisions",
+      "breakpoints": true
     }
   ]
 }

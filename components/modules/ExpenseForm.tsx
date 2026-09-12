@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useState } from "react";
@@ -156,6 +157,8 @@ export function ExpenseBatchAddDialog({
       initialRows={1}
       autoAppend
       draftKey={userId ? `expense-batch:${userId}` : "expense-batch"}
+      draftMetadata={{ date: batchDate }}
+      restoreDraftMetadata={value => { if (/^\d{4}-\d{2}-\d{2}$/.test(value.date)) setBatchDate(value.date); }}
       headers={["Company", "Category", "Amount", "Settle via", "Account", "Note"]}
       toolbar={
         <label className="flex items-center gap-2">
@@ -291,10 +294,10 @@ function Fields({
   cashAccountOptions: CashOption[];
   chequeOptions: ChequeOption[];
 }) {
-  const [companyId, setCompanyId] = useState(defaults?.companyId ?? companyOptions[0]?.id ?? "");
-  const [expenseCategoryId, setExpenseCategoryId] = useState(defaults?.expenseCategoryId ?? "");
-  const [categoryText, setCategoryText] = useState(() => categoryOptions.find((c) => c.id === defaults?.expenseCategoryId)?.name ?? "");
-  const [settlementType, setSettlementType] = useState<SettlementType>(
+  const [companyId, setCompanyId] = useRecoveryState("companyId", defaults?.companyId ?? companyOptions[0]?.id ?? "");
+  const [expenseCategoryId, setExpenseCategoryId] = useRecoveryState("expenseCategoryId", defaults?.expenseCategoryId ?? "");
+  const [categoryText, setCategoryText] = useRecoveryState("categoryText", () => categoryOptions.find((c) => c.id === defaults?.expenseCategoryId)?.name ?? "");
+  const [settlementType, setSettlementType] = useRecoveryState<SettlementType>("settlementType",
     defaults?.bankAccountId ? "account" : defaults?.cashAccountId ? "cash" : defaults?.chequeId ? "cheque" : "cash",
   );
   // Cheques created from the "+" beside the picker, newest first.
@@ -306,7 +309,7 @@ function Fields({
   // The select is uncontrolled (it remounts on `key` when the settlement type
   // changes, taking a fresh default with it), so a cheque created on the spot is
   // selected by overriding that default rather than by holding a value.
-  const [createdChequeId, setCreatedChequeId] = useState("");
+  const [createdChequeId, setCreatedChequeId] = useRecoveryState("createdChequeId", "");
 
   return (
     <>
@@ -424,7 +427,7 @@ function Fields({
   );
 }
 
-export function ExpenseEditForm({
+function ExpenseEditFormBody({
   expenseId,
   defaults,
   companyOptions,
@@ -513,4 +516,8 @@ export function DeleteExpenseButton({
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>
   );
+}
+
+export function ExpenseEditForm(props: Parameters<typeof ExpenseEditFormBody>[0]) {
+  return <FormRecovery domain="expenses" id={props.expenseId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><ExpenseEditFormBody {...props} /></FormRecovery>;
 }

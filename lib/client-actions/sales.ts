@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/sales";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/sales";
 export const listSales: typeof server.listSales = backgroundRead("sales.listSales", server.listSales);
+export const listSalesPage: typeof server.listSalesPage = backgroundRead("sales.listSalesPage", server.listSalesPage);
 export const listChequesForSales: typeof server.listChequesForSales = backgroundRead("sales.listChequesForSales", server.listChequesForSales);
 export const getCustomerOutstanding: typeof server.getCustomerOutstanding = backgroundRead("sales.getCustomerOutstanding", server.getCustomerOutstanding);
 export const getSaleEditorOptions: typeof server.getSaleEditorOptions = backgroundRead("sales.getSaleEditorOptions", server.getSaleEditorOptions);

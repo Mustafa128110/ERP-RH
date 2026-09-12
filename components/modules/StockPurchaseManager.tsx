@@ -241,6 +241,7 @@ export function StockPurchaseManager({
         pendingIds={pending}
         emptyMessage="No purchases yet."
         searchPlaceholder="Search purchases…"
+        history
       />
 
       {mergeOpen && <MergePurchasesDialog onClose={() => setMergeOpen(false)} onDone={close} />}

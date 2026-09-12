@@ -38,11 +38,12 @@ export async function listExpenses(filters: ExpenseFilters = {}) {
   requirePermission(session, "expenses", "view");
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(READ_DOMAIN.expenses, `${session.userId}:expenses:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.expenses, `${session.userId}:expenses:v2:${cacheScope}:${stableReadKey(filters)}`, async () => {
 
   const rows = await db
     .select({
       id: expenses.id,
+      _revision: sql<string>`${expenses}.xmin::text`,
       companyId: expenses.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       expenseCategoryId: expenses.expenseCategoryId,

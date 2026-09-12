@@ -2,6 +2,8 @@ import "server-only";
 import { Redis } from "@upstash/redis";
 import { encodeCacheValue, decodeCacheValue } from "@/lib/cache-codec";
 import { deferUntilCommit, commandContext } from "@/lib/db/command-context";
+import { cacheGeneration } from "@/lib/cache-generation";
+import { createHash } from "node:crypto";
 
 // L1 coalesces duplicate work in one process.  Upstash is only the shared L2:
 // a quota, network, or service failure must make reads slower, never stale or
@@ -18,7 +20,7 @@ type CacheGlobals = {
 const globalForCache = globalThis as unknown as CacheGlobals;
 const store = (globalForCache.appCache ??= new Map<string, Entry>());
 const MAX_ENTRIES = 1000;
-const NAMESPACE = "erp:cache:v2";
+const NAMESPACE = "erp:cache:v3";
 const CIRCUIT_MS = 60_000;
 
 export const MINUTE = 60_000;
@@ -85,8 +87,14 @@ export async function cached<T>(key: string, ttlMs: number, load: () => Promise<
   if (commandContext.getStore()) return load();
   const redis = client();
   if (!redis) return process.env.NODE_ENV === "production" ? load() : localCached(key, ttlMs, load);
+  // Redis delivery is best effort. The DB stamp is committed with the business
+  // write and remains observable even after a failed writer instance disappears.
+  const { readCacheVersions } = await import("@/lib/db/cache-revisions");
+  const databaseVersions = await readCacheVersions();
+  if (!databaseVersions) return load();
   const versions = await shared((ready) => versionsFor(ready, key));
   if (!versions) return load();
+  versions.push(createHash("sha256").update(cacheGeneration(key, databaseVersions)).digest("hex").slice(0, 24));
   const sharedKey = valueKey(key, versions);
   return localCached(sharedKey, ttlMs, async () => {
     const serialized = await shared((ready) => ready.get<string>(sharedKey));

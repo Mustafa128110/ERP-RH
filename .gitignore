@@ -55,6 +55,7 @@ next-env.d.ts
 
 # Pre-change DB exports (recovery artifacts, contain business data)
 db-export/
+__pycache__/
 
 # Example documents (reference files, not part of the app)
 example doc/

@@ -1,4 +1,5 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -57,11 +58,12 @@ export type ReturnableSaleLine = {
   unitPrice: string;
 };
 
-export async function getReturnableSale(documentId: string): Promise<{ id: string; number: string; companyId: string; documentDate: string; lines: ReturnableSaleLine[]; returns: { id: string; number: string; documentDate: string; grandTotal: string; status: "draft" | "pending" | "approved" | "posted" | "cancelled" }[] } | null> {
+export async function getReturnableSale(documentId: string): Promise<{ _revision: string; id: string; number: string; companyId: string; documentDate: string; lines: ReturnableSaleLine[]; returns: { id: string; number: string; documentDate: string; grandTotal: string; status: "draft" | "pending" | "approved" | "posted" | "cancelled" }[] } | null> {
+  return withReadSnapshot(async () => {
   const session = await getSession();
   requirePermission(session, "sales", "view");
   const [doc] = await db
-    .select({ id: documents.id, number: documents.number, companyId: documents.companyId, documentDate: documents.documentDate })
+    .select({ id: documents.id, _revision: sql<string>`${documents}.xmin::text`, number: documents.number, companyId: documents.companyId, documentDate: documents.documentDate })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
     .where(and(eq(documents.id, documentId), eq(documents.status, "posted"), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
@@ -104,6 +106,8 @@ export async function getReturnableSale(documentId: string): Promise<{ id: strin
     }),
     returns: returnDocs,
   };
+
+  });
 }
 
 export async function createSalesReturn(_prevState: (ActionResult & { id?: string }) | undefined, formData: FormData): Promise<ActionResult & { id?: string }> {

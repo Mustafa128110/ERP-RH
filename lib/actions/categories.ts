@@ -12,6 +12,7 @@ import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard
 import { recordAudit } from "@/lib/actions/audit";
 
 export interface CategoryNode {
+  _revision: string;
   id: string;
   name: string;
   slug: string | null;
@@ -26,6 +27,7 @@ export async function listCategoryTree(): Promise<CategoryNode[]> {
   const rows = await db
     .select({
       id: categories.id,
+      _revision: sql<string>`${categories}.xmin::text`,
       name: categories.name,
       slug: categories.slug,
       parentId: categories.parentId,
@@ -34,7 +36,7 @@ export async function listCategoryTree(): Promise<CategoryNode[]> {
     .from(categories)
     .orderBy(categories.sortOrder, categories.name);
 
-  const byId = new Map<string, CategoryNode>(rows.map((r) => [r.id, { id: r.id, name: r.name, slug: r.slug, parentId: r.parentId, children: [] }]));
+  const byId = new Map<string, CategoryNode>(rows.map((r) => [r.id, { id: r.id, _revision: r._revision, name: r.name, slug: r.slug, parentId: r.parentId, children: [] }]));
   const roots: CategoryNode[] = [];
   // rows are already sorted by (sortOrder, name), so children/roots keep that order.
   for (const r of rows) {

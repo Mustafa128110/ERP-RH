@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useState } from "react";
@@ -14,8 +15,8 @@ type UnitOption = { id: string; name: string; symbol: string | null };
 const unitLabel = (unit: UnitOption) => unit.symbol ? `${unit.name} (${unit.symbol})` : unit.name;
 
 function RuleFields({ defaults, unitOptions }: { defaults?: RuleValues; unitOptions: UnitOption[] }) {
-  const [fromUnitId, setFromUnitId] = useState(defaults?.fromUnitId ?? "");
-  const [toUnitId, setToUnitId] = useState(defaults?.toUnitId ?? "");
+  const [fromUnitId, setFromUnitId] = useRecoveryState("fromUnitId", defaults?.fromUnitId ?? "");
+  const [toUnitId, setToUnitId] = useRecoveryState("toUnitId", defaults?.toUnitId ?? "");
   return (
     <>
       <label className={labelClass}>
@@ -51,7 +52,7 @@ function RuleFields({ defaults, unitOptions }: { defaults?: RuleValues; unitOpti
   );
 }
 
-export function UnitConversionCreateForm({ unitOptions, onDone }: { unitOptions: UnitOption[]; onDone?: () => void }) {
+function UnitConversionCreateFormBody({ unitOptions, onDone }: { unitOptions: UnitOption[]; onDone?: () => void }) {
   const [state, action, pending] = useActionState(createUnitConversion, undefined);
   useEffect(() => { if (state?.success) onDone?.(); }, [state?.success, onDone]);
   return (
@@ -64,7 +65,11 @@ export function UnitConversionCreateForm({ unitOptions, onDone }: { unitOptions:
   );
 }
 
-export function UnitConversionEditForm({ conversionId, defaults, unitOptions, onDone }: { conversionId: string; defaults: RuleValues; unitOptions: UnitOption[]; onDone?: () => void }) {
+export function UnitConversionCreateForm(props: Parameters<typeof UnitConversionCreateFormBody>[0]) {
+  return <FormRecovery domain="unit_conversions" id="new" revision="0" createAction="unit-conversions.createUnitConversion"><UnitConversionCreateFormBody {...props} /></FormRecovery>;
+}
+
+function UnitConversionEditFormBody({ conversionId, defaults, unitOptions, onDone }: { conversionId: string; defaults: RuleValues; unitOptions: UnitOption[]; onDone?: () => void }) {
   const [state, action, pending] = useActionState(updateUnitConversion.bind(null, conversionId), undefined);
   useEffect(() => { if (state?.success) onDone?.(); }, [state?.success, onDone]);
   return (
@@ -77,12 +82,12 @@ export function UnitConversionEditForm({ conversionId, defaults, unitOptions, on
   );
 }
 
-export function UnitRuleProductsForm({ ruleId, itemIds, itemOptions, onDone }: { ruleId: string; itemIds: string[]; itemOptions: ItemOption[]; onDone?: () => void }) {
-  const [selected, setSelected] = useState(itemIds);
+function UnitRuleProductsFormBody({ ruleId, itemIds, itemOptions, onDone }: { ruleId: string; revision?: string; itemIds: string[]; itemOptions: ItemOption[]; onDone?: () => void }) {
+  const [selected, setSelected] = useRecoveryState("selected", itemIds);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   return (
-    <div className="flex flex-col gap-3 border-t border-sand pt-4">
+    <form className="flex flex-col gap-3 border-t border-sand pt-4" onSubmit={event => event.preventDefault()}>
       <div>
         <p className={labelTextClass}>Products using this rule</p>
         <p className="text-xs text-steel">A product may use more than one compatible rule.</p>
@@ -112,7 +117,7 @@ export function UnitRuleProductsForm({ ruleId, itemIds, itemOptions, onDone }: {
       >
         {saving ? "Saving…" : "Save product assignments"}
       </button>
-    </div>
+    </form>
   );
 }
 
@@ -126,4 +131,12 @@ export function DeleteUnitConversionButton({ conversionId, onDone }: { conversio
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>
   );
+}
+
+export function UnitConversionEditForm(props: Parameters<typeof UnitConversionEditFormBody>[0]) {
+  return <FormRecovery domain="unit_conversions" id={props.conversionId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><UnitConversionEditFormBody {...props} /></FormRecovery>;
+}
+
+export function UnitRuleProductsForm(props: Parameters<typeof UnitRuleProductsFormBody>[0]) {
+  return <FormRecovery domain="unit_conversions" id={props.ruleId} revision={props.revision} draftSuffix="assignments"><UnitRuleProductsFormBody {...props} /></FormRecovery>;
 }

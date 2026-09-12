@@ -39,21 +39,39 @@ export async function queueBackgroundAction(action: string, rawArgs: unknown[], 
     const submittedForm = rawArgs.find(arg => arg instanceof FormData) as FormData | undefined;
     const formId = submittedForm?.get("operationId");
     const formElement = [...document.querySelectorAll<HTMLFormElement>("form[data-draft-key]")].find(form => form.querySelector<HTMLInputElement>('[name="operationId"]')?.value === formId);
-    const batchDraft = document.querySelector<HTMLElement>('[role="dialog"] [data-batch-draft-key]')?.dataset.batchDraftKey;
+    const batchEditor = document.querySelector<HTMLElement>('[role="dialog"] [data-batch-draft-key]');
+    const batchDraft = batchEditor?.dataset.batchDraftKey;
     const draftKey = formElement?.dataset.draftKey || (!submittedForm ? batchDraft : undefined);
     // The previous useActionState result isn't part of the business input.
     const formIndex = args.findIndex(arg => arg && !Array.isArray(arg) && typeof arg === "object" && "$form" in arg);
     if (formIndex > 0) args[formIndex - 1] = null;
     const table = tableForCommand(action);
     const ids = referencedIds(args);
-    const editor = [...document.querySelectorAll<HTMLElement>('[data-command-table][data-command-record]')]
-      .find(node => node.dataset.commandTable === table && ids.has(node.dataset.commandRecord!));
+    const editors = [...document.querySelectorAll<HTMLElement>('[data-command-table][data-command-record]')]
+      .filter(node => node.dataset.commandTable === table && ids.has(node.dataset.commandRecord!));
+    const editor = editors.find(node => node.contains(document.activeElement)) ?? editors[0];
     if (editor && !editor.dataset.commandRevision) return { error: "Refresh this page to load the record version before saving." };
     // A queued delete does not contain the unsaved edit fields. Retain that
     // draft in case deletion is refused; only an update transfers its input.
-    const recoveryKey = action.split(".")[1].startsWith("update") ? editor?.dataset.recoveryKey : undefined;
+    const creating = [...document.querySelectorAll<HTMLElement>('[data-command-create-action]')].find(node => node.dataset.commandCreateAction === action);
+    const recoveryKey = creating?.dataset.recoveryKey ?? (/^(update|set)/.test(action.split(".")[1]) ? editor?.dataset.recoveryKey : undefined);
     const expected = Object.fromEntries([...revisions].filter(([key]) => table && key.startsWith(`${table}:`) && ids.has(key.slice(table.length + 1))));
     if (editor?.dataset.commandRevision) expected[`${table}:${editor.dataset.commandRecord}`] = editor.dataset.commandRevision;
+    const relatedVersions = (creating ?? editor)?.dataset.commandRevisions;
+    if (table && relatedVersions) {
+      const related = JSON.parse(relatedVersions) as Record<string, string>;
+      for (const [key, value] of Object.entries(related)) if (key.startsWith(`${table}:`)) {
+        if (!/^\d+$/.test(value)) return { error: "Reopen this record to load the linked record versions." };
+        expected[key] = value;
+      }
+    }
+    if (!submittedForm && table && batchEditor && batchEditor.dataset.commandTable === table && batchEditor.dataset.commandRevisions) {
+      const base = JSON.parse(batchEditor.dataset.commandRevisions) as Record<string, string>;
+      for (const [key, value] of Object.entries(base)) if (key.startsWith(`${table}:`) && ids.has(key.slice(table!.length + 1))) {
+        if (!/^\d+$/.test(value)) return { error: "Reopen this batch to load the current record versions." };
+        expected[key] = value;
+      }
+    }
     const command: SavedCommand = {
       id: recoveryKey && draftOperationId(recoveryKey) || draftKey && draftOperationId(draftKey) || crypto.randomUUID(), userId, action, args, path,
       label: commandLabel(action, args), version: 1, createdAt: Date.now(), updatedAt: Date.now(),
@@ -70,6 +88,7 @@ export async function queueBackgroundAction(action: string, rawArgs: unknown[], 
     if (new TextEncoder().encode(JSON.stringify(command)).length > COMMAND_LIMIT_BYTES - 1000) return { error: "This batch is too large. Split it before saving." };
     await addCommand(command);
     if (recoveryKey) clearDraft(recoveryKey);
+    if (draftKey && batchEditor?.dataset.commandRevisions) clearDraft(draftKey);
     pendingHint++;
     void requestWorkPersistence();
     return { success: true, queued: true, operationId: command.id };

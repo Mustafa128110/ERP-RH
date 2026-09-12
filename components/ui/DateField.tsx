@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDate, toISODate } from "@/lib/format";
 
 // Every date on screen is DD-MM-YYYY. A bare <input type="date"> can't be told
@@ -52,6 +52,19 @@ export function DateField({
   }
 
   const pickerRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    const restore = (event: Event) => {
+      const next = (event as CustomEvent<string>).detail;
+      if (typeof next !== "string") return;
+      if (value === undefined) setOwnIso(next);
+      onChange?.(next);
+      setText(next ? formatDate(next) : "");
+    };
+    root?.addEventListener("erp:restore-date", restore);
+    return () => root?.removeEventListener("erp:restore-date", restore);
+  }, [onChange, value]);
 
   function set(nextIso: string) {
     if (value === undefined) setOwnIso(nextIso);
@@ -72,7 +85,7 @@ export function DateField({
   }
 
   return (
-    <span className="relative inline-flex w-full items-center">
+    <span ref={rootRef} data-date-field={name} className="relative inline-flex w-full items-center">
       {/* Validation sits on the visible box, not on the hidden ISO field: the
           browser refuses to report a problem on a control it can't scroll to
           and focus, which silently blocks the whole form. The pattern is the

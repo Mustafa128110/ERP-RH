@@ -44,6 +44,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       ) : <InterCompanyFormPage
         saleId={sale.id}
         defaults={{
+          _revision: sale._revision,
+          _revisions: sale._revisions,
           sellerCompanyId: sale.sellerCompanyId,
           buyerCompanyId: sale.buyerCompanyId,
           sellerName: sale.sellerName,

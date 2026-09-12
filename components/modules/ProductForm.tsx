@@ -1,4 +1,6 @@
 "use client";
+import { useBatchEditDraft } from "@/components/ui/useBatchEditDraft";
+import { DraftBanner } from "@/components/ui/useDraft";
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import {
@@ -216,6 +218,8 @@ export function ProductsBatchEditDialog({
   const [reason, setReason] = useState("");
   const [documentDate, setDocumentDate] = useState(todayISO);
 
+  const recovery = useBatchEditDraft("items", itemIds, data?.rows ?? null, { rows, mode, locationId, reason, documentDate }, value => { setRows(value.rows); setMode(value.mode); setLocationId(value.locationId); setReason(value.reason); setDocumentDate(value.documentDate); });
+
   useEffect(() => {
     let cancelled = false;
     getProductsForEdit(itemIds)
@@ -293,6 +297,7 @@ export function ProductsBatchEditDialog({
   }
 
   function submit() {
+    if (!recovery.ready || recovery.offerDraft) return;
     setError(null);
     startSaving(async () => {
       // First thing inside the transition, because React only honours an
@@ -389,7 +394,7 @@ export function ProductsBatchEditDialog({
             <button
               type="button"
               onClick={submit}
-              disabled={pending || rows.length === 0}
+              disabled={!recovery.ready || recovery.offerDraft || pending || rows.length === 0}
               // data-dialog-submit: this dialog has no form (Save calls a
               // function), so the app-wide Ctrl+Enter handler clicks this
               // button from anywhere in the dialog body.
@@ -402,6 +407,10 @@ export function ProductsBatchEditDialog({
         </div>
       }
     >
+      <div {...recovery.attributes}>
+        {recovery.offerDraft && <DraftBanner noun="batch edit" onRestore={recovery.restore} onDiscard={recovery.discard} canRestore={recovery.canRestore} onDownload={recovery.download} />}
+        {recovery.storageError && <p role="alert">This browser could not preserve the batch. Keep it open until saved.</p>}
+        <fieldset className="contents" disabled={!recovery.ready || recovery.offerDraft}>
       {loadError ? (
         <p className={errorTextClass}>Couldn&apos;t load the selected products.</p>
       ) : !data ? (
@@ -650,6 +659,8 @@ export function ProductsBatchEditDialog({
           </div>
         </div>
       )}
+        </fieldset>
+      </div>
     </Dialog>
   );
 }

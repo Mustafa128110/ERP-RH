@@ -1,6 +1,7 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { getTableColumns, and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { itemUnitConversionRules, items, unitConversions, units } from "@/lib/db/schema";
@@ -141,11 +142,14 @@ export async function listUnitConversions() {
 }
 
 export async function getUnitConversion(id: string) {
+  return withReadSnapshot(async () => {
   const { rule } = await scopedRule(id, "view");
   if (!rule) return null;
-  const [detail] = await db.select().from(unitConversions).where(eq(unitConversions.id, id)).limit(1);
+  const [detail] = await db.select({ ...getTableColumns(unitConversions), _revision: sql<string>`${unitConversions}.xmin::text` }).from(unitConversions).where(eq(unitConversions.id, id)).limit(1);
   const assigned = await db.select({ itemId: itemUnitConversionRules.itemId }).from(itemUnitConversionRules).where(eq(itemUnitConversionRules.ruleId, id));
   return { ...detail, itemIds: assigned.map((row) => row.itemId) };
+
+  });
 }
 
 export async function createUnitConversion(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {

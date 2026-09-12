@@ -16,12 +16,18 @@ export function recordFields(form: HTMLFormElement): [string, string][] {
   return [...new FormData(form)].filter((pair): pair is [string, string] => names.has(pair[0]) && typeof pair[1] === "string");
 }
 
-export function restoreRecordFields(form: HTMLFormElement, fields: [string, string][]): void {
+export function restoreRecordFields(form: HTMLFormElement, fields: [string, string][], onlyChanged = false): void {
   for (const element of form.elements) {
     if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement)) continue;
     if (element instanceof HTMLInputElement && ["password", "file", "hidden", "submit", "button"].includes(element.type)) continue;
     if (!element.name) continue;
     const values = fields.filter(([name]) => name === element.name).map(([, value]) => value);
+    if (onlyChanged) {
+      const current = element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)
+        ? (element.checked ? [element.value] : [])
+        : element instanceof HTMLSelectElement && element.multiple ? [...element.selectedOptions].map(option => option.value) : [element.value];
+      if (JSON.stringify(current) === JSON.stringify(values.length ? values : element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? [] : [""])) continue;
+    }
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) element.checked = values.includes(element.value);
     else if (element instanceof HTMLSelectElement && element.multiple) for (const option of element.options) option.selected = values.includes(option.value);
     else element.value = values[0] ?? "";

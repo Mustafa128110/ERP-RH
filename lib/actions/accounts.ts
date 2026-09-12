@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql, getTableColumns } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { bankAccounts, cashAccounts, chequeRegister } from "@/lib/db/schema";
@@ -39,7 +39,7 @@ export async function listBankAccounts() {
   requirePermission(session, "accounts", "view");
   const scope = (await getScopeCompanyIds()).sort().join(",");
   return cachedPageRead(READ_DOMAIN.accounts, `${session.userId}:accounts:bank:${scope}`, async () =>
-    db.select().from(bankAccounts).where(await companyInPermissionScope(bankAccounts.companyId, session, "accounts")),
+    db.select({ ...getTableColumns(bankAccounts), _revision: sql<string>`${bankAccounts}.xmin::text` }).from(bankAccounts).where(await companyInPermissionScope(bankAccounts.companyId, session, "accounts")),
   );
 }
 
@@ -48,7 +48,7 @@ export async function listCashAccounts() {
   requirePermission(session, "accounts", "view");
   const scope = (await getScopeCompanyIds()).sort().join(",");
   return cachedPageRead(READ_DOMAIN.accounts, `${session.userId}:accounts:cash:${scope}`, async () =>
-    db.select().from(cashAccounts).where(await companyInPermissionScope(cashAccounts.companyId, session, "accounts")),
+    db.select({ ...getTableColumns(cashAccounts), _revision: sql<string>`${cashAccounts}.xmin::text` }).from(cashAccounts).where(await companyInPermissionScope(cashAccounts.companyId, session, "accounts")),
   );
 }
 
@@ -57,7 +57,7 @@ export async function listCheques() {
   requirePermission(session, "cheques", "view");
   const scope = (await getScopeCompanyIds()).sort().join(",");
   return cachedPageRead(READ_DOMAIN.accounts, `${session.userId}:accounts:cheques:${scope}`, async () =>
-    db.select().from(chequeRegister).where(await companyInPermissionScope(chequeRegister.companyId, session, "cheques")),
+    db.select({ ...getTableColumns(chequeRegister), _revision: sql<string>`${chequeRegister}.xmin::text` }).from(chequeRegister).where(await companyInPermissionScope(chequeRegister.companyId, session, "cheques")),
   );
 }
 

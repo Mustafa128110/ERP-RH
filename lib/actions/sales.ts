@@ -1,4 +1,7 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
+import { documentHistoryWindow } from "@/lib/queries/history-window";
+import type { HistoryRequest } from "@/lib/history-window";
 
 import { and, desc, eq, getTableColumns, gte, ilike, inArray, lte, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -80,10 +83,11 @@ export interface SalesFilters {
 // Filtering in SQL rather than over the returned array: the lines query is driven
 // by document type, so a JS filter would still have dragged every sale and every
 // line of it back before throwing most away.
-export async function listSales(filters: SalesFilters = {}) {
+export async function listSales(filters: SalesFilters = {}, documentIds?: string[]) {
   const session = await getSession();
   requirePermission(session, "sales", "view");
   const scope = and(
+    documentIds ? (documentIds.length ? inArray(documents.id, documentIds) : sql`false`) : undefined,
     await companyInPermissionScope(documents.companyId, session, "sales"),
     filters.from ? gte(documents.documentDate, filters.from) : undefined,
     filters.to ? lte(documents.documentDate, filters.to) : undefined,
@@ -94,7 +98,7 @@ export async function listSales(filters: SalesFilters = {}) {
   );
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(READ_DOMAIN.sales, `${session.userId}:sales:${cacheScope}:${stableReadKey(filters)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.sales, `${session.userId}:sales:${cacheScope}:${stableReadKey({ filters: filters, documentIds })}`, async () => {
 
   // The lines query used to wait on the document ids from the first query, which
   // made two ~170ms round trips where one would do. Selecting lines by the same
@@ -163,6 +167,28 @@ export async function listSales(filters: SalesFilters = {}) {
   return docs.map((d) => ({ ...d, items: linesByDoc.get(d.id) ?? [] }));
   });
 }
+
+export async function listSalesPage(filters: SalesFilters = {}, request: HistoryRequest = {}) {
+  const session = await getSession();
+  requirePermission(session, "sales", "view");
+  const scope = and(
+    await companyInPermissionScope(documents.companyId, session, "sales"),
+    filters.from ? gte(documents.documentDate, filters.from) : undefined,
+    filters.to ? lte(documents.documentDate, filters.to) : undefined,
+    filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : undefined,
+    filters.customer ? ilike(contacts.displayName, `%${filters.customer}%`) : undefined,
+    filters.status === "outstanding" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} > ${documents.paidAmount}`) : undefined,
+    filters.status === "paid" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} <= ${documents.paidAmount}`) : undefined,
+  );
+  return withReadSnapshot(async () => {
+    const selected = await documentHistoryWindow(scope, "SALES_INVOICE", request);
+    const records = await listSales(filters, selected.ids);
+    const order = new Map(selected.ids.map((id, index) => [id, index]));
+    records.sort((a,b) => order.get(a.id)! - order.get(b.id)!);
+    return { records, info: selected.info, outstanding: Number(selected.outstanding) };
+  });
+}
+
 
 // Cheques available to settle a sale: unlinked everywhere, plus (when editing)
 // the one already on this invoice. An action rather than a plain query because

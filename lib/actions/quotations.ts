@@ -3,6 +3,7 @@
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import { companies, contacts, documentLines, documentNumberLedger, documentTypes, documents, items, units } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -152,13 +153,14 @@ export async function listQuotations(): Promise<QuotationListRow[]> {
 }
 
 export async function getQuotation(documentId: string) {
+  return withReadSnapshot(async () => {
   const session = await getSession();
   requirePermission(session, "quotations", "view");
 
   // Both only need the id we were handed, so they share one round trip.
   const [[doc], lineRows] = await Promise.all([
     db
-      .select(getTableColumns(documents))
+      .select({ ...getTableColumns(documents), _revision: sql<string>`${documents}.xmin::text` })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documentTypes.code, "QUOTATION"), await companyInPermissionScope(documents.companyId, session, "quotations")))
@@ -187,6 +189,7 @@ export async function getQuotation(documentId: string) {
 
   return {
     id: doc.id,
+    _revision: doc._revision,
     number: doc.number,
     companyId: doc.companyId,
     contactId: doc.contactId ?? "",
@@ -211,6 +214,8 @@ export async function getQuotation(documentId: string) {
       }),
     ),
   };
+
+  });
 }
 
 type LineInput = { itemId: string; itemName: string; unitId: string; unitName: string; quantity: string; unitPrice: string };

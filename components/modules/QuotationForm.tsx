@@ -56,6 +56,7 @@ const BLANK_ROWS = 8;
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", unitPrice: "", convertedQuantity: "0" });
 
 export type QuotationDefaults = {
+  _revision: string;
   companyId: string;
   contactId: string;
   documentDate: string;
@@ -98,7 +99,7 @@ export function QuotationForm({
   // (in the layout) sets the id before children render, so the first render
   // already carries the scoped key.
   const userId = useClientUserId();
-  const quotationDraftKey = userId ? `${QUOTATION_DRAFT_KEY}:${userId}` : QUOTATION_DRAFT_KEY;
+  const quotationDraftKey = isEdit ? `edit:${userId}:documents:${quotationId}` : userId ? `${QUOTATION_DRAFT_KEY}:${userId}` : QUOTATION_DRAFT_KEY;
 
   const [companyId, setCompanyId] = useState(defaults?.companyId ?? companyOptions[0]?.id ?? "");
   const [contactId, setContactId] = useState(defaults?.contactId ?? "");
@@ -137,13 +138,15 @@ export function QuotationForm({
   // restoring a stale copy over one is how someone else's changes disappear.
   // The hook (components/ui/useDraft.tsx) owns the store read, the
   // offer/restore/discard logic and the save-on-change effect.
-  const draftState = { companyId, contactId, contactText, documentDate, validUntil, discount, taxId, shipping, lines };
+  const draftState = { _revision: defaults?._revision, companyId, contactId, contactText, documentDate, validUntil, discount, taxId, shipping, lines };
   type QuotationDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(quotationDraftKey, {
+  const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(quotationDraftKey, {
     state: draftState,
-    enabled: !isEdit,
-    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    enabled: !isEdit || !!defaults?._revision,
+    skipInitialSave: true,
+    canRestore: d => Array.isArray(d.lines) && (!isEdit || d._revision === defaults?._revision),
+    hasContent: (d) => isEdit || d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
     apply: (d) => {
       setCompanyId(d.companyId);
       setContactId(d.contactId);
@@ -267,7 +270,7 @@ export function QuotationForm({
   );
 
   return (
-    <form data-command-record={quotationId} data-draft-key={isEdit ? undefined : quotationDraftKey} action={action} className="document-form flex h-full min-h-0 flex-col gap-4">
+    <form data-command-table={isEdit ? "documents" : undefined} data-command-revision={defaults?._revision} data-recovery-key={isEdit ? quotationDraftKey : undefined} data-command-record={quotationId} data-draft-key={isEdit ? undefined : quotationDraftKey} action={action} className="document-form flex h-full min-h-0 flex-col gap-4">
       <input type="hidden" name="operationId" value={operationId} />
       <input type="hidden" name="companyId" value={companyId} />
       <input type="hidden" name="contactId" value={contactId} />
@@ -281,8 +284,9 @@ export function QuotationForm({
 
       {/* An unfinished quotation from before — a crash, a closed tab, a reload.
           Offered, never applied on its own. */}
-      {offerDraft && <DraftBanner noun="quotation" onRestore={restoreDraft} onDiscard={discardDraft} />}
-      <fieldset disabled={offerDraft} className="contents">
+      {offerDraft && <DraftBanner noun="quotation" onRestore={restoreDraft} onDiscard={discardDraft} canRestore={canRestore} onDownload={download} />}
+      {isEdit && !defaults?._revision && <p role="alert">Refresh to load the current record version before editing.</p>}
+      <fieldset disabled={offerDraft || isEdit && !defaults?._revision} className="contents">
 
       {locked && (
         <p className="shrink-0 rounded border border-warning/40 bg-warning-tint p-3 text-sm text-ink">

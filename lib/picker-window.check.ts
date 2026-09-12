@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { filterPickerOptions, pickerWindow, PICKER_ROW_HEIGHT } from "./picker-window";
+const options = Array.from({ length: 50_000 }, (_, i) => ({ name: `Product ${i}` }));
+assert.equal(filterPickerOptions(options, "49999")[0], options[49999]);
+assert.equal(filterPickerOptions(options, ""), options);
+assert.ok(pickerWindow(options.length, 0).last < 20);
+const end = pickerWindow(options.length, options.length * PICKER_ROW_HEIGHT - 224);
+assert.equal(end.last, options.length);
+assert.ok(end.first < options.length - 1);
+options[0].name = "Renamed";
+assert.equal(filterPickerOptions(options, "renamed")[0], options[0]);
+console.log("Picker full-dataset filtering and virtual window checks passed");

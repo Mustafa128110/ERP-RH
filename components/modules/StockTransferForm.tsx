@@ -38,6 +38,7 @@ type TransferActionState = { error?: string; success?: boolean; id?: string } | 
 // Server lines carry ids; the combobox text is derived from the option lists on
 // load. One entry per item — the inbound half of each pair says nothing new.
 export type TransferDefaults = {
+  _revision: string;
   companyId: string;
   documentDate: string;
   fromLocationId: string;
@@ -102,20 +103,22 @@ export function StockTransferFormPage({
   // (in the layout) sets the id before children render, so the first render
   // already carries the scoped key.
   const userId = useClientUserId();
-  const transferDraftKey = userId ? `${TRANSFER_DRAFT_KEY}:${userId}` : TRANSFER_DRAFT_KEY;
+  const transferDraftKey = isEdit ? `edit:${userId}:documents:${transferId}` : userId ? `${TRANSFER_DRAFT_KEY}:${userId}` : TRANSFER_DRAFT_KEY;
 
   // --- Draft ----------------------------------------------------------------
   // New transfers are entered back to back, so a created one clears the form; a
   // crash, a closed tab or an offline blip before then costs nothing. Edits are
   // excluded: restoring a stale copy over a saved document would overwrite
   // someone else's changes.
-  const draftState = { lines, companyId, fromLocationId, toLocationId, documentDate };
+  const draftState = { _revision: defaults?._revision, lines, companyId, fromLocationId, toLocationId, documentDate };
   type TransferDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<TransferDraft>(transferDraftKey, {
+  const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<TransferDraft>(transferDraftKey, {
     state: draftState,
-    enabled: !isEdit,
-    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    enabled: !isEdit || !!defaults?._revision,
+    skipInitialSave: true,
+    canRestore: d => Array.isArray(d.lines) && (!isEdit || d._revision === defaults?._revision),
+    hasContent: (d) => isEdit || d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
     apply: (d) => {
       setLines(d.lines);
       setCompanyId(d.companyId);
@@ -184,7 +187,7 @@ export function StockTransferFormPage({
   }
 
   return (
-    <form data-command-record={transferId} data-draft-key={isEdit ? undefined : transferDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-command-table={isEdit ? "documents" : undefined} data-command-revision={defaults?._revision} data-recovery-key={isEdit ? transferDraftKey : undefined} data-command-record={transferId} data-draft-key={isEdit ? undefined : transferDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -194,8 +197,9 @@ export function StockTransferFormPage({
 
       {/* An unfinished transfer from before — a crash, a closed tab, a reload.
           Offered, never applied on its own. */}
-      {offerDraft && <DraftBanner noun="transfer" onRestore={restoreDraft} onDiscard={discardDraft} />}
-      <fieldset disabled={offerDraft} className="contents">
+      {offerDraft && <DraftBanner noun="transfer" onRestore={restoreDraft} onDiscard={discardDraft} canRestore={canRestore} onDownload={download} />}
+      {isEdit && !defaults?._revision && <p role="alert">Refresh to load the current record version before editing.</p>}
+      <fieldset disabled={offerDraft || isEdit && !defaults?._revision} className="contents">
 
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Transfer</span>

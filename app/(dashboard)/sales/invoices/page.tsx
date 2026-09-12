@@ -1,8 +1,11 @@
-import { listSales } from "@/lib/actions/sales";
+import { listSalesPage } from "@/lib/actions/sales";
 import { InvoiceManager } from "@/components/modules/InvoiceManager";
 import { formatDate, money } from "@/lib/format";
 import { saleTypeLabel } from "@/lib/sale-constants";
 import type { Row } from "@/lib/table";
+
+import { HistoryProvider } from "@/components/ui/HistoryProvider";
+import { historyRequest } from "@/lib/history-window";
 
 export const dynamic = "force-dynamic";
 
@@ -22,26 +25,15 @@ function daysOld(documentDate: string) {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ customer?: string; status?: string; saleType?: string; from?: string; to?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const { status, ...listFilters } = await searchParams;
-  const sales = await listSales({ ...listFilters, status });
-  const filtered = Boolean(status) || Object.values(listFilters).some(Boolean);
-
-  const invoices = sales
-    .map((s) => ({ ...s, balance: s.status === "cancelled" ? 0 : Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }))
-    .filter((s) => (status === "outstanding" ? s.status === "posted" && s.balance > 0 : status === "paid" ? s.status === "posted" && s.balance <= 0 : true))
-    // Outstanding first and oldest of those at the top — the one that has been
-    // waiting longest is the one to chase. Settled invoices sit below, newest
-    // first, where they're only ever looked up by number.
-    .sort((a, b) => {
-      const aOwed = a.balance > 0;
-      const bOwed = b.balance > 0;
-      if (aOwed !== bOwed) return aOwed ? -1 : 1;
-      return aOwed ? b.age - a.age : a.age - b.age;
-    });
-
-  const outstanding = invoices.reduce((sum, s) => sum + Math.max(s.balance, 0), 0);
+  const params = await searchParams;
+  const { customer, status, saleType, from, to } = params;
+  const result = await listSalesPage({ customer, status, saleType, from, to }, historyRequest(params));
+  const sales = result.records;
+  const filtered = [customer,status,saleType,from,to,params.q].some(Boolean);
+  const invoices = sales.map(s => ({ ...s, balance: s.status === "cancelled" ? 0 : Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }));
+  const outstanding = result.outstanding;
 
   // Items per invoice for the customer hover panel.
   const itemsBySaleId = new Map(
@@ -81,12 +73,12 @@ export default async function Page({
   });
 
   return (
-    <InvoiceManager
+    <HistoryProvider info={result.info}><InvoiceManager
       rows={rows}
-      count={invoices.length}
+      count={result.info.total}
       outstanding={outstanding}
       filtered={filtered}
       itemsBySaleId={itemsBySaleId}
-    />
+    /></HistoryProvider>
   );
 }

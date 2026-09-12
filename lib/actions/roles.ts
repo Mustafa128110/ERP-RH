@@ -1,6 +1,7 @@
 "use server";
 
 import { eq, sql } from "drizzle-orm";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { roles, permissions, rolePermissions, userRoles } from "@/lib/db/schema";
@@ -90,6 +91,14 @@ export async function getRolePermissionKeys(roleId: string): Promise<string[]> {
     .where(eq(rolePermissions.roleId, roleId));
 
   return rows.map((r) => `${r.module}.${r.action}`);
+}
+
+export async function getRoleForEdit(roleId: string) {
+  return withReadSnapshot(async () => {
+    const keys = await getRolePermissionKeys(roleId);
+    const [role] = await db.select({ id: roles.id, name: roles.name, _revision: sql<string>`${roles}.xmin::text` }).from(roles).where(eq(roles.id, roleId));
+    return role ? { ...role, keys } : null;
+  });
 }
 
 // The grid posts its ticked keys as a JSON array in a hidden field. A malformed

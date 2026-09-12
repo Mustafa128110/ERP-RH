@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useState } from "react";
@@ -121,7 +122,7 @@ function BankAccountFields({ defaults, companyOptions }: { defaults?: BankAccoun
   );
 }
 
-export function BankAccountEditForm({
+function BankAccountEditFormBody({
   accountId,
   defaults,
   companyOptions,
@@ -325,7 +326,7 @@ function CashAccountFields({ defaults, companyOptions }: { defaults?: CashAccoun
   );
 }
 
-export function CashAccountEditForm({
+function CashAccountEditFormBody({
   accountId,
   defaults,
   companyOptions,
@@ -476,9 +477,9 @@ function ChequeFields({
   bankAccountOptions: { id: string; label: string; companyId: string | null }[];
   contactOptions: { id: string; displayName: string; companyId: string | null }[];
 }) {
-  const [companyId, setCompanyId] = useState(defaults?.companyId ?? "");
-  const [contactId, setContactId] = useState(defaults?.contactId ?? "");
-  const [bankAccountId, setBankAccountId] = useState(defaults?.bankAccountId ?? "");
+  const [companyId, setCompanyId] = useRecoveryState("companyId", defaults?.companyId ?? "");
+  const [contactId, setContactId] = useRecoveryState("contactId", defaults?.contactId ?? "");
+  const [bankAccountId, setBankAccountId] = useRecoveryState("bankAccountId", defaults?.bankAccountId ?? "");
   // The chosen company's contacts and bank accounts, plus the global ones — a
   // record with no company is visible to every company.
   const visibleContacts = contactOptions.filter(inCompany(companyId));
@@ -822,7 +823,7 @@ export function ChequeQuickAddButton({
   );
 }
 
-export function ChequeEditForm({
+function ChequeEditFormBody({
   chequeId,
   defaults,
   companyOptions,
@@ -876,4 +877,16 @@ export function DeleteChequeButton({ chequeId, onDone, onDeleting }: { chequeId:
       {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>
   );
+}
+
+export function BankAccountEditForm(props: Parameters<typeof BankAccountEditFormBody>[0]) {
+  return <FormRecovery domain="bank_accounts" id={props.accountId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><BankAccountEditFormBody {...props} /></FormRecovery>;
+}
+
+export function CashAccountEditForm(props: Parameters<typeof CashAccountEditFormBody>[0]) {
+  return <FormRecovery domain="cash_accounts" id={props.accountId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><CashAccountEditFormBody {...props} /></FormRecovery>;
+}
+
+export function ChequeEditForm(props: Parameters<typeof ChequeEditFormBody>[0]) {
+  return <FormRecovery domain="cheque_register" id={props.chequeId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><ChequeEditFormBody {...props} /></FormRecovery>;
 }

@@ -1,0 +1,22 @@
+{
+  "measuredAt": "2026-09-11T19:23:39.133Z",
+  "scope": "Read-only dashboard queries over both existing companies; warm connections; local client to Singapore",
+  "samples": {
+    "baseline": [
+      299.3130000000001,
+      128.50610000000006,
+      283.4514000000004,
+      126.25279999999975,
+      212.63839999999982
+    ],
+    "optimized": [
+      106.10419999999976,
+      186.54359999999997,
+      102.88509999999997,
+      98.95970000000034,
+      98.27029999999968
+    ]
+  },
+  "medianBaseline": 212.63839999999982,
+  "medianOptimized": 102.88509999999997
+}

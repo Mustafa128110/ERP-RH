@@ -51,7 +51,7 @@ const bundled = await build({ stdin: { contents: `
       export const getCustomerOutstanding=async()=>({amount:'0'});
     ` }));
     builder.onResolve({filter:/^(next\/(navigation|link)|@\/components\/layout\/KeyboardShortcuts)$/}, args=>({path:args.path,namespace:"framework"}));
-    builder.onLoad({filter:/.*/,namespace:"framework"},()=>({resolveDir:process.cwd(),contents:"import React from 'react'; export const useRouter=()=>({push(){},refresh(){}}); export const useNewEntry=()=>{}; export default function Link(props){return React.createElement('a',props);}"}));
+    builder.onLoad({filter:/.*/,namespace:"framework"},()=>({resolveDir:process.cwd(),contents:"import React from 'react'; export const usePathname=()=>String.fromCharCode(47); export const useSearchParams=()=>new URLSearchParams(); export const useRouter=()=>({push(){},refresh(){}}); export const useNewEntry=()=>{}; export default function Link(props){return React.createElement('a',props);}"}));
   }}] });
 const server = http.createServer((request,response)=>{
   response.setHeader('Content-Type',request.url==='/work.js'?'text/javascript':'text/html');

@@ -37,6 +37,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <StockTransferFormPage
         transferId={transfer.id}
         defaults={{
+          _revision: transfer._revision,
           companyId: transfer.companyId,
           documentDate: transfer.documentDate,
           fromLocationId: transfer.fromLocationId,

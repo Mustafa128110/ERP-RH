@@ -34,6 +34,8 @@ const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText:
 // load. Only the seller's half is returned — the buyer's is the same items and
 // quantities at the other location.
 export type InterCompanyDefaults = {
+  _revision: string;
+  _revisions: Record<string, string>;
   sellerCompanyId: string;
   buyerCompanyId: string;
   sellerName: string;
@@ -103,20 +105,22 @@ export function InterCompanyFormPage({
   // (in the layout) sets the id before children render, so the first render
   // already carries the scoped key.
   const userId = useClientUserId();
-  const intercompanyDraftKey = userId ? `${INTERCOMPANY_DRAFT_KEY}:${userId}` : INTERCOMPANY_DRAFT_KEY;
+  const intercompanyDraftKey = isEdit ? `edit:${userId}:documents:${saleId}` : userId ? `${INTERCOMPANY_DRAFT_KEY}:${userId}` : INTERCOMPANY_DRAFT_KEY;
 
   // --- Draft ----------------------------------------------------------------
   // New sales are entered back to back, so a created one clears the form; a
   // crash, a closed tab or an offline blip before then costs nothing — the
   // draft keeps the whole inter-company sale. Edits are excluded: restoring a
   // stale copy over a saved document would overwrite someone else's changes.
-  const draftState = { lines, sellerCompanyId, buyerCompanyId, documentDate, fromLocationId, toLocationId };
+  const draftState = { _revision: defaults?._revision, _revisions: defaults?._revisions, lines, sellerCompanyId, buyerCompanyId, documentDate, fromLocationId, toLocationId };
   type InterCompanyDraft = typeof draftState;
 
-  const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<InterCompanyDraft>(intercompanyDraftKey, {
+  const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<InterCompanyDraft>(intercompanyDraftKey, {
     state: draftState,
-    enabled: !isEdit,
-    hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
+    enabled: !isEdit || !!defaults?._revision,
+    skipInitialSave: true,
+    canRestore: d => Array.isArray(d.lines) && (!isEdit || d._revision === defaults?._revision && JSON.stringify(d._revisions) === JSON.stringify(defaults?._revisions)),
+    hasContent: (d) => isEdit || d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
     apply: (d) => {
       setLines(d.lines);
       setSellerCompanyId(d.sellerCompanyId);
@@ -202,7 +206,7 @@ export function InterCompanyFormPage({
   const total = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.rate) || 0), 0);
 
   return (
-    <form data-command-record={saleId} data-draft-key={isEdit ? undefined : intercompanyDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
+    <form data-command-table={isEdit ? "documents" : undefined} data-command-revision={defaults?._revision} data-command-revisions={JSON.stringify(defaults?._revisions)} data-recovery-key={isEdit ? intercompanyDraftKey : undefined} data-command-record={saleId} data-draft-key={isEdit ? undefined : intercompanyDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
       <input type="hidden" name="operationId" value={operationId} />
       <input
         type="hidden"
@@ -212,8 +216,9 @@ export function InterCompanyFormPage({
 
       {/* An unfinished inter-company sale from before — a crash, a closed tab, a
           reload. Offered, never applied on its own. */}
-      {offerDraft && <DraftBanner noun="inter-company sale" onRestore={restoreDraft} onDiscard={discardDraft} />}
-      <fieldset disabled={offerDraft} className="contents">
+      {offerDraft && <DraftBanner noun="inter-company sale" onRestore={restoreDraft} onDiscard={discardDraft} canRestore={canRestore} onDownload={download} />}
+      {isEdit && !defaults?._revision && <p role="alert">Refresh to load the current record version before editing.</p>}
+      <fieldset disabled={offerDraft || isEdit && !defaults?._revision} className="contents">
 
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Companies</span>

@@ -7,6 +7,7 @@ import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass,
 import { DateField } from "@/components/ui/DateField";
 import { optimistically } from "@/lib/optimistic-records";
 import { todayISO } from "@/lib/format";
+import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 
 type Option = { id: string; name: string };
 
@@ -26,10 +27,9 @@ export function transferAccounts(bank: Option[], cash: Option[], cheques: Option
 
 const isCheque = (value: string) => value.startsWith("cheque:");
 
-export function CashTransferDialog({
+function CashTransferDialogBody({
   companyOptions,
   accounts,
-  onClose,
   onDone,
 }: {
   companyOptions: Option[];
@@ -50,7 +50,7 @@ export function CashTransferDialog({
     },
     undefined,
   );
-  const [from, setFrom] = useState("");
+  const [from, setFrom] = useRecoveryState("from", "");
   // One id per dialog session: a replayed submit (response lost after a
   // successful save) is refused by the server rather than moving the money twice.
   const [operationId] = useState(() => crypto.randomUUID());
@@ -61,7 +61,7 @@ export function CashTransferDialog({
   }, [state?.success]);
 
   return (
-    <Dialog title="Transfer Money" onClose={onClose}>
+    <>
       <form action={action} className="flex flex-col gap-4">
         <input type="hidden" name="operationId" value={operationId} />
         <label className={labelClass}>
@@ -130,8 +130,12 @@ export function CashTransferDialog({
           {pending ? "Transferring…" : "Transfer"}
         </button>
       </form>
-    </Dialog>
+    </>
   );
+}
+
+export function CashTransferDialog(props: Parameters<typeof CashTransferDialogBody>[0]) {
+  return <Dialog title="Transfer Money" onClose={props.onClose}><FormRecovery domain="documents" id="cash-transfer" revision="0" createAction="transfers.createCashTransfer"><CashTransferDialogBody {...props} /></FormRecovery></Dialog>;
 }
 
 export function DeleteCashTransferButton({

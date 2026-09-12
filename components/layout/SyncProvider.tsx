@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useClientUserId, getClientUserId } from "@/lib/client-user";
-import { addCommand, changeCommand, listCommands, subscribeCommands } from "@/lib/command-store";
+import { addCommand, changeCommand, compactConfirmedCommands, listCommands, subscribeCommands } from "@/lib/command-store";
 import { localWritesPending, queueBackgroundAction, setPendingCommandCount } from "@/lib/background-client";
 import { encodeArgument, unresolved, type SavedCommand } from "@/lib/command-protocol";
 import { canCancel, drainCommands, warnBeforeUnload, type CommandReply } from "@/lib/command-sync";
@@ -109,6 +109,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (!userId) return;
       try {
         const migrationWarning = await migrateLegacy(userId);
+        await compactConfirmedCommands(userId);
         if (!live) return;
         setStorageWarning(migrationWarning);
         ready.current = userId;
@@ -128,8 +129,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = subscribeCommands(changed);
     window.addEventListener("online", kick); window.addEventListener("focus", kick);
     const timer = setInterval(kick, 5_000);
-    return () => { unsubscribe(); clearInterval(timer); window.removeEventListener("online", kick); window.removeEventListener("focus", kick); };
-  }, [refresh, syncNow, warn]);
+    const housekeeping = setInterval(() => {
+      if (userId && ready.current === userId) void compactConfirmedCommands(userId).then(refresh).catch(warn);
+    }, 24 * 60 * 60 * 1000);
+    return () => { unsubscribe(); clearInterval(timer); clearInterval(housekeeping); window.removeEventListener("online", kick); window.removeEventListener("focus", kick); };
+  }, [userId, refresh, syncNow, warn]);
   useEffect(() => {
     const draftStatus = (event: Event) => {
       const { key, failed } = (event as CustomEvent<{ key: string; failed: boolean }>).detail;

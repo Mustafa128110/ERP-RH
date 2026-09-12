@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
@@ -11,6 +12,7 @@ import { errorTextClass, fieldClass, labelClass, labelTextClass, primaryActionCl
 import { formatDate, money, qty, todayISO } from "@/lib/format";
 
 type RequestRow = {
+  _revision: string;
   id: string;
   companyId: string;
   company: string;
@@ -29,7 +31,7 @@ type RequestRow = {
 
 type AccountOption = { id: string; name: string; companyId: string | null };
 
-export function MarketPurchaseManager({
+function MarketPurchaseManagerBody({
   requests,
   bankAccountOptions,
   cashAccountOptions,
@@ -43,9 +45,9 @@ export function MarketPurchaseManager({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const pendingRows = requests.filter((request) => request.status === "pending");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [costs, setCosts] = useState<Record<string, string>>({});
-  const [settlementType, setSettlementType] = useState<"account" | "cash" | "cheque">("cash");
+  const [selected, setSelected] = useRecoveryState<string[]>("selected", []);
+  const [costs, setCosts] = useRecoveryState<Record<string, string>>("costs", {});
+  const [settlementType, setSettlementType] = useRecoveryState<"account" | "cash" | "cheque">("settlementType", "cash");
   const [operationId, setOperationId] = useState(() => crypto.randomUUID());
   const selectedCompany = pendingRows.find((row) => selected.includes(row.id))?.companyId ?? "";
   const selectedRows = pendingRows.filter((row) => selected.includes(row.id));
@@ -176,4 +178,10 @@ function ConfirmedPurchase({ id, number, company, lines, total }: { id: string; 
       {state?.error && <span className={errorTextClass}>{state.error}</span>}
     </form>
   );
+}
+
+export function MarketPurchaseManager(props: Parameters<typeof MarketPurchaseManagerBody>[0]) {
+  const revisions = Object.fromEntries(props.requests.filter(row => row.status === "pending").map(row => [`market_purchase_requests:${row.id}`, row._revision]));
+  const version = JSON.stringify(Object.entries(revisions).sort());
+  return <FormRecovery key={version} domain="market_purchase_requests" id="confirmation" revision={version} revisions={revisions} createAction="market-purchases.confirmMarketPurchases"><MarketPurchaseManagerBody {...props}/></FormRecovery>;
 }

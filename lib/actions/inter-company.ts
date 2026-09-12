@@ -3,6 +3,7 @@
 import { and, desc, eq, getTableColumns, inArray, like, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import {
   companies,
   documents,
@@ -308,11 +309,12 @@ export async function listInterCompanySales() {
 // The pair, read back by the seller's document id — that's what the list links to
 // and what the edit page is addressed by.
 export async function getInterCompanySale(saleId: string) {
+  return withReadSnapshot(async () => {
   const session = await getSession();
   requirePermission(session, "sales", "view");
 
   const [sale] = await db
-    .select(getTableColumns(documents))
+    .select({ ...getTableColumns(documents), _revision: sql<string>`${documents}.xmin::text` })
     .from(documents)
     .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
     .where(and(eq(documents.id, saleId), eq(documentTypes.code, "SALES_INVOICE"), await companyInPermissionScope(documents.companyId, session, "sales")))
@@ -321,7 +323,7 @@ export async function getInterCompanySale(saleId: string) {
 
   const [sides, sellerLines, [seller]] = await Promise.all([
     db
-      .select(getTableColumns(documents))
+      .select({ ...getTableColumns(documents), _revision: sql<string>`${documents}.xmin::text` })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.reason, sale.reason), eq(documentTypes.code, "PURCHASE_INVOICE"), await companyInPermissionScope(documents.companyId, session, "purchases"))),
@@ -350,6 +352,8 @@ export async function getInterCompanySale(saleId: string) {
 
   return {
     id: sale.id,
+    _revision: sale._revision,
+    _revisions: { [`documents:${sale.id}`]: sale._revision, [`documents:${purchase.id}`]: purchase._revision },
     saleNumber: sale.number,
     purchaseId: purchase.id,
     purchaseNumber: purchase.number,
@@ -370,6 +374,8 @@ export async function getInterCompanySale(saleId: string) {
       rate: l.unitPrice,
     })),
   };
+
+  });
 }
 
 // --- Writes ---

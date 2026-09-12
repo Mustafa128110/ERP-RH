@@ -52,6 +52,7 @@ export async function listMarketPurchaseRequests() {
   return db
     .select({
       id: marketPurchaseRequests.id,
+      _revision: sql<string>`${marketPurchaseRequests}.xmin::text`,
       companyId: marketPurchaseRequests.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       saleDocumentId: marketPurchaseRequests.saleDocumentId,

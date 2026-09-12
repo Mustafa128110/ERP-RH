@@ -1,11 +1,15 @@
-import { listStockPurchases } from "@/lib/actions/purchases";
+import { HistoryProvider } from "@/components/ui/HistoryProvider";
+import { historyRequest } from "@/lib/history-window";
+import { listStockPurchasesPage } from "@/lib/actions/purchases";
 import { getPurchaseFormOptions } from "@/lib/queries/lookups";
 import { StockPurchaseManager } from "@/components/modules/StockPurchaseManager";
 import { getSession } from "@/lib/auth/session";
 import { formatDate, money, qty } from "@/lib/format";
 
-export default async function Page() {
-  const [purchases, options, session] = await Promise.all([listStockPurchases(), getPurchaseFormOptions(), getSession()]);
+export default async function Page({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const params = await searchParams;
+  const [result, options, session] = await Promise.all([listStockPurchasesPage(undefined, historyRequest(params)), getPurchaseFormOptions(), getSession()]);
+  const purchases = result.records;
 
   // Only show locations the user has warehouse access for
   const warehouseIds = session?.warehouseIds ?? [];
@@ -44,11 +48,11 @@ export default async function Page() {
   }));
 
   return (
-    <StockPurchaseManager
+    <HistoryProvider info={result.info}><StockPurchaseManager
       rows={rows}
       {...options}
       locationOptions={filteredLocationOptions}
       canHardDelete={session?.globalPermissions.has("purchases.delete") ?? false}
-    />
+    /></HistoryProvider>
   );
 }

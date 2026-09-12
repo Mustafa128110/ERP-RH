@@ -6,6 +6,7 @@ export type * from "@/lib/actions/roles";
 export const listRoles: typeof server.listRoles = backgroundRead("roles.listRoles", server.listRoles);
 export const getPermissionCatalog: typeof server.getPermissionCatalog = backgroundRead("roles.getPermissionCatalog", server.getPermissionCatalog);
 export const getRolePermissionKeys: typeof server.getRolePermissionKeys = backgroundRead("roles.getRolePermissionKeys", server.getRolePermissionKeys);
+export const getRoleForEdit: typeof server.getRoleForEdit = backgroundRead("roles.getRoleForEdit", server.getRoleForEdit);
 export const createRole: typeof server.createRole = backgroundAction("roles.createRole", server.createRole);
 export const updateRole: typeof server.updateRole = backgroundAction("roles.updateRole", server.updateRole);
 export const deleteRole: typeof server.deleteRole = backgroundAction("roles.deleteRole", server.deleteRole);

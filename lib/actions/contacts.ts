@@ -42,6 +42,7 @@ function requireContactPermission(session: AuthSession | null, action: string, c
 }
 
 const contactColumns = {
+  _revision: sql<string>`${contacts}.xmin::text`,
   id: contacts.id,
   companyId: contacts.companyId,
   displayName: contacts.displayName,
@@ -221,6 +222,7 @@ export async function createContactsBatch(
 // how the missing halves get filled in, one pass instead of one dialog each.
 export interface ContactEditRow {
   id: string;
+  _revision?: string;
   displayName: string;
   companyId: string | null;
   companyName: string | null;

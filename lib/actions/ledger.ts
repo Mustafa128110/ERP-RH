@@ -69,6 +69,7 @@ export interface ContactDocument {
 }
 
 export interface ContactLedgerBalance {
+  _revision?: string;
   contactId: string;
   displayName: string;
   companyId: string;
@@ -117,6 +118,7 @@ async function loadLedgerBalances(
     db
       .select({
         contactId: contacts.id,
+        _revision: sql<string>`${contacts}.xmin::text`,
         displayName: contacts.displayName,
         companyId: ledgerEntries.companyId,
         company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
@@ -267,6 +269,7 @@ async function loadLedgerBalances(
     const key = `${r.companyId}:${r.contactId ?? "unknown"}`;
     const entry = byContact.get(key) ?? {
       contactId: r.contactId ?? "unknown",
+      _revision: r._revision,
       displayName: r.displayName ?? "Unknown Contact",
       companyId: r.companyId,
       company: r.company,

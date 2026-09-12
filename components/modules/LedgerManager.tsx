@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
@@ -271,7 +272,7 @@ export function LedgerManager({
 // stands. The company and the contact are what identify the row, so they're
 // shown but fixed; the direction and amount are the balance itself, and changing
 // them is what gets saved.
-function LedgerEntryForm({
+function LedgerEntryFormBody({
   balance,
   companyOptions,
   contactOptions,
@@ -299,11 +300,11 @@ function LedgerEntryForm({
     },
     undefined,
   );
-  const [companyId, setCompanyId] = useState(
+  const [companyId, setCompanyId] = useRecoveryState("companyId",
     () => balance?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
-  const [contactText, setContactText] = useState(() => balance?.displayName ?? "");
-  const [contactId, setContactId] = useState(() => balance?.contactId ?? "");
+  const [contactText, setContactText] = useRecoveryState("contactText", () => balance?.displayName ?? "");
+  const [contactId, setContactId] = useRecoveryState("contactId", () => balance?.contactId ?? "");
 
   useEffect(() => {
     if (state?.success) onClose();
@@ -424,4 +425,8 @@ function LedgerEntryForm({
       </div>
     </form>
   );
+}
+
+function LedgerEntryForm(props: Parameters<typeof LedgerEntryFormBody>[0]) {
+  return <FormRecovery domain="contacts" id={props.balance?.contactId ?? "opening-balance"} revision={props.balance ? props.balance._revision : "0"} createAction={props.balance ? undefined : "ledger.createOpeningBalanceEntry"} draftSuffix={props.balance?.companyId}><LedgerEntryFormBody {...props}/></FormRecovery>;
 }

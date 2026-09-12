@@ -1,10 +1,12 @@
 name: ERP restore verification
 
-# There is deliberately no schedule here. An administrator starts this only
-# when they request a restore test; it restores into the disposable PostgreSQL
-# service below and never writes to production.
+# Runs after a successful backup, or on demand. Uses only the disposable
+# PostgreSQL service below; it never writes to production.
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["ERP database backup"]
+    types: [completed]
 
 concurrency:
   group: erp-restore-verification
@@ -15,6 +17,7 @@ permissions:
 
 jobs:
   verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -40,6 +43,7 @@ jobs:
       AWS_DEFAULT_REGION: auto
       VERIFY_DATABASE_URL: postgresql://restore_verify:restore_verify_only@localhost:5432/restore_verify
     steps:
+      - uses: actions/checkout@v4
       - name: Validate required secrets
         shell: bash
         run: |
@@ -72,9 +76,18 @@ jobs:
             docker run --rm --network host --volume "$GITHUB_WORKSPACE:/backup" postgres:17 \
               psql "$VERIFY_DATABASE_URL" "$@"
           }
-          psql_17 -v ON_ERROR_STOP=1 -f /backup/schema.sql
-          psql_17 -v ON_ERROR_STOP=1 -f /backup/roles.sql
-          psql_17 -v ON_ERROR_STOP=1 -f /backup/data.sql
-          psql_17 -v ON_ERROR_STOP=1 -c "SELECT count(*) AS products FROM public.items; SELECT count(*) AS documents FROM public.documents; SELECT count(*) AS ledger_entries FROM public.ledger_entries;"
+          # Verify every encrypted member before using the custom snapshot.
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          for name, expected in json.loads(Path("manifest.json").read_text())["files"].items():
+              assert Path(name).name == name
+              assert hashlib.sha256(Path(name).read_bytes()).hexdigest() == expected, name
+          PY
+          test -s snapshot.dump
+          psql_17 -v ON_ERROR_STOP=1 -c "CREATE SCHEMA auth; CREATE SCHEMA drizzle; CREATE SCHEMA supabase_migrations;"
+          docker run --rm --network host --volume "$GITHUB_WORKSPACE:/backup" postgres:17 \
+            pg_restore --exit-on-error --no-owner --no-privileges --schema=public --schema=auth --schema=drizzle --schema=supabase_migrations --dbname="$VERIFY_DATABASE_URL" /backup/snapshot.dump
+          psql_17 -v ON_ERROR_STOP=1 -c "SELECT count(*) AS products FROM public.items; SELECT count(*) AS documents FROM public.documents; SELECT count(*) AS ledger_entries FROM public.ledger_entries; SELECT count(*) AS identities FROM auth.users;"
           echo "## Restore verification passed" >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow used a disposable PostgreSQL service only; production was not touched." >> "$GITHUB_STEP_SUMMARY"

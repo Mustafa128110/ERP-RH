@@ -7,6 +7,7 @@ import {
   jsonb,
   boolean,
   integer,
+  bigint,
   smallint,
   numeric,
   timestamp,
@@ -19,6 +20,11 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+export const cacheRevisions = pgTable("cache_revisions", {
+  name: text("name").primaryKey(),
+  version: bigint("version", { mode: "bigint" }).notNull().default(sql`0`),
+}).enableRLS();
 
 // --- Enums (docs/db/Royal_Hardware_ERP_SQL.md) ---
 

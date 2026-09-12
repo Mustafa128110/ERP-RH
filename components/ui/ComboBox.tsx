@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { InputHTMLAttributes, KeyboardEvent } from "react";
+import { filterPickerOptions, pickerWindow, PICKER_ROW_HEIGHT, PICKER_HEIGHT } from "@/lib/picker-window";
 
 export type ComboOption = { id: string; name: string };
 
@@ -34,9 +35,11 @@ export function ComboBox({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
+  const [scrollTop, setScrollTop] = useState(0);
 
   const q = value.trim().toLowerCase();
-  const filtered = useMemo(() => !open ? [] : q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options, [open, q, options]);
+  const filtered = useMemo(() => !open ? [] : filterPickerOptions(options, q), [open, q, options]);
+  const visibleWindow = pickerWindow(filtered.length, scrollTop);
 
   function place() {
     const r = inputRef.current?.getBoundingClientRect();
@@ -45,6 +48,7 @@ export function ComboBox({
   function openList() {
     place();
     setHighlight(0);
+    setScrollTop(0);
     setOpen(true);
   }
 
@@ -74,7 +78,11 @@ export function ComboBox({
   // bottom of the 14rem window — bring it along.
   useEffect(() => {
     if (!open) return;
-    listRef.current?.querySelector(`[data-idx="${highlight}"]`)?.scrollIntoView({ block: "nearest" });
+    const list = listRef.current;
+    if (!list) return;
+    const top = highlight * PICKER_ROW_HEIGHT;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + PICKER_ROW_HEIGHT > list.scrollTop + PICKER_HEIGHT) list.scrollTop = top + PICKER_ROW_HEIGHT - PICKER_HEIGHT;
   }, [highlight, open]);
 
   function select(o: ComboOption) {
@@ -142,6 +150,8 @@ export function ComboBox({
         onChange={(e) => {
           onChange(e.target.value);
           setHighlight(0);
+          setScrollTop(0);
+          if (listRef.current) listRef.current.scrollTop = 0;
           if (!open) openList();
           else place();
         }}
@@ -159,25 +169,37 @@ export function ComboBox({
         <ul
           ref={listRef}
           id={listId}
-          style={{ position: "fixed", top: rect.top, left: rect.left, width: rect.width, zIndex: 60 }}
-          className="scroll-thin mt-1 max-h-56 overflow-auto rounded-md border border-sand bg-white py-1 text-sm shadow-lg"
+          role="listbox"
+          onScroll={event => setScrollTop(event.currentTarget.scrollTop)}
+          style={{ position: "fixed", top: rect.top, left: rect.left, width: rect.width, zIndex: 60, maxHeight: PICKER_HEIGHT }}
+          className="scroll-thin mt-1 overflow-auto rounded-md border border-sand bg-white text-sm shadow-lg"
         >
-          {filtered.map((o, i) => (
+          <li aria-hidden style={{ height: visibleWindow.first * PICKER_ROW_HEIGHT }} />
+          {filtered.slice(visibleWindow.first, visibleWindow.last).map((o, offset) => {
+            const i = visibleWindow.first + offset;
+            return (
             <li key={o.id}>
               <button
                 type="button"
+                role="option"
+                aria-selected={i === highlight}
+                aria-posinset={i + 1}
+                aria-setsize={filtered.length}
+                title={o.name}
+                style={{ height: PICKER_ROW_HEIGHT }}
                 data-idx={i}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   select(o);
                 }}
                 onMouseEnter={() => setHighlight(i)}
-                className={`block w-full px-3 py-1.5 text-left ${i === highlight ? "bg-navy-800 text-white" : "text-ink hover:bg-ivory"}`}
+                className={`block w-full truncate px-3 text-left ${i === highlight ? "bg-navy-800 text-white" : "text-ink hover:bg-ivory"}`}
               >
                 {o.name}
               </button>
             </li>
-          ))}
+          ); })}
+          <li aria-hidden style={{ height: (filtered.length - visibleWindow.last) * PICKER_ROW_HEIGHT }} />
         </ul>
       )}
     </>

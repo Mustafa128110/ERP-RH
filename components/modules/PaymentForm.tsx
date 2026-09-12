@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
@@ -197,6 +198,8 @@ export function PaymentBatchAddDialog({
       initialRows={1}
       autoAppend
       draftKey={userId ? `payment-batch:${userId}` : "payment-batch"}
+      draftMetadata={{ date: batchDate }}
+      restoreDraftMetadata={value => { if (/^\d{4}-\d{2}-\d{2}$/.test(value.date)) setBatchDate(value.date); }}
       headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount"]}
       toolbar={
         <label className="flex items-center gap-2">
@@ -349,8 +352,8 @@ function Fields({
   cashAccountOptions: CashOption[];
   chequeOptions: ChequeOption[];
 }) {
-  const [paymentType, setPaymentType] = useState<PaymentType>(defaults?.paymentType ?? "cash");
-  const [companyId, setCompanyId] = useState(defaults?.companyId ?? "");
+  const [paymentType, setPaymentType] = useRecoveryState<PaymentType>("paymentType", defaults?.paymentType ?? "cash");
+  const [companyId, setCompanyId] = useRecoveryState("companyId", defaults?.companyId ?? "");
   // The chosen company's contacts, plus the global ones — a contact with no
   // company is visible to every company.
   const visibleContacts = useMemo(() => contactOptions.filter(inCompany(companyId)), [contactOptions, companyId]);
@@ -367,7 +370,7 @@ function Fields({
   // The select is uncontrolled (it remounts on `key` when the settlement type
   // changes, taking a fresh default with it), so a cheque created on the spot is
   // selected by overriding that default rather than by holding a value.
-  const [createdChequeId, setCreatedChequeId] = useState("");
+  const [createdChequeId, setCreatedChequeId] = useRecoveryState("createdChequeId", "");
 
   return (
     <>
@@ -474,7 +477,7 @@ function Fields({
   );
 }
 
-export function PaymentEditForm({
+function PaymentEditFormBody({
   paymentId,
   direction,
   defaults,
@@ -503,8 +506,8 @@ export function PaymentEditForm({
   onSaving?: (formData: FormData) => void;
 }) {
   const [state, action, pending] = useActionState(optimistically(updatePayment.bind(null, paymentId), onSaving), undefined);
-  const [contactId, setContactId] = useState(defaults.contactId ?? "");
-  const [contactText, setContactText] = useState(() => contactOptions.find((c) => c.id === defaults.contactId)?.name ?? "");
+  const [contactId, setContactId] = useRecoveryState("contactId", defaults.contactId ?? "");
+  const [contactText, setContactText] = useRecoveryState("contactText", () => contactOptions.find((c) => c.id === defaults.contactId)?.name ?? "");
 
   useEffect(() => {
     if (state?.success) onDone?.();
@@ -597,4 +600,8 @@ export function DeletePaymentButton({
       )}
     </form>
   );
+}
+
+export function PaymentEditForm(props: Parameters<typeof PaymentEditFormBody>[0]) {
+  return <FormRecovery domain="documents" id={props.paymentId} revision={props.defaults ? revisionOf(props.defaults) : undefined}><PaymentEditFormBody {...props} /></FormRecovery>;
 }

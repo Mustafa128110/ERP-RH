@@ -22,7 +22,7 @@ const result = await build({ stdin: { contents: `
   createRoot(document.getElementById('root')).render(React.createElement(App));
 `, loader: "tsx", resolveDir: process.cwd() }, bundle: true, write: false, platform: "browser", format: "iife", plugins: [{ name: "next-test-context", setup(build) {
   build.onResolve({ filter: /^next\/(navigation|link)$/ }, args => ({ path: args.path, namespace: "test-next" }));
-  build.onLoad({ filter: /.*/, namespace: "test-next" }, args => ({ contents: args.path.endsWith("navigation") ? 'export const useRouter=()=>({push(){}});' : 'import React from "react"; export default function Link(props){return React.createElement("a",props);}', resolveDir: process.cwd(), loader: "js" }));
+  build.onLoad({ filter: /.*/, namespace: "test-next" }, args => ({ contents: args.path.endsWith("navigation") ? 'export const usePathname=()=>String.fromCharCode(47); export const useSearchParams=()=>new URLSearchParams(); export const useRouter=()=>({push(){}});' : 'import React from "react"; export default function Link(props){return React.createElement("a",props);}', resolveDir: process.cwd(), loader: "js" }));
 } }] });
 const server = http.createServer((request, response) => {
   if (request.url === "/app.js") { response.setHeader("Content-Type", "text/javascript"); response.end(result.outputFiles[0].text); }

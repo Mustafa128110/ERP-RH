@@ -3,6 +3,7 @@
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import {
   companies,
   documents,
@@ -106,6 +107,7 @@ export async function listStockTransfers() {
 }
 
 export async function getStockTransfer(documentId: string) {
+  return withReadSnapshot(async () => {
   const session = await getSession();
   requirePermission(session, "stock_transfers", "view");
 
@@ -113,7 +115,7 @@ export async function getStockTransfer(documentId: string) {
   // the option lists. from/to are read back off the -1 and +1 sides of each pair.
   const [[doc], lineRows] = await Promise.all([
     db
-      .select(getTableColumns(documents))
+      .select({ ...getTableColumns(documents), _revision: sql<string>`${documents}.xmin::text` })
       .from(documents)
       .innerJoin(documentTypes, eq(documentTypes.id, documents.documentTypeId))
       .where(and(eq(documents.id, documentId), eq(documentTypes.code, "STOCK_TRANSFER"), await companyInPermissionScope(documents.companyId, session, "stock_transfers")))
@@ -136,6 +138,7 @@ export async function getStockTransfer(documentId: string) {
   const inbound = lineRows.find((l) => l.movement === 1);
   return {
     id: doc.id,
+    _revision: doc._revision,
     number: doc.number,
     companyId: doc.companyId,
     documentDate: doc.documentDate,
@@ -153,6 +156,8 @@ export async function getStockTransfer(documentId: string) {
       quantity: l.quantity,
     })),
   };
+
+  });
 }
 
 interface TransferLineInput {

@@ -1,7 +1,8 @@
 "use client";
 import { saveStatus } from "@/lib/save-status";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo } from "react";
+import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 import { createRole, updateRole, deleteRole, type PermissionCatalog } from "@/lib/client-actions/roles";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 
@@ -100,7 +101,7 @@ function PermissionGrid({
 }
 
 function useGranted(initial: string[], catalog: PermissionCatalog) {
-  const [granted, setGranted] = useState<Set<string>>(() => new Set(initial));
+  const [granted, setGranted] = useRecoveryState<Set<string>>("granted", () => new Set(initial));
 
   // All valid keys, so the column/row toggles only ever set keys that exist.
   const validKeys = useMemo(() => {
@@ -145,7 +146,7 @@ function useGranted(initial: string[], catalog: PermissionCatalog) {
   return { granted, toggle, toggleModule, toggleAction, keys };
 }
 
-export function RoleCreateForm({ catalog, onDone }: { catalog: PermissionCatalog; onDone: () => void }) {
+function RoleCreateFormBody({ catalog, onDone }: { catalog: PermissionCatalog; onDone: () => void }) {
   const [state, action, pending] = useActionState(createRole, undefined);
   const { granted, toggle, toggleModule, toggleAction, keys } = useGranted([], catalog);
 
@@ -176,7 +177,11 @@ export function RoleCreateForm({ catalog, onDone }: { catalog: PermissionCatalog
   );
 }
 
-export function RoleEditForm({
+export function RoleCreateForm(props: Parameters<typeof RoleCreateFormBody>[0]) {
+  return <FormRecovery domain="roles" id="new" revision="0" createAction="roles.createRole"><RoleCreateFormBody {...props} /></FormRecovery>;
+}
+
+function RoleEditFormBody({
   roleId,
   roleName,
   catalog,
@@ -184,6 +189,7 @@ export function RoleEditForm({
   onDone,
 }: {
   roleId: string;
+  revision: string;
   roleName: string;
   catalog: PermissionCatalog;
   initialKeys: string[];
@@ -218,6 +224,10 @@ export function RoleEditForm({
       </button>
     </form>
   );
+}
+
+export function RoleEditForm(props: Parameters<typeof RoleEditFormBody>[0]) {
+  return <FormRecovery domain="roles" id={props.roleId} revision={props.revision}><RoleEditFormBody {...props} /></FormRecovery>;
 }
 
 export function DeleteRoleButton({ roleId, onDone }: { roleId: string; onDone: () => void }) {

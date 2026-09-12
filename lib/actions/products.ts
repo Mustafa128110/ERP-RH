@@ -1,4 +1,5 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -300,6 +301,7 @@ export async function createProductsBatch(
 // display, and a name typed over it is what creates a new one.
 export interface ProductEditRow {
   id: string;
+  _revision: string;
   companyId: string;
   company: string;
   sku: string;
@@ -346,6 +348,7 @@ export interface ProductEditData {
 // row: the derived half (suppliers, stock) is three joins per item, and only the
 // handful that were ticked are ever opened.
 export async function getProductsForEdit(itemIds: string[]): Promise<ProductEditData> {
+  return withReadSnapshot(async () => {
   const session = await getSession();
   requirePermission(session, "products", "view");
 
@@ -355,6 +358,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
   const rows = await db
     .select({
       id: items.id,
+      _revision: sql<string>`${items}.xmin::text`,
       companyId: items.companyId,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       sku: items.sku,
@@ -490,6 +494,8 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     unitOptions: unitOpts.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name })),
     locationOptions: locationOpts.map((l) => ({ id: l.id, name: l.name })),
   };
+
+  });
 }
 
 // What one row of the edit grid submits. Every reference is an id-or-name pair:

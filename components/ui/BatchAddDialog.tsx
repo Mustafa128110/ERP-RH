@@ -6,6 +6,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { clearDraft, readDraft, saveDraft } from "@/lib/draft";
 import { TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
+import { useClientUserId } from "@/lib/client-user";
 
 const ADD_ROWS = 2;
 
@@ -33,7 +34,10 @@ export function BatchAddDialog<T, C = unknown>({
   initialRows = 5,
   toolbar,
   autoAppend = false,
-  draftKey,
+  draftKey: suppliedDraftKey,
+  preserveDraft = true,
+  draftMetadata,
+  restoreDraftMetadata,
 }: {
   title: string;
   onClose: () => void;
@@ -59,6 +63,9 @@ export function BatchAddDialog<T, C = unknown>({
   // (expenses, payments); the master-data dialogs don't pass it. Clearing on a
   // successful save is handled here, inside submit().
   draftKey?: string;
+  preserveDraft?: boolean;
+  draftMetadata?: Record<string, string>;
+  restoreDraftMetadata?: (value: Record<string, string>) => void;
   // Sits above the table — used for the "+ Add Category" / "+ Add Brand" quick
   // buttons when a row's dropdowns reference records the user may not have yet,
   // or for a dialog-level field that applies to every row, like a shared date.
@@ -72,16 +79,25 @@ export function BatchAddDialog<T, C = unknown>({
   // actions, so a spare at the bottom costs nothing.
   autoAppend?: boolean;
 }) {
+  const userId = useClientUserId();
+  const draftKey = preserveDraft ? suppliedDraftKey ?? (userId ? `batch:${userId}:${title}` : undefined) : undefined;
   // A draft key means the rows survive a crash mid-entry: they open with the
   // last unsaved batch in place and save back as they're typed. The initial
   // state is read once, when the dialog mounts — the draft is the rows, so
   // restoring is opening, and a "restored N unsaved rows" note tells the user
   // they aren't looking at a fresh grid.
-  const [initial] = useState<T[] | null>(() => {
+  const [initialDraft] = useState<{ rows: T[]; metadata?: Record<string, string> } | null>(() => {
     if (!draftKey) return null;
-    const saved = readDraft<T[]>(draftKey);
-    return Array.isArray(saved) && saved.length > 0 ? saved : null;
+    const saved = readDraft<T[] | { rows: T[]; metadata?: Record<string, string> }>(draftKey);
+    if (Array.isArray(saved)) return saved.length ? { rows: saved } : null;
+    return saved && Array.isArray(saved.rows) && saved.rows.length ? saved : null;
   });
+  const initial = initialDraft?.rows ?? null;
+  useEffect(() => {
+    if (initialDraft?.metadata) restoreDraftMetadata?.(initialDraft.metadata);
+    // Only restore the metadata captured when this dialog opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [rows, setRows] = useState<T[]>(initial ?? Array.from({ length: initialRows }, emptyRow));
   const [restoredFromDraft, setRestoredFromDraft] = useState(initial !== null);
   const [pending, setPending] = useState(false);
@@ -107,15 +123,17 @@ export function BatchAddDialog<T, C = unknown>({
   // untouched dialog must not write an "empty batch" draft that then reads as
   // a restore. Touch happens in update, removeRow and the +Add rows button.
   const [touched, setTouched] = useState(initial !== null);
+  const metadataFrame = useRef(!!initialDraft?.metadata);
   useEffect(() => {
+    if (metadataFrame.current) { metadataFrame.current = false; return; }
     if (!draftKey || !touched) return;
     // saveDraft reports whether the write landed; a draft that couldn't be
     // saved must not be silently presented as crash-proof. The warning update
     // is deferred off the synchronous effect body (the lint rule against
     // setState in effects); the value is stable, so a failed save warns once.
-    const ok = saveDraft(draftKey, rows);
+    const ok = saveDraft(draftKey, draftMetadata ? { rows, metadata: draftMetadata } : rows);
     queueMicrotask(() => setDraftSaveFailed(!ok));
-  }, [draftKey, rows, touched]);
+  }, [draftKey, rows, touched, draftMetadata]);
 
   function update(i: number, patch: Partial<T>) {
     setTouched(true);
@@ -266,7 +284,7 @@ export function BatchAddDialog<T, C = unknown>({
         </div>
       )}
 
-      {toolbar && <div className="mb-3 flex flex-wrap items-center gap-2">{toolbar}</div>}
+      {toolbar && <div className="mb-3 flex flex-wrap items-center gap-2" onChangeCapture={() => setTouched(true)}>{toolbar}</div>}
 
       {/* Blank rows are ignored by the server actions, so leaving spares at the
           bottom is harmless — the header stays put while the rows scroll. */}

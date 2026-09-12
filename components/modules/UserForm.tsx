@@ -22,6 +22,7 @@ export function UserBatchAddDialog({
 
   return (
     <BatchAddDialog<BatchRow>
+      preserveDraft={false}
       title="Batch Add Users"
       onClose={onClose}
       onDone={onDone}

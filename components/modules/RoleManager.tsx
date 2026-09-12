@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
-import { getRolePermissionKeys, type PermissionCatalog, type RoleListItem } from "@/lib/client-actions/roles";
+import { getRoleForEdit, type PermissionCatalog, type RoleListItem } from "@/lib/client-actions/roles";
 import { RoleCreateForm, RoleEditForm, DeleteRoleButton } from "@/components/modules/RoleForm";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
@@ -17,7 +17,7 @@ const columns: ColumnDef[] = [
   { key: "users", label: "Users", align: "right" },
 ];
 
-type EditState = { role: RoleListItem; keys: string[] } | null;
+type EditState = Awaited<ReturnType<typeof getRoleForEdit>>;
 
 // Roles are created and edited through the same permission grid — a single
 // record with a big matrix, so a dialog rather than the batch template the
@@ -26,6 +26,7 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<EditState>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState("");
 
   function close() {
     setCreating(false);
@@ -36,11 +37,16 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
     const role = roles.find((r) => r.id === row.id);
     if (!role) return;
     setLoadingId(role.id);
+    setLoadError("");
     // The role's current grants are fetched on open so the list query stays a
     // cheap count rather than dragging every role's full permission set.
-    const keys = await getRolePermissionKeys(role.id);
-    setLoadingId(null);
-    setEditing({ role, keys });
+    try {
+      const detail = await getRoleForEdit(role.id);
+      if (detail) setEditing(detail);
+      else setLoadError("This role is no longer available. Refresh the list.");
+    }
+    catch { setLoadError("Could not load this role. Check your connection and try again."); }
+    finally { setLoadingId(null); }
   }
 
   const rows: Row[] = roles.map((r) => ({
@@ -68,6 +74,7 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
 
       <DataTable columns={columns} rows={rows} idKey="id" onRowClick={openEdit} emptyMessage="No roles yet." searchPlaceholder="Search roles…" />
       {loadingId && <p className="text-xs text-steel">Loading…</p>}
+      {loadError && <p role="alert" className="text-sm text-error">{loadError}</p>}
 
       {creating && (
         <Dialog title="New Role" onClose={close} size="wide">
@@ -76,17 +83,18 @@ export function RoleManager({ roles, catalog }: { roles: RoleListItem[]; catalog
       )}
 
       {editing && (
-        <Dialog title={editing.role.name} onClose={close} size="wide">
+        <Dialog title={editing.name} onClose={close} size="wide">
           <div className="flex flex-col gap-4">
             <RoleEditForm
-              roleId={editing.role.id}
-              roleName={editing.role.name}
+              roleId={editing.id}
+              roleName={editing.name}
+              revision={editing._revision}
               catalog={catalog}
               initialKeys={editing.keys}
               onDone={close}
             />
             <div className="rounded border border-error/30 bg-error-tint p-4">
-              <DeleteRoleButton roleId={editing.role.id} onDone={close} />
+              <DeleteRoleButton roleId={editing.id} onDone={close} />
             </div>
           </div>
         </Dialog>

@@ -13,7 +13,7 @@ import type { ColumnDef, Row } from "@/lib/table";
 type ConversionListItem = { id: string; name: string; multiplier: string; fromUnitId: string; fromUnitName: string | null; toUnitId: string; assignedCount: number };
 type ItemOption = { id: string; name: string; sku: string };
 type UnitOption = { id: string; name: string; symbol: string | null };
-type Detail = { id: string; name: string; fromUnitId: string; toUnitId: string; multiplier: string; itemIds: string[] } | null;
+type Detail = { id: string; _revision: string; name: string; fromUnitId: string; toUnitId: string; multiplier: string; itemIds: string[] } | null;
 
 const columns: ColumnDef[] = [
   { key: "name", label: "Rule Name" },
@@ -49,7 +49,7 @@ export function UnitConversionManager({ conversions, getDetail, itemOptions, uni
           {detail ? (
             <div className="flex flex-col gap-4">
               <UnitConversionEditForm conversionId={modal.id} defaults={detail} unitOptions={unitOptions} onDone={close} />
-              <UnitRuleProductsForm ruleId={modal.id} itemIds={detail.itemIds} itemOptions={itemOptions} onDone={close} />
+              <UnitRuleProductsForm ruleId={modal.id} revision={detail._revision} itemIds={detail.itemIds} itemOptions={itemOptions} onDone={close} />
               <div className="rounded border border-error/30 bg-error-tint p-4"><DeleteUnitConversionButton conversionId={modal.id} onDone={close} /></div>
             </div>
           ) : <p className="text-sm text-steel">Loading…</p>}

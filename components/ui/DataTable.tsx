@@ -11,6 +11,7 @@ import { Icon } from "./Icon";
 import { iconButtonClass } from "./form-styles";
 import { matchesTableSearch, parseTableSearch } from "@/lib/search-query";
 import { compareTableValues, tableColumnSortKey } from "@/lib/table-sort";
+import { HistoryPager, useHistory } from "./HistoryProvider";
 
 // Every list gets a row number in front, so a row can be pointed at out loud
 // ("line 14") without reading its contents back. It's synthesised rather than a
@@ -65,8 +66,10 @@ export function DataTable({
   pendingIds,
   onRowIntent,
   globalShortcuts = true,
+  history = false,
 }: {
   columns: ColumnDef[];
+  history?: boolean;
   rows: Row[];
   idKey: string;
   // Row link target: `${hrefBase}/${row[idKey]}`.
@@ -111,7 +114,14 @@ export function DataTable({
   // -1 until the list is actually used: an untouched page shouldn't already be
   // pointing at its first row.
   const [focused, setFocused] = useState(-1);
-  const [query, setQuery] = useState("");
+  const historyContext = useHistory();
+  const remote = history ? historyContext : null;
+  const [query, setQuery] = useState(remote?.info.query ?? "");
+  const [seenQuery, setSeenQuery] = useState(remote?.info.query ?? "");
+  if (remote && seenQuery !== remote.info.query) {
+    if (query === seenQuery) setQuery(remote.info.query);
+    setSeenQuery(remote.info.query);
+  }
   const [showAllRows, setShowAllRows] = useState(false);
   const [printing, setPrinting] = useState(false);
   // The search box is a search icon until it is asked for. On a list screen the
@@ -121,6 +131,7 @@ export function DataTable({
 
   // Load sort state from localStorage if storageKey is provided
   const [sortKey, setSortKey] = useState<string | null>(() => {
+    if (remote) return remote.info.sort || null;
     if (storageKey && typeof window !== "undefined") {
       const saved = localStorage.getItem(`datatable-sort-${storageKey}`);
       if (saved) {
@@ -136,6 +147,7 @@ export function DataTable({
   });
 
   const [sortDir, setSortDir] = useState<"asc" | "desc">(() => {
+    if (remote) return remote.info.direction;
     if (storageKey && typeof window !== "undefined") {
       const saved = localStorage.getItem(`datatable-sort-${storageKey}`);
       if (saved) {
@@ -151,6 +163,13 @@ export function DataTable({
   });
 
   // Save sort state to localStorage when it changes
+  const remoteSort = remote ? `${remote.info.sort}:${remote.info.direction}` : "";
+  const [seenSort, setSeenSort] = useState(remoteSort);
+  if (remote && seenSort !== remoteSort) {
+    setSeenSort(remoteSort);
+    setSortKey(remote.info.sort || null);
+    setSortDir(remote.info.direction);
+  }
   useEffect(() => {
     if (storageKey && typeof window !== "undefined") {
       localStorage.setItem(`datatable-sort-${storageKey}`, JSON.stringify({ key: sortKey, dir: sortDir }));
@@ -170,6 +189,7 @@ export function DataTable({
   // merely because the contact's name happens to contain "dozen".
   const terms = parseTableSearch(query.replaceAll(",", " "));
   const visible = useMemo(() => {
+    if (remote) return rows;
     let result = terms.length === 0 ? rows : rows.filter((row, i) => matchesTableSearch(row, index[i], terms));
     if (sortKey) {
       result = [...result].sort((a, b) => {
@@ -180,7 +200,7 @@ export function DataTable({
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, index, query, sortKey, sortDir]);
+  }, [rows, index, query, sortKey, sortDir, remote]);
 
   const virtualized = visible.length > 150 && !showAllRows && !printing;
   // Search, selection and keyboard navigation still use the full filtered set.
@@ -210,6 +230,13 @@ export function DataTable({
   }, []);
 
   function toggleSort(key: string) {
+    if (remote) {
+      const nextKey = sortKey === key && sortDir === "asc" ? null : key;
+      const nextDirection = sortKey === key && sortDir === "desc" ? "asc" : "desc";
+      setSortKey(nextKey); setSortDir(nextDirection);
+      remote.change({sort:nextKey,direction:nextDirection,page:1});
+      return;
+    }
     if (sortKey === key) {
       // Third click: clear sort
       if (sortDir === "asc") {
@@ -231,6 +258,7 @@ export function DataTable({
   // of saying the same thing (and a second render to say it in).
   function runSearch(next: string) {
     setQuery(next);
+    remote?.change({q:next,page:1},true);
     setFocused(-1);
     anchor.current = 0;
     scrollRef.current?.scrollTo({ top: 0 });
@@ -446,7 +474,7 @@ export function DataTable({
     </div>
   ) : null;
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && !remote) {
     return (
       <div className="rounded-lg border border-dashed border-zinc-300 p-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
         {emptyMessage ?? "No records yet."}
@@ -459,6 +487,8 @@ export function DataTable({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {search}
+      {remote && <HistoryPager history={remote} />}
+      {remote && !remote.info.all && remote.info.total > rows.length && <p className="hidden print:block">This printout contains page {remote.info.page} only. Load all matching records to print the full list.</p>}
       {visible.length > 150 && <div className="flex shrink-0 items-center justify-between text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
       {/* tabIndex makes the list itself focusable, which is what gives the arrow
           keys somewhere to arrive. Clicking any row focuses it as a side effect. */}
@@ -483,7 +513,7 @@ export function DataTable({
                   <th className="w-10 px-4 py-2.5">
                     <input
                       type="checkbox"
-                      aria-label={allSelected ? "Clear selection" : "Select all rows"}
+                      aria-label={allSelected ? "Clear selection" : remote && !remote.info.all ? "Select rows on this page" : "Select all rows"}
                       checked={allSelected}
                       onChange={() => onSelectedChange!(allSelected ? [] : allIds)}
                       className="h-4 w-4 rounded border-sand align-middle"

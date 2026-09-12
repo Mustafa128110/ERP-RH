@@ -1,4 +1,7 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
+import { documentHistoryWindow } from "@/lib/queries/history-window";
+import type { HistoryRequest } from "@/lib/history-window";
 
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -99,13 +102,14 @@ export interface StockPurchaseItemRow {
 // `companyId` narrows to one company on top of the scope, driven by the list's
 // company filter — companyInScope() still gates every row, so it can only ever
 // show less than the scope, never more.
-export async function listStockPurchases(companyId?: string) {
+export async function listStockPurchases(companyId?: string, documentIds?: string[]) {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
-  const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(
+    documentIds ? (documentIds.length ? inArray(documents.id, documentIds) : sql`false`) : undefined,await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
   const cacheScope = (await getScopeCompanyIds()).sort().join(",");
 
-  return cachedPageRead(READ_DOMAIN.purchases, `${session.userId}:purchases:${cacheScope}:${stableReadKey(companyId)}`, async () => {
+  return cachedPageRead(READ_DOMAIN.purchases, `${session.userId}:purchases:${cacheScope}:${stableReadKey({ filters: companyId, documentIds })}`, async () => {
 
   // Same shape as listSales: selecting lines by document type rather than by a
   // list of ids drops the dependency between the two queries, so they overlap
@@ -178,6 +182,20 @@ export async function listStockPurchases(companyId?: string) {
   return docs.map((d) => ({ ...d, items: linesByDoc.get(d.id) ?? [] }));
   });
 }
+
+export async function listStockPurchasesPage(companyId?: string, request: HistoryRequest = {}) {
+  const session = await getSession();
+  requirePermission(session, "purchases", "view");
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
+  return withReadSnapshot(async () => {
+    const selected = await documentHistoryWindow(scope, "PURCHASE_INVOICE", request);
+    const records = await listStockPurchases(companyId, selected.ids);
+    const order = new Map(selected.ids.map((id, index) => [id, index]));
+    records.sort((a,b) => order.get(a.id)! - order.get(b.id)!);
+    return { records, info: selected.info, outstanding: Number(selected.outstanding) };
+  });
+}
+
 
 export async function getStockPurchase(documentId: string) {
   const session = await getSession();

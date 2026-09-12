@@ -1,4 +1,5 @@
 "use server";
+import { withReadSnapshot } from "@/lib/db/read-snapshot";
 
 import { and, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -327,6 +328,7 @@ export async function createPayment(
 }
 
 export async function getPayment(documentId: string) {
+  return withReadSnapshot(async () => {
   const session = await getSession();
   requirePermission(session, "payments", "view");
 
@@ -336,6 +338,7 @@ export async function getPayment(documentId: string) {
     db
       .select({
         id: documents.id,
+        _revision: sql<string>`${documents}.xmin::text`,
         companyId: documents.companyId,
         contactId: documents.contactId,
         amount: documents.grandTotal,
@@ -367,6 +370,8 @@ export async function getPayment(documentId: string) {
     paymentType,
     direction: (doc.code === "PAYMENT_MADE" ? "made" : "received") as PaymentDirection,
   };
+
+  });
 }
 
 export interface PaymentBatchRow {

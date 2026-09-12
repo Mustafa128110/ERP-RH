@@ -1,4 +1,5 @@
 "use client";
+import { FormRecovery, RecoveryValue } from "@/components/ui/FormRecovery";
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -337,6 +338,7 @@ export function InvoiceManager({
         onBatchEdit={() => selected[0] && void openEdit(selected[0])}
         emptyMessage={filtered ? "No invoices match these filters." : "No invoices yet — raise one from Sales."}
         searchPlaceholder="Search invoices…"
+        history
         storageKey="sales-invoices"
       />
 
@@ -347,6 +349,8 @@ export function InvoiceManager({
 
       {returning && (
         <Dialog title={`Sales Return · ${returning.number}`} onClose={() => !returnBusy && setReturning(null)} size="wide">
+          <FormRecovery domain="documents" id={`return:${returning.id}`} revision={JSON.stringify([returning._revision, returning.lines.map(line => [line.sourceLineId, line.availableQuantity])])} revisions={{ [`documents:${returning.id}`]: returning._revision }} createAction="returns.createSalesReturn">
+          <RecoveryValue name="returnQuantities" value={returnQuantities} restore={value => setReturnQuantities(value as Record<string, string>)} />
           <form onSubmit={(event) => void saveReturn(event)} className="flex flex-col gap-4">
             <input type="hidden" name="sourceDocumentId" value={returning.id} />
             <label className="w-fit text-sm text-ink">Return date
@@ -362,6 +366,7 @@ export function InvoiceManager({
             {returnError && <p className="rounded border border-error/30 bg-error-tint p-3 text-sm text-error">{returnError}</p>}
             <div className="flex justify-end gap-2"><button type="button" onClick={() => setReturning(null)} disabled={returnBusy} className="rounded border border-sand px-4 py-2 text-sm">Cancel</button><button type="submit" disabled={returnBusy} className="rounded bg-navy-800 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{returnBusy ? "Saving…" : "Create return"}</button></div>
           </form>
+          </FormRecovery>
         </Dialog>
       )}
 
