@@ -16,7 +16,7 @@ import { ChequeQuickAddButton, chequeDialogOptions } from "@/components/modules/
 import { inCompany } from "@/lib/contact-scope";
 import { optimistically } from "@/lib/optimistic-records";
 
-type Option = { id: string; name: string };
+type Option = { id: string; name: string; shortName?: string | null };
 type ScopedOption = Option & { companyId: string };
 // Cash accounts carry their default flag so a new row can preselect the drawer.
 export type CashOption = Option & { isDefault: boolean; companyId: string | null };
@@ -204,7 +204,7 @@ export function ExpenseBatchAddDialog({
               </option>
               {companyOptions.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name}
+                  {c.shortName || c.name}
                 </option>
               ))}
             </select>
@@ -245,7 +245,7 @@ export function ExpenseBatchAddDialog({
                 batch half-entered. */}
             <div className="flex gap-1.5">
               <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
-                <option value="">—</option>
+                <option value="">Select</option>
                 {settlementList(row.settlementType, row.companyId).map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.name}

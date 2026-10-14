@@ -70,7 +70,7 @@ function BankAccountFields({ defaults, companyOptions }: { defaults?: BankAccoun
       <label className={labelClass}>
         <span className={labelTextClass}>Company</span>
         <select name="companyId" defaultValue={defaults?.companyId ?? ""} className={inputClass}>
-          <option value="">— Global (all companies) —</option>
+          <option value="">Global (all companies)</option>
           {companyOptions.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -515,7 +515,7 @@ function ChequeFields({
       <label className={labelClass}>
         <span className={labelTextClass}>Bank account</span>
         <select name="bankAccountId" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} className={inputClass}>
-          <option value="">— None —</option>
+          <option value="">None</option>
           {visibleBankAccounts.map((b) => (
             <option key={b.id} value={b.id}>
               {b.label}
@@ -526,7 +526,7 @@ function ChequeFields({
       <label className={labelClass}>
         <span className={labelTextClass}>Contact</span>
         <select name="contactId" value={contactId} onChange={(e) => setContactId(e.target.value)} className={inputClass}>
-          <option value="">— None —</option>
+          <option value="">None</option>
           {visibleContacts.map((c) => (
             <option key={c.id} value={c.id}>
               {c.displayName}
@@ -723,7 +723,7 @@ export function ChequeBatchAddDialog({
           </td>
           <td className={batchCellClass}>
             <select value={row.bankAccountId} onChange={(e) => update({ bankAccountId: e.target.value })} className={batchInputClass}>
-              <option value="">— None —</option>
+              <option value="">None</option>
               {bankOpts.filter(inCompany(row.companyId)).map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.label}

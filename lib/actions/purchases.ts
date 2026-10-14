@@ -60,7 +60,7 @@ import {
   type PurchasePaidMode,
 } from "@/lib/purchase-edit-rules";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
-import { bankAccountLabel } from "@/lib/account-label";
+import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
 import { isCounterContact } from "@/lib/contact-scope";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
@@ -1534,9 +1534,7 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
         unit: units.name,
         quantity: documentLines.quantity,
         unitPrice: documentLines.unitPrice,
-        bankName: bankAccounts.bankName,
-        branchName: bankAccounts.branchName,
-        accountTitle: bankAccounts.accountTitle,
+        bankAccountName: sql<string>`${sql.raw(BANK_ACCOUNT_LABEL_SQL())}`,
         cashName: cashAccounts.name,
       })
       .from(documentLines)
@@ -1566,7 +1564,7 @@ export async function exportStockPurchasesCsv(companyId?: string): Promise<Recor
     const cheque = chequeByDoc.get(r.documentId);
     const settlementType = r.bankAccountId ? "account" : r.cashAccountId ? "cash" : cheque ? "cheque" : "";
     const settlementAccount = r.bankAccountId
-      ? bankAccountLabel({ bankName: r.bankName ?? "", branchName: r.branchName, accountTitle: r.accountTitle })
+      ? (r.bankAccountName ?? "")
       : r.cashAccountId
         ? (r.cashName ?? "")
         : (cheque ?? "");

@@ -24,7 +24,7 @@ import { getSession } from "@/lib/auth/session";
 import { PermissionError } from "@/lib/auth/permissions";
 import { companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { cached, invalidate, MINUTE } from "@/lib/cache";
-import { bankAccountLabel } from "@/lib/account-label";
+import { bankAccountLabel, getDuplicateBankTitleSet } from "@/lib/account-label";
 import { CACHE } from "@/lib/cache-keys";
 import { settingsForCompanies } from "@/lib/queries/settings";
 import { queryItemOptions } from "@/lib/queries/item-options";
@@ -188,23 +188,29 @@ export const getContactOptions = scopedLookup(`${CACHE.contacts}:options`, conta
 );
 
 export const getBankAccountOptions = scopedLookup(CACHE.bankAccounts, bankAccounts.companyId, async (w) => {
-  const rows = await db
-    .select({
-      id: bankAccounts.id,
-      companyId: bankAccounts.companyId,
-      bankName: bankAccounts.bankName,
-      branchName: bankAccounts.branchName,
-      accountTitle: bankAccounts.accountTitle,
-    })
-    .from(bankAccounts)
-    .where(and(eq(bankAccounts.isActive, true), w));
-  // Bank, branch and account title together (lib/account-label.ts). Bank and
-  // branch alone can't tell two accounts at the same branch apart, which is
-  // exactly the case a shop with a current and a savings account is in.
-  //
-  // companyId rides along for the pickers that narrow to one company — null is
-  // global, visible to every company (lib/contact-scope.ts).
-  return rows.map((r) => ({ id: r.id, companyId: r.companyId, name: bankAccountLabel(r) }));
+  const [rows, allBankAccounts] = await Promise.all([
+    db
+      .select({
+        id: bankAccounts.id,
+        companyId: bankAccounts.companyId,
+        bankName: bankAccounts.bankName,
+        branchName: bankAccounts.branchName,
+        accountTitle: bankAccounts.accountTitle,
+      })
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.isActive, true), w)),
+    db
+      .select({
+        id: bankAccounts.id,
+        bankName: bankAccounts.bankName,
+        accountTitle: bankAccounts.accountTitle,
+      })
+      .from(bankAccounts)
+      .where(eq(bankAccounts.isActive, true)),
+  ]);
+
+  const dupes = getDuplicateBankTitleSet(allBankAccounts);
+  return rows.map((r) => ({ id: r.id, companyId: r.companyId, name: bankAccountLabel(r, dupes) }));
 });
 
 // companyId comes along so a form can narrow the list to the company being

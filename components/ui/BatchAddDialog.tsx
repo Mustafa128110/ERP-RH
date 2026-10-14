@@ -24,10 +24,13 @@ const ADD_ROWS = 2;
 // the user was editing, instead of making them hunt for it in the dropdown.
 function getBatchHeaderWidth(header: string): string {
   const h = header.toLowerCase();
+  if (h === "company") return "w-20 min-w-[5rem]";
+  if (h === "direction") return "w-24 min-w-[6rem]";
+  if (h.includes("settle")) return "w-28 min-w-[7rem]";
   if (h.includes("name") || h.includes("description") || h.includes("email") || h.includes("address") || h.includes("contact")) return "w-52 min-w-[13rem]";
   if (h.includes("company") || h.includes("category") || h.includes("brand") || h.includes("role") || h.includes("account")) return "w-44 min-w-[11rem]";
   if (h.includes("active") || h.includes("taxable")) return "w-24 min-w-[6rem]";
-  if (h.includes("rate") || h.includes("price") || h.includes("qty") || h.includes("value") || h.includes("code") || h.includes("sku") || h.includes("unit") || h.includes("balance") || h.includes("amount") || h.includes("direction") || h.includes("settle")) return "w-32 min-w-[8rem]";
+  if (h.includes("rate") || h.includes("price") || h.includes("qty") || h.includes("value") || h.includes("code") || h.includes("sku") || h.includes("unit") || h.includes("balance") || h.includes("amount")) return "w-32 min-w-[8rem]";
   return "w-36 min-w-[9rem]";
 }
 
@@ -290,4 +293,4 @@ export function BatchAddDialog<T, C = unknown>({
 // Cells share a single collapsed border (grid look, like the sales/purchase
 // line editors); the input itself is borderless and fills the cell.
 export const batchCellClass = "border border-sand p-0 align-middle";
-export const batchInputClass = "h-9 w-full min-w-[8rem] bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";
+export const batchInputClass = "h-9 w-full min-w-0 bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";

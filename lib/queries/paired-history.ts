@@ -12,14 +12,14 @@ export async function pairedHistory<T extends {id:string}>(kind:'inter'|'cash',s
    coalesce(companies.short_name,companies.name) AS company,
    ${inter?sql`documents.reason`:sql`split_part(documents.reason,' ',4)`} AS pair,
    ${inter?sql`CASE WHEN document_types.code='SALES_INVOICE' THEN 'out' ELSE 'in' END`:sql`split_part(documents.reason,' ',3)`} AS side,
-   coalesce(${sql.raw(BANK_ACCOUNT_LABEL_SQL())},cash_accounts.name,'—') AS account
+   coalesce(${sql.raw(BANK_ACCOUNT_LABEL_SQL())},cash_accounts.name,'') AS account
   FROM documents JOIN document_types ON document_types.id=documents.document_type_id JOIN companies ON companies.id=documents.company_id
   LEFT JOIN bank_accounts ON bank_accounts.id=documents.bank_account_id LEFT JOIN cash_accounts ON cash_accounts.id=documents.cash_account_id
   WHERE ${scope??sql`true`} AND ${inter?sql`documents.reason LIKE 'Inter-Company %' AND document_types.code IN ('SALES_INVOICE','PURCHASE_INVOICE')`:sql`documents.reason LIKE 'Cash Transfer %' AND documents.status='posted'`}
  ), ranked AS (SELECT *,row_number() OVER(PARTITION BY pair,side ORDER BY created_at DESC,id) AS rank FROM sides)
  SELECT outgoing.id,outgoing.number AS ${sql.identifier(inter?'saleNumber':'number')},outgoing.document_date::text AS "documentDate",outgoing.created_at AS "createdAt",
  ${inter?sql`incoming.number AS "purchaseNumber",outgoing.company AS seller,incoming.company AS buyer,outgoing.status,outgoing.grand_total::text AS "grandTotal"`:
- sql`outgoing.company,outgoing.account AS "from",coalesce(incoming.account,'—') AS "to",outgoing.grand_total::text AS amount`}
+ sql`outgoing.company,outgoing.account AS "from",coalesce(incoming.account,'') AS "to",outgoing.grand_total::text AS amount`}
  FROM ranked outgoing ${inter?sql`JOIN`:sql`LEFT JOIN`} ranked incoming ON incoming.pair=outgoing.pair AND incoming.side='in' AND incoming.rank=1
  WHERE outgoing.side='out' AND outgoing.rank=1 AND outgoing.pair<>''`;
  const names=inter?['id','saleNumber','documentDate','createdAt','purchaseNumber','seller','buyer','status','grandTotal']:['id','number','documentDate','createdAt','company','from','to','amount'];

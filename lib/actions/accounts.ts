@@ -10,7 +10,7 @@ import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { CHEQUE_TYPES, CHEQUE_STATUSES } from "@/lib/cheque-constants";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
-import { bankAccountLabel } from "@/lib/account-label";
+import { bankAccountLabel, getDuplicateBankTitleSet } from "@/lib/account-label";
 import { recordAudit } from "@/lib/actions/audit";
 import { resolveContactIds } from "@/lib/actions/resolve-refs";
 import { claimOperation, DuplicateOperationError } from "@/lib/actions/operation-id";
@@ -181,10 +181,15 @@ export async function createBankAccountsBatch(
       await invalidateAccounts();
       revalidatePath("/accounts");
       await recordAudit({ action: "create", entity: "bank account", summary: inserted.map((r) => r.bankName).join(", ") });
+      const allActive = await db
+        .select({ id: bankAccounts.id, bankName: bankAccounts.bankName, accountTitle: bankAccounts.accountTitle, branchName: bankAccounts.branchName })
+        .from(bankAccounts)
+        .where(eq(bankAccounts.isActive, true));
+      const dupes = getDuplicateBankTitleSet(allActive);
       // Labelled the way every picker labels an account, so one created from
       // inside a cheque form drops into the dropdown reading identically to the
       // rest of the list.
-      return { created: inserted.map((r) => ({ id: r.id, name: bankAccountLabel(r), companyId: r.companyId })) };
+      return { created: inserted.map((r) => ({ id: r.id, name: bankAccountLabel(r, dupes), companyId: r.companyId })) };
     },
     { [DUPLICATE]: "Can't create — one or more account numbers already exist for their company." },
   );

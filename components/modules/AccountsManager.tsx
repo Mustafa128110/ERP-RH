@@ -28,7 +28,7 @@ import { formatDate } from "@/lib/format";
 import { patchFromFormData } from "@/lib/optimistic-records";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import { isChequeSpent, UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
-import { bankAccountLabel } from "@/lib/account-label";
+import { bankAccountLabel, getDuplicateBankTitleSet } from "@/lib/account-label";
 
 interface BankAccount extends BankAccountValues {
   id: string;
@@ -137,8 +137,9 @@ export function AccountsManager({
   // list and the transfers list all use (lib/account-label.ts). Off the optimistic
   // list, so a bank account renamed on its own tab reads the new way in the cheque
   // list and in the transfer picker at once.
-  const bankAccountOptions = bank.records.map((b) => ({ id: b.id, label: bankAccountLabel(b), companyId: b.companyId }));
-  const bankAccountFor = (id: string | null) => (id ? (bankAccountOptions.find((b) => b.id === id)?.label ?? "—") : "—");
+  const bankDupes = getDuplicateBankTitleSet(bank.records);
+  const bankAccountOptions = bank.records.map((b) => ({ id: b.id, label: bankAccountLabel(b, bankDupes), companyId: b.companyId }));
+  const bankAccountFor = (id: string | null) => (id ? (bankAccountOptions.find((b) => b.id === id)?.label ?? "") : "");
   const contactName = (id: string | null) => (id ? (contactOptions.find((c) => c.id === id)?.displayName ?? "—") : "—");
 
   function close() {
@@ -148,7 +149,7 @@ export function AccountsManager({
   const bankRows: Row[] = bank.records.map((b) => ({
     id: b.id,
     bankName: b.bankName,
-    branchName: b.branchName ?? "—",
+    branchName: b.branchName ?? "",
     accountTitle: b.accountTitle,
     accountNumber: b.accountNumber,
     balance: b.currentBalance ?? "0",

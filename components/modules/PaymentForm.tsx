@@ -34,7 +34,7 @@ import { useSync } from "@/components/layout/SyncProvider";
 import { ChequeQuickAddButton, chequeDialogOptions } from "@/components/modules/AccountForms";
 import { settlingCompanyId, type ContactBalanceHint } from "@/lib/payment-constants";
 
-type Option = { id: string; name: string };
+type Option = { id: string; name: string; shortName?: string | null };
 type ScopedOption = Option & { companyId: string };
 export type ChequeOption = Option & { companyId: string | null };
 // Cash accounts carry their default flag so a new row can preselect the drawer,
@@ -317,7 +317,7 @@ export function PaymentBatchAddDialog({
                   batch half-entered. */}
               <div className="flex gap-1.5">
                 <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
-                  <option value="">—</option>
+                  <option value="">Select</option>
                   {settlementList(row.settlementType, row.companyId).map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name}
@@ -356,7 +356,7 @@ export function PaymentBatchAddDialog({
                 </option>
                 {companyOptions.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name}
+                    {c.shortName || c.name}
                   </option>
                 ))}
               </select>
