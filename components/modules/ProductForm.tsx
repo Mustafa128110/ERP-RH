@@ -161,7 +161,11 @@ function ComboCell({
         options={options}
         placeholder={placeholder}
         className={cellInputClass}
-        onChange={(text) => onChange({ text, id: options.find((o) => o.name === text)?.id ?? "" })}
+        onChange={(text) => {
+          const trimmed = text.trim();
+          const matched = options.find((o) => o.name === text) ?? options.find((o) => o.name.toLowerCase() === trimmed.toLowerCase());
+          onChange({ text, id: matched?.id ?? "" });
+        }}
       />
     </td>
   );
@@ -285,10 +289,10 @@ export function ProductsBatchEditDialog({
       .filter((r) => r.id)
       .map((r) => {
         const values: Record<string, string> = {
-          name: r.name,
-          sku: r.sku,
-          category: r.category.text,
-          brand: r.brand.text,
+          name: r.name.trim(),
+          sku: r.sku.trim(),
+          category: r.category.text.trim(),
+          brand: r.brand.text.trim(),
         };
         const company = companyOptions.find((c) => c.id === r.companyId)?.name;
         if (company) values.company = company;

@@ -1,7 +1,7 @@
 "use server";
 import { withReadSnapshot } from "@/lib/db/read-snapshot";
 
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { commandContext } from "@/lib/db/command-context";
@@ -171,7 +171,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.categoryId)
-        .map((row) => toTitleCase(row.categoryName))
+        .map((row) => (row.categoryName ?? "").trim())
         .filter((name): name is string => Boolean(name)),
     ),
   ];
@@ -179,7 +179,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.brandId)
-        .map((row) => toTitleCase(row.brandName))
+        .map((row) => (row.brandName ?? "").trim())
         .filter((name): name is string => Boolean(name)),
     ),
   ];
@@ -187,28 +187,64 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.unitId)
-        .map((row) => toTitleCase(row.unitName))
+        .map((row) => (row.unitName ?? "").trim())
         .filter((name): name is string => Boolean(name)),
     ),
   ];
 
   const [knownCategories, knownBrands, knownUnits] = await Promise.all([
     categoryNames.length
-      ? tx.select({ id: categories.id, name: categories.name }).from(categories).where(inArray(categories.name, categoryNames))
+      ? tx
+          .select({ id: categories.id, name: categories.name })
+          .from(categories)
+          .where(
+            or(
+              inArray(categories.name, categoryNames),
+              inArray(sql`lower(${categories.name})`, categoryNames.map((n) => n.toLowerCase())),
+            ),
+          )
       : Promise.resolve([]),
     brandNames.length
-      ? tx.select({ id: brands.id, name: brands.name }).from(brands).where(inArray(brands.name, brandNames))
+      ? tx
+          .select({ id: brands.id, name: brands.name })
+          .from(brands)
+          .where(
+            or(
+              inArray(brands.name, brandNames),
+              inArray(sql`lower(${brands.name})`, brandNames.map((n) => n.toLowerCase())),
+            ),
+          )
       : Promise.resolve([]),
     unitNames.length
-      ? tx.select({ id: units.id, name: units.name }).from(units).where(inArray(units.name, unitNames))
+      ? tx
+          .select({ id: units.id, name: units.name })
+          .from(units)
+          .where(
+            or(
+              inArray(units.name, unitNames),
+              inArray(sql`lower(${units.name})`, unitNames.map((n) => n.toLowerCase())),
+            ),
+          )
       : Promise.resolve([]),
   ]);
-  const categoryByName = new Map(knownCategories.map((row) => [row.name, row.id]));
-  const brandByName = new Map(knownBrands.map((row) => [row.name, row.id]));
-  const unitByName = new Map(knownUnits.map((row) => [row.name, row.id]));
-  const missingCategories = categoryNames.filter((name) => !categoryByName.has(name));
-  const missingBrands = brandNames.filter((name) => !brandByName.has(name));
-  const missingUnits = unitNames.filter((name) => !unitByName.has(name));
+  const categoryByName = new Map<string, string>();
+  for (const row of knownCategories) {
+    categoryByName.set(row.name, row.id);
+    categoryByName.set(row.name.toLowerCase(), row.id);
+  }
+  const brandByName = new Map<string, string>();
+  for (const row of knownBrands) {
+    brandByName.set(row.name, row.id);
+    brandByName.set(row.name.toLowerCase(), row.id);
+  }
+  const unitByName = new Map<string, string>();
+  for (const row of knownUnits) {
+    unitByName.set(row.name, row.id);
+    unitByName.set(row.name.toLowerCase(), row.id);
+  }
+  const missingCategories = categoryNames.filter((name) => !categoryByName.has(name) && !categoryByName.has(name.toLowerCase()));
+  const missingBrands = brandNames.filter((name) => !brandByName.has(name) && !brandByName.has(name.toLowerCase()));
+  const missingUnits = unitNames.filter((name) => !unitByName.has(name) && !unitByName.has(name.toLowerCase()));
 
   const [insertedCategories, insertedBrands, insertedUnits] = await Promise.all([
     // Category names are not unique because two branches may legitimately use
@@ -228,15 +264,29 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
       ? tx.insert(units).values(missingUnits.map((name) => ({ name }))).returning({ id: units.id, name: units.name })
       : Promise.resolve([]),
   ]);
-  for (const row of insertedCategories) categoryByName.set(row.name, row.id);
-  for (const row of insertedBrands) brandByName.set(row.name, row.id);
-  for (const row of insertedUnits) unitByName.set(row.name, row.id);
+  for (const row of insertedCategories) {
+    categoryByName.set(row.name, row.id);
+    categoryByName.set(row.name.toLowerCase(), row.id);
+  }
+  for (const row of insertedBrands) {
+    brandByName.set(row.name, row.id);
+    brandByName.set(row.name.toLowerCase(), row.id);
+  }
+  for (const row of insertedUnits) {
+    unitByName.set(row.name, row.id);
+    unitByName.set(row.name.toLowerCase(), row.id);
+  }
 
-  return rows.map((row) => ({
-    categoryId: row.categoryId || categoryByName.get(toTitleCase(row.categoryName)) || null,
-    brandId: row.brandId || brandByName.get(toTitleCase(row.brandName)) || null,
-    unitId: row.unitId || unitByName.get(toTitleCase(row.unitName)) || null,
-  }));
+  return rows.map((row) => {
+    const catName = (row.categoryName ?? "").trim();
+    const brName = (row.brandName ?? "").trim();
+    const uName = (row.unitName ?? "").trim();
+    return {
+      categoryId: row.categoryId || categoryByName.get(catName) || categoryByName.get(catName.toLowerCase()) || null,
+      brandId: row.brandId || brandByName.get(brName) || brandByName.get(brName.toLowerCase()) || null,
+      unitId: row.unitId || unitByName.get(uName) || unitByName.get(uName.toLowerCase()) || null,
+    };
+  });
 }
 
 // Returns what it created so a quick-add from a sale or purchase line can drop
@@ -677,7 +727,7 @@ export async function updateProductsBatch(
               FROM (VALUES ${sql.join(
                 updates.map(({ row, categoryId, brandId, unitId, sku }) => sql`(
                   ${row.id}::uuid,
-                  ${toTitleCase(row.name)}::text,
+                  ${row.name.trim()}::text,
                   ${row.urduName.trim() || null}::text,
                   ${categoryId}::uuid,
                   ${brandId}::uuid,
@@ -699,7 +749,7 @@ export async function updateProductsBatch(
               .values(
                 creates.map(({ row, categoryId, brandId, unitId, sku }) => ({
                   companyId: row.companyId,
-                  name: toTitleCase(row.name),
+                  name: row.name.trim(),
                   urduName: row.urduName.trim() || null,
                   categoryId,
                   brandId,
@@ -1048,7 +1098,7 @@ export async function mergeProducts(
       // the SKU being kept is one of theirs — items is UNIQUE(company_id, sku),
       // and the row still holding it would not have been deleted yet.
       await tx.delete(items).where(and(inArray(items.id, loserIds), ne(items.id, survivorId)));
-      await tx.update(items).set({ name: toTitleCase(name), sku }).where(eq(items.id, survivorId));
+      await tx.update(items).set({ name: name.trim(), sku }).where(eq(items.id, survivorId));
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't merge — that SKU is already used by another product in this company, or one of these rows is still referenced elsewhere.") };
