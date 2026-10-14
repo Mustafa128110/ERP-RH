@@ -24,10 +24,10 @@ const ADD_ROWS = 2;
 // the user was editing, instead of making them hunt for it in the dropdown.
 function getBatchHeaderWidth(header: string): string {
   const h = header.toLowerCase();
-  if (h.includes("name") || h.includes("description") || h.includes("email") || h.includes("address")) return "w-52 min-w-[13rem]";
+  if (h.includes("name") || h.includes("description") || h.includes("email") || h.includes("address") || h.includes("contact")) return "w-52 min-w-[13rem]";
   if (h.includes("company") || h.includes("category") || h.includes("brand") || h.includes("role") || h.includes("account")) return "w-44 min-w-[11rem]";
   if (h.includes("active") || h.includes("taxable")) return "w-24 min-w-[6rem]";
-  if (h.includes("rate") || h.includes("price") || h.includes("qty") || h.includes("value") || h.includes("code") || h.includes("sku") || h.includes("unit")) return "w-32 min-w-[8rem]";
+  if (h.includes("rate") || h.includes("price") || h.includes("qty") || h.includes("value") || h.includes("code") || h.includes("sku") || h.includes("unit") || h.includes("balance") || h.includes("amount") || h.includes("direction") || h.includes("settle")) return "w-32 min-w-[8rem]";
   return "w-36 min-w-[9rem]";
 }
 
@@ -38,7 +38,7 @@ export function BatchAddDialog<T, C = unknown>({
   headers,
   renderRow,
   onSubmit,
-  onQueue,
+  onQueue: _onQueue,
   onDone,
   initialRows = 5,
   toolbar,
@@ -116,10 +116,6 @@ export function BatchAddDialog<T, C = unknown>({
   // accurate.)
   const offline = useOffline();
   const [error, setError] = useState<string | null>(null);
-  // True when the queue for later couldn't be written to local storage — the
-  // dialog stays open because the rows are only safe in this page, and the
-  // user must be told rather than believe the work is stored.
-  const [queueError, setQueueError] = useState<string | null>(null);
   // True when the crash-draft (the copy that survives a reload) failed to
   // save. The rows are still in the grid, so nothing is lost yet — but a
   // reload would be. Say so.
@@ -163,7 +159,6 @@ export function BatchAddDialog<T, C = unknown>({
   async function submit() {
     setPending(true);
     setError(null);
-    setQueueError(null);
     let result;
     try {
       result = await onSubmit(rows);
@@ -208,43 +203,6 @@ export function BatchAddDialog<T, C = unknown>({
           )}
           <div className="ml-auto flex items-center gap-3">
             {error && <p className="text-sm text-error">{error}</p>}
-            {queueError && <p className="text-sm text-error">{queueError}</p>}
-            {onQueue && (
-              <button
-                type="button"
-                // Disabled while a save is in flight, and that is not cosmetic.
-                // With experimental.useOffline a Save pressed offline does not
-                // fail — Next holds the request and re-runs it when the
-                // connection returns — so queueing on top of it would send the
-                // same rows twice under two different operation ids, which is
-                // the one thing the duplicate guard cannot catch. Exactly one
-                // in-flight copy of a batch, always.
-                disabled={pending}
-                onClick={async () => {
-                  // The rows have moved out of this grid into the outbox — the
-                  // local draft would otherwise offer them back next time and a
-                  // restore could queue the same work twice. Only when the queue
-                  // actually took them: a queue that couldn't be written leaves
-                  // the dialog open, rows intact, and says so.
-                  setPending(true);
-                  try {
-                    if (await onQueue(rows)) {
-                      if (draftKey) clearDraft(draftKey);
-                      onClose();
-                    }
-                  } catch { setQueueError("This browser could not store your work. Keep this form open."); }
-                  finally { setPending(false); }
-                }}
-                className="h-10 rounded border border-sand px-4 text-sm font-medium text-navy-800 hover:bg-ivory disabled:opacity-40"
-                title={
-                  pending
-                    ? "A save is already in flight — it lands on its own when the connection returns"
-                    : "Keep this work locally and send it when the connection returns"
-                }
-              >
-                Queue for later
-              </button>
-            )}
             <button type="button" onClick={onClose} className="h-10 rounded px-4 text-sm text-steel hover:bg-ivory">
               Cancel
             </button>

@@ -200,7 +200,7 @@ export function PaymentBatchAddDialog({
       draftKey={userId ? `payment-batch:${userId}` : "payment-batch"}
       draftMetadata={{ date: batchDate }}
       restoreDraftMetadata={value => { if (/^\d{4}-\d{2}-\d{2}$/.test(value.date)) setBatchDate(value.date); }}
-      headers={["Direction", "Company", "Contact", "Settle via", "Account", "Amount"]}
+      headers={["Direction", "Contact", "Amount", "Balance", "Settle via", "Account", "Company"]}
       toolbar={
         <label className="flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Date</span>
@@ -221,112 +221,149 @@ export function PaymentBatchAddDialog({
         // as if the work were safe.
         return (await enqueue("payment", `${values.length} payment(s) · ${money(values.reduce((s, r) => s + Number(r.amount || 0), 0))}`, values))?.persisted ?? false;
       }}
-      renderRow={(row, _index, update) => (
-        <>
-          <td className={batchCellClass}>
-            <select
-              value={row.direction}
-              onChange={(e) => update(settledIn(row, { direction: e.target.value as PaymentDirection }))}
-              className={batchInputClass}
-            >
-              <option value="received">Received</option>
-              <option value="made">Made</option>
-            </select>
-          </td>
-          <td className={batchCellClass}>
-            <select
-              value={row.companyId}
-              onChange={(e) => {
-                // A contact belongs to one company, so switching companies drops
-                // the picked id — the text stays and re-resolves against the new
-                // company's list on save.
-                const stillValid = contactOptions.some((c) => c.id === row.contactId && inCompany(e.target.value)(c));
-                const patch = { companyId: e.target.value, ...(stillValid ? {} : { contactId: "" }) };
-                // Chosen by hand, so the contact's own balance doesn't get to
-                // overrule it — only the account is re-pointed at this company.
-                update({ ...patch, ...settledIn({ ...row, contactId: "" }, patch) });
-              }}
-              className={batchInputClass}
-            >
-              <option value="" disabled>
-                Select
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+      renderRow={(row, _index, update) => {
+        const matchingContact = row.contactId
+          ? null
+          : contactOptions.find((c) => c.name.toLowerCase() === row.contactText.trim().toLowerCase());
+        const effectiveContactId = row.contactId || matchingContact?.id || "";
+        const matchingBalances = contactBalances.filter((b) => b.contactId === effectiveContactId);
+        const specificBalance = matchingBalances.find((b) => b.companyId === row.companyId)?.balance;
+        const contactBalance = !effectiveContactId
+          ? null
+          : specificBalance !== undefined
+            ? specificBalance
+            : (matchingBalances.length === 1 ? matchingBalances[0].balance : (matchingBalances.reduce((s, b) => s + b.balance, 0) || 0));
+
+        return (
+          <>
+            <td className={batchCellClass}>
+              <select
+                value={row.direction}
+                onChange={(e) => update(settledIn(row, { direction: e.target.value as PaymentDirection }))}
+                className={batchInputClass}
+              >
+                <option value="received">Received</option>
+                <option value="made">Made</option>
+              </select>
+            </td>
+            <td className={batchCellClass}>
+              <ComboBox
+                value={row.contactText}
+                options={contactOptions.filter(inCompany(row.companyId))}
+                placeholder="Pick or type a new one"
+                className={batchInputClass}
+                onChange={(name) =>
+                  update(
+                    settledIn(row, {
+                      contactText: name,
+                      contactId: contactOptions.find((c) => inCompany(row.companyId)(c) && c.name === name)?.id ?? "",
+                    }),
+                  )
+                }
+              />
+            </td>
+            <td className={batchCellClass}>
+              {/* A cheque settles for its own registered amount, so the field is
+                  disabled for cheque rows — the server reads the amount off the
+                  cheque. */}
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={row.settlementType === "cheque" ? "" : row.amount}
+                disabled={row.settlementType === "cheque"}
+                placeholder={row.settlementType === "cheque" ? "from cheque" : ""}
+                onChange={(e) => update({ amount: e.target.value })}
+                className={`${batchInputClass} disabled:bg-ivory disabled:text-steel`}
+              />
+            </td>
+            <td className={batchCellClass}>
+              <div className="flex h-9 items-center px-2 text-sm font-medium">
+                {contactBalance === null ? (
+                  <span className="text-steel">—</span>
+                ) : contactBalance < 0 ? (
+                  <span
+                    className="font-semibold text-red-600 dark:text-red-400"
+                    title={`Payable: ${money(Math.abs(contactBalance))}`}
+                  >
+                    {money(Math.abs(contactBalance))}
+                  </span>
+                ) : contactBalance > 0 ? (
+                  <span
+                    className="font-semibold text-yellow-600 dark:text-yellow-400"
+                    title={`Receivable: ${money(contactBalance)}`}
+                  >
+                    {money(contactBalance)}
+                  </span>
+                ) : (
+                  <span className="text-steel font-normal">0.00</span>
+                )}
+              </div>
+            </td>
+            <td className={batchCellClass}>
+              <select
+                value={row.settlementType}
+                onChange={(e) => update(settledIn(row, { settlementType: e.target.value as SettlementType, settlementId: "" }))}
+                className={batchInputClass}
+              >
+                <option value="account">Account</option>
+                <option value="cash">Cash</option>
+                <option value="cheque">Cheque</option>
+              </select>
+            </td>
+            <td className={batchCellClass}>
+              {/* Settling by cheque needs the cheque to exist in the register, so
+                  a cheque row gets a "+" that puts one there without leaving the
+                  batch half-entered. */}
+              <div className="flex gap-1.5">
+                <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
+                  <option value="">—</option>
+                  {settlementList(row.settlementType, row.companyId).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+                {row.settlementType === "cheque" && (
+                  <ChequeQuickAddButton
+                    companyOptions={companyOptions}
+                    {...chequeDialogOptions(contactOptions, bankAccountOptions)}
+                    onCreated={(created) => {
+                      setChequeOpts((prev) => [...created, ...prev]);
+                      if (created[0]?.companyId === row.companyId) update({ settlementId: created[0].id });
+                    }}
+                  />
+                )}
+              </div>
+            </td>
+            <td className={batchCellClass}>
+              <select
+                value={row.companyId}
+                onChange={(e) => {
+                  // A contact belongs to one company, so switching companies drops
+                  // the picked id — the text stays and re-resolves against the new
+                  // company's list on save.
+                  const stillValid = contactOptions.some((c) => c.id === row.contactId && inCompany(e.target.value)(c));
+                  const patch = { companyId: e.target.value, ...(stillValid ? {} : { contactId: "" }) };
+                  // Chosen by hand, so the contact's own balance doesn't get to
+                  // overrule it — only the account is re-pointed at this company.
+                  update({ ...patch, ...settledIn({ ...row, contactId: "" }, patch) });
+                }}
+                className={batchInputClass}
+              >
+                <option value="" disabled>
+                  Select
                 </option>
-              ))}
-            </select>
-          </td>
-          <td className={batchCellClass}>
-            <ComboBox
-              value={row.contactText}
-              options={contactOptions.filter(inCompany(row.companyId))}
-              placeholder="Pick or type a new one"
-              className={batchInputClass}
-              onChange={(name) =>
-                update(
-                  settledIn(row, {
-                    contactText: name,
-                    contactId: contactOptions.find((c) => inCompany(row.companyId)(c) && c.name === name)?.id ?? "",
-                  }),
-                )
-              }
-            />
-          </td>
-          <td className={batchCellClass}>
-            <select
-              value={row.settlementType}
-              onChange={(e) => update(settledIn(row, { settlementType: e.target.value as SettlementType, settlementId: "" }))}
-              className={batchInputClass}
-            >
-              <option value="account">Account</option>
-              <option value="cash">Cash</option>
-              <option value="cheque">Cheque</option>
-            </select>
-          </td>
-          <td className={batchCellClass}>
-            {/* Settling by cheque needs the cheque to exist in the register, so
-                a cheque row gets a "+" that puts one there without leaving the
-                batch half-entered. */}
-            <div className="flex gap-1.5">
-              <select value={row.settlementId} onChange={(e) => update({ settlementId: e.target.value })} className={batchInputClass}>
-                <option value="">—</option>
-                {settlementList(row.settlementType, row.companyId).map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
+                {companyOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
                   </option>
                 ))}
               </select>
-              {row.settlementType === "cheque" && (
-                <ChequeQuickAddButton
-                  companyOptions={companyOptions}
-                  {...chequeDialogOptions(contactOptions, bankAccountOptions)}
-                  onCreated={(created) => {
-                    setChequeOpts((prev) => [...created, ...prev]);
-                    if (created[0]?.companyId === row.companyId) update({ settlementId: created[0].id });
-                  }}
-                />
-              )}
-            </div>
-          </td>
-          <td className={batchCellClass}>
-            {/* A cheque settles for its own registered amount, so the field is
-                disabled for cheque rows — the server reads the amount off the
-                cheque. */}
-            <input
-              type="number"
-              min="0.1"
-              step="0.1"
-              value={row.settlementType === "cheque" ? "" : row.amount}
-              disabled={row.settlementType === "cheque"}
-              placeholder={row.settlementType === "cheque" ? "from cheque" : ""}
-              onChange={(e) => update({ amount: e.target.value })}
-              className={`${batchInputClass} disabled:bg-ivory disabled:text-steel`}
-            />
-          </td>
-        </>
-      )}
+            </td>
+          </>
+        );
+      }}
     />
   );
 }
