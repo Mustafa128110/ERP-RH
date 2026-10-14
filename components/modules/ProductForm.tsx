@@ -105,7 +105,7 @@ const toEditRow = (r: ProductEditRow, data: ProductEditData): EditRow => {
     sku: r.sku,
     urduName: r.urduName ?? "",
     category: { id: r.categoryId ?? "", text: r.categoryName ?? "" },
-    brand: { id: r.brandId ?? "", text: r.brandName ?? "" },
+    brand: { id: r.brandId ?? "", text: (r.brandName ?? "").toUpperCase() },
     taxable: r.taxable,
     isActive: r.isActive,
     unit: combo(r.baseUnitId, data.unitOptions),
@@ -322,7 +322,7 @@ export function ProductsBatchEditDialog({
             categoryId: r.category.id,
             categoryName: r.category.text,
             brandId: r.brand.id,
-            brandName: r.brand.text,
+            brandName: r.brand.text.trim().toUpperCase(),
             taxable: r.taxable,
             isActive: r.isActive,
             unitId: r.unit.id,
@@ -583,7 +583,19 @@ export function ProductsBatchEditDialog({
                       placeholder="Category"
                       onChange={(category) => update(i, { category })}
                     />
-                    <ComboCell value={row.brand} options={brandOptions} placeholder="Brand" onChange={(brand) => update(i, { brand })} />
+                    <ComboCell
+                      value={row.brand}
+                      options={brandOptions}
+                      placeholder="Brand"
+                      onChange={(brand) =>
+                        update(i, {
+                          brand: {
+                            id: brand.id,
+                            text: brand.text.toUpperCase(),
+                          },
+                        })
+                      }
+                    />
                     <td className={`${cellClass} text-center`}>
                       <input
                         type="checkbox"
@@ -782,7 +794,7 @@ export function ProductBatchAddDialog({
           categoryId: r.categoryId || null,
           categoryName: r.categoryText.trim() || null,
           brandId: r.brandId || null,
-          brandName: r.brandText.trim() || null,
+          brandName: r.brandText.trim().toUpperCase() || null,
           urduName: r.urduName.trim() || null,
           taxable: r.taxable,
           isActive: r.isActive,

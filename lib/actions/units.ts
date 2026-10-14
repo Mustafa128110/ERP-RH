@@ -32,7 +32,7 @@ export async function getUnit(unitId: string) {
 function readUnitForm(formData: FormData) {
   return {
     name: toTitleCase(String(formData.get("name") ?? "")),
-    symbol: String(formData.get("symbol") ?? "").trim() || null,
+    symbol: String(formData.get("symbol") ?? "").trim().toLowerCase() || null,
   };
 }
 
@@ -53,7 +53,7 @@ export async function createUnitsBatch(rows: UnitBatchRow[]): Promise<CreateResu
 
     const created = await db
       .insert(units)
-      .values(valid.map((r) => ({ name: toTitleCase(r.name), symbol: r.symbol.trim() || null })))
+      .values(valid.map((r) => ({ name: toTitleCase(r.name), symbol: r.symbol.trim().toLowerCase() || null })))
       .returning({ id: units.id, name: units.name, symbol: units.symbol });
     await invalidateLookups(CACHE.units);
     await invalidateReads(...READS);

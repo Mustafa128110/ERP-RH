@@ -18,7 +18,16 @@ function Fields({ defaults }: { defaults?: BrandValues }) {
     <>
       <label className={labelClass}>
         <span className={labelTextClass}>Name</span>
-        <input name="name" type="text" required defaultValue={defaults?.name} className={inputClass} />
+        <input
+          name="name"
+          type="text"
+          required
+          defaultValue={defaults?.name?.toUpperCase()}
+          onChange={(e) => {
+            e.target.value = e.target.value.toUpperCase();
+          }}
+          className={`${inputClass} uppercase`}
+        />
       </label>
     </>
   );
@@ -52,7 +61,13 @@ export function BrandEditForm({
   }, [state?.success]);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form
+      action={(formData) => {
+        formData.set("name", String(formData.get("name") ?? "").trim().toUpperCase());
+        action(formData);
+      }}
+      className="flex flex-col gap-4"
+    >
       <Fields defaults={defaults} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
       {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
@@ -89,13 +104,18 @@ export function BrandBatchAddDialog({
       emptyRow={emptyBatchRow}
       headers={["Name"]}
       onSubmit={async (rows) => {
-        const values: BrandBatchRow[] = rows.map((r) => ({ name: r.name.trim() }));
+        const values: BrandBatchRow[] = rows.map((r) => ({ name: r.name.trim().toUpperCase() }));
         return createBrandsBatch(values);
       }}
       renderRow={(row, _index, update) => (
         <>
           <td className={batchCellClass}>
-            <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Name" />
+            <input
+              value={row.name}
+              onChange={(e) => update({ name: e.target.value.toUpperCase() })}
+              className={`${batchInputClass} uppercase`}
+              placeholder="NAME"
+            />
           </td>
         </>
       )}

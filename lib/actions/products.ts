@@ -179,7 +179,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.brandId)
-        .map((row) => (row.brandName ?? "").trim())
+        .map((row) => (row.brandName ?? "").trim().toUpperCase())
         .filter((name): name is string => Boolean(name)),
     ),
   ];
@@ -256,7 +256,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     missingBrands.length
       ? tx
           .insert(brands)
-          .values(missingBrands.map((name) => ({ name })))
+          .values(missingBrands.map((name) => ({ name: name.toUpperCase() })))
           .onConflictDoUpdate({ target: brands.name, set: { name: sql`excluded.name` } })
           .returning({ id: brands.id, name: brands.name })
       : Promise.resolve([]),
@@ -279,7 +279,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
 
   return rows.map((row) => {
     const catName = (row.categoryName ?? "").trim();
-    const brName = (row.brandName ?? "").trim();
+    const brName = (row.brandName ?? "").trim().toUpperCase();
     const uName = (row.unitName ?? "").trim();
     return {
       categoryId: row.categoryId || categoryByName.get(catName) || categoryByName.get(catName.toLowerCase()) || null,
@@ -712,6 +712,21 @@ export async function updateProductsBatch(
         }));
         const updates = prepared.filter(({ row }) => Boolean(row.id));
         const creates = prepared.filter(({ row }) => !row.id);
+
+        const allBrandIds = [...new Set(prepared.map((p) => p.brandId).filter((id): id is string => Boolean(id)))];
+        if (allBrandIds.length > 0) {
+          await tx.execute(sql`
+            UPDATE brands
+            SET name = upper(name)
+            WHERE id IN (${sql.join(allBrandIds.map((id) => sql`${id}::uuid`), sql`, `)})
+              AND name <> upper(name)
+              AND NOT EXISTS (
+                SELECT 1 FROM brands b2
+                WHERE b2.name = upper(brands.name)
+                  AND b2.id <> brands.id
+              )
+          `);
+        }
 
         const updated = updates.length
           ? await tx.execute<{ id: string; company_id: string }>(sql`

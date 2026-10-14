@@ -9,7 +9,6 @@ import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
-import { toTitleCase } from "@/lib/format";
 
 export async function listBrands() {
   const session = await getSession();
@@ -19,7 +18,7 @@ export async function listBrands() {
 
 function readBrandForm(formData: FormData) {
   return {
-    name: toTitleCase(String(formData.get("name") ?? "")),
+    name: String(formData.get("name") ?? "").trim().toUpperCase(),
   };
 }
 
@@ -37,13 +36,13 @@ export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateRe
 
     const created = await db
       .insert(brands)
-      .values(valid.map((r) => ({ ...r, name: toTitleCase(r.name) })))
+      .values(valid.map((r) => ({ ...r, name: r.name.trim().toUpperCase() })))
       .returning({ id: brands.id, name: brands.name });
     await invalidateLookups(CACHE.brands);
     // The product list carries each item's brand name, so a rename changes it.
     await invalidateReads(READ_DOMAIN.products);
     revalidatePath("/inventory/brands");
-    await recordAudit({ action: "create", entity: "brand", summary: valid.map((r) => r.name).join(", ") });
+    await recordAudit({ action: "create", entity: "brand", summary: valid.map((r) => r.name.trim().toUpperCase()).join(", ") });
     return { created };
   });
 }

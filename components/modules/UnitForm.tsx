@@ -7,6 +7,7 @@ import { updateUnit, deleteUnit, createUnitsBatch, type UnitBatchRow } from "@/l
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
 import { optimistically } from "@/lib/optimistic-records";
+import { toTitleCase } from "@/lib/format";
 
 interface UnitValues {
   name: string;
@@ -18,11 +19,19 @@ function Fields({ defaults }: { defaults?: UnitValues }) {
     <>
       <label className={labelClass}>
         <span className={labelTextClass}>Name</span>
-        <input name="name" type="text" required defaultValue={defaults?.name} className={inputClass} />
+        <input name="name" type="text" required defaultValue={defaults?.name ? toTitleCase(defaults.name) : ""} className={inputClass} />
       </label>
       <label className={labelClass}>
         <span className={labelTextClass}>Symbol</span>
-        <input name="symbol" type="text" defaultValue={defaults?.symbol ?? ""} className={inputClass} />
+        <input
+          name="symbol"
+          type="text"
+          defaultValue={defaults?.symbol?.toLowerCase() ?? ""}
+          onChange={(e) => {
+            e.target.value = e.target.value.toLowerCase();
+          }}
+          className={`${inputClass} lowercase`}
+        />
       </label>
     </>
   );
@@ -52,7 +61,15 @@ export function UnitEditForm({
   }, [state?.success]);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form
+      action={(formData) => {
+        formData.set("name", toTitleCase(String(formData.get("name") ?? "")));
+        const symbol = String(formData.get("symbol") ?? "").trim().toLowerCase();
+        formData.set("symbol", symbol);
+        action(formData);
+      }}
+      className="flex flex-col gap-4"
+    >
       <Fields defaults={defaults} />
       {state?.error && <p className={errorTextClass}>{state.error}</p>}
       {state?.success && <p className={successTextClass}>{saveStatus(state)}</p>}
@@ -93,7 +110,10 @@ export function UnitBatchAddDialog({
       emptyRow={emptyBatchRow}
       headers={["Name", "Symbol"]}
       onSubmit={async (rows) => {
-        const values: UnitBatchRow[] = rows.map((r) => ({ name: r.name.trim(), symbol: r.symbol.trim() }));
+        const values: UnitBatchRow[] = rows.map((r) => ({
+          name: toTitleCase(r.name),
+          symbol: r.symbol.trim().toLowerCase(),
+        }));
         return createUnitsBatch(values);
       }}
       renderRow={(row, _index, update) => (
@@ -102,7 +122,12 @@ export function UnitBatchAddDialog({
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Kilogram" />
           </td>
           <td className={batchCellClass}>
-            <input value={row.symbol} onChange={(e) => update({ symbol: e.target.value })} className={batchInputClass} placeholder="kg" />
+            <input
+              value={row.symbol}
+              onChange={(e) => update({ symbol: e.target.value.toLowerCase() })}
+              className={`${batchInputClass} lowercase`}
+              placeholder="kg"
+            />
           </td>
         </>
       )}
