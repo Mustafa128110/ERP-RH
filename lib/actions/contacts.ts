@@ -11,6 +11,7 @@ import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/qu
 import { cachedPageRead } from "@/lib/read-cache";
 import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { toTitleCase } from "@/lib/format";
 import type { AuthSession } from "@/lib/auth/session";
 
 // A contact's name is printed on every document it is party to, so renaming one
@@ -154,7 +155,7 @@ export async function getContact(id: string) {
 function readContactForm(formData: FormData) {
   const str = (key: string) => String(formData.get(key) ?? "").trim() || null;
   return {
-    displayName: String(formData.get("displayName") ?? "").trim(),
+    displayName: toTitleCase(String(formData.get("displayName") ?? "")),
     companyId: str("companyId"),
     companyName: str("companyName"),
     phone: str("phone"),
@@ -202,7 +203,12 @@ export async function createContactsBatch(
 
       const created = await db
         .insert(contacts)
-        .values(valid)
+        .values(
+          valid.map((r) => ({
+            ...r,
+            displayName: toTitleCase(r.displayName),
+          })),
+        )
         .returning({ id: contacts.id, name: contacts.displayName, companyId: contacts.companyId });
       await invalidateLookups(CACHE.contacts);
       await invalidateReads(...READS);
@@ -285,7 +291,7 @@ export async function updateContactsBatch(rows: ContactEditRow[]): Promise<{ err
         rows.map(
           (r) => sql`(
             ${r.id}::uuid,
-            ${r.displayName.trim()}::varchar,
+            ${toTitleCase(r.displayName)}::varchar,
             ${str(r.companyId)}::uuid,
             ${str(r.companyName)}::varchar,
             ${str(r.phone)}::varchar,

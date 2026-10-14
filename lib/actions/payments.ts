@@ -28,6 +28,7 @@ import { resolveContactId, resolveContactIds } from "@/lib/actions/resolve-refs"
 import { CACHE, getAvailableCheques, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { BANK_ACCOUNT_LABEL_SQL } from "@/lib/account-label";
+import { isCounterContact } from "@/lib/contact-scope";
 import { paymentLedgerSide } from "@/lib/payment-constants";
 import { UNSPENT_CHEQUE_STATUS } from "@/lib/cheque-constants";
 import { chequeStatusAfterSettling } from "@/lib/cheque-constants";
@@ -236,9 +237,9 @@ function readPaymentForm(formData: FormData) {
 
 export async function createPayment(
   direction: PaymentDirection,
-  _prevState: ActionResult | undefined,
+  _prevState: (ActionResult & { id?: string; isPayment?: boolean }) | undefined,
   formData: FormData,
-): Promise<ActionResult> {
+): Promise<ActionResult & { id?: string; isPayment?: boolean }> {
   return guard("Couldn't create the payment.", async () => {
   const session = await getLiveSession();
 
@@ -312,7 +313,14 @@ export async function createPayment(
       // a credit. Without the credit side, taking money off a customer left
       // what they owed us exactly where it was.
       if (contactId) {
-        await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, ...paymentLedgerSide(direction, values.amount) });
+        let isCounter = isCounterContact(values.contactName);
+        if (!isCounter) {
+          const [c] = await tx.select({ displayName: contacts.displayName }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
+          if (isCounterContact(c?.displayName)) isCounter = true;
+        }
+        if (!isCounter) {
+          await tx.insert(ledgerEntries).values({ companyId: values.companyId, documentId: doc.id, ...paymentLedgerSide(direction, values.amount) });
+        }
       }
       await allocatePaymentsFifo(tx, [doc.id]);
     });
@@ -335,7 +343,7 @@ export async function createPayment(
     companyId: values.companyId,
     detail: `Amount ${values.amount}`,
   });
-  return { success: true };
+  return { success: true, id: createdId, isPayment: true };
   });
 }
 
@@ -552,7 +560,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
       );
 
       const entries = prepared
-        .filter(({ contactId }) => contactId)
+        .filter(({ contactId, row }) => contactId && !isCounterContact(row.contactName))
         .map(({ row, amount, documentId }) => ({ companyId: row.companyId, documentId, ...paymentLedgerSide(row.direction, amount) }));
       if (entries.length > 0) await tx.insert(ledgerEntries).values(entries);
       await allocatePaymentsFifo(tx, prepared.map(({ documentId }) => documentId));
@@ -673,7 +681,14 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
         // amount/contact never leaves a stale ledger row behind.
         await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, paymentId));
         if (contactId) {
-          await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
+          let isCounter = isCounterContact(values.contactName);
+          if (!isCounter) {
+            const [c] = await tx.select({ displayName: contacts.displayName }).from(contacts).where(eq(contacts.id, contactId)).limit(1);
+            if (isCounterContact(c?.displayName)) isCounter = true;
+          }
+          if (!isCounter) {
+            await tx.insert(ledgerEntries).values({ companyId: existing.companyId, documentId: paymentId, ...paymentLedgerSide(direction, values.amount) });
+          }
         }
         const paymentCode = direction === "made" ? "PAYMENT_MADE" : "PAYMENT_RECEIVED";
         await reallocateAccountPaymentsFifo(tx, existing.companyId, existing.contactId, paymentCode);

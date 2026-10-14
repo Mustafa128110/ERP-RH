@@ -33,10 +33,8 @@ type ScopedOption = Option & { companyId: string };
 // at, which prefills what it's being sold for now.
 type ItemOption = ScopedOption & { rate: string | null; salesRate: string | null; baseUnitId: string | null; taxable: boolean };
 type TaxOption = { id: string; name: string; rate: string };
-// Both rates are stored with four decimals, but every total on this form is
-// round1 — so a price box prefilled with 1250.7500 shows precision the sale
-// itself will never carry. One decimal in, one decimal out.
-const rate1 = (v: string | null | undefined) => (v ? String(round1(Number(v))) : "");
+// Rates support precision beyond 2 decimal places when saving and editing.
+const rate1 = (v: string | null | undefined) => (v != null && v !== "" && Number.isFinite(Number(v)) ? String(Number(v)) : "");
 type PaidMode = "yes" | "partial" | "no";
 type Line = {
   itemId: string;
@@ -91,7 +89,7 @@ const UNPAID_BY_DEFAULT_COMPANY = "M52";
 // createSale returns the new id, updateSale doesn't — one shape covers both so
 // the wrapped action has a single return type. `needsConfirmation` is the third
 // answer: not saved, not broken, waiting for a yes (see confirmNoticeClass).
-type SaleActionState = { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean; queued?: boolean } | undefined;
+type SaleActionState = { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean; queued?: boolean; isPayment?: boolean } | undefined;
 
 const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
   { value: "account", label: "Account" },
@@ -201,7 +199,8 @@ export function SaleFormPage({
   // Which way the Paid select starts, for the company being sold from. Used on
   // first render, on switching company, and on the reset after a save — so all
   // three agree instead of "yes" being written in three places.
-  function defaultPaidMode(company: string): PaidMode {
+  function defaultPaidMode(company: string, currentSaleType?: SaleType): PaidMode {
+    if ((currentSaleType ?? saleType) === "balochistan") return "no";
     return companyOptions.find((c) => c.id === company)?.name === UNPAID_BY_DEFAULT_COMPANY ? "no" : "yes";
   }
 
@@ -230,22 +229,27 @@ export function SaleFormPage({
   // One box each, no Rs/% selector beside it: a bare number is rupees, a number
   // ending in % is a percentage of the subtotal. The stored value was always the
   // resolved amount, so an existing sale loads as the plain figure.
-  const [discountTotal, setDiscountTotal] = useState(() => defaults?.discountTotal ?? "0");
+  const [discountTotal, setDiscountTotal] = useState(() => (defaults?.discountTotal && Number(defaults.discountTotal) !== 0 ? defaults.discountTotal : ""));
   const [taxId, setTaxId] = useState(() => defaults?.taxId ?? taxSettings[companyId]?.default_sales_tax_id ?? "");
-  const [shippingTotal, setShippingTotal] = useState(() => defaults?.shippingTotal ?? "0");
+  const [shippingTotal, setShippingTotal] = useState(() => (defaults?.shippingTotal && Number(defaults.shippingTotal) !== 0 ? defaults.shippingTotal : ""));
   const [contactId, setContactId] = useState(() => defaults?.contactId ?? counterId(companyId));
   const [customerText, setCustomerText] = useState(() =>
     defaults ? (customerOptions.find((c) => c.id === defaults.contactId)?.name ?? "") : DEFAULT_CUSTOMER,
   );
+  const initialSaleType = defaults?.saleType ?? DEFAULT_SALE_TYPE;
+  const [saleType, setSaleType] = useState<SaleType>(initialSaleType);
   // A sale is paid in full, part paid, or not at all. Part paid carries how much
   // came in; the rest of the grand total stays owed.
   const [isPaid, setIsPaid] = useState<PaidMode>(() =>
-    defaults ? (defaults.isPaid ? "yes" : Number(defaults.paidAmount) > 0 ? "partial" : "no") : defaultPaidMode(companyId),
+    defaults
+      ? (defaults.isPaid ? "yes" : Number(defaults.paidAmount) > 0 ? "partial" : "no")
+      : initialSaleType === "balochistan"
+        ? "no"
+        : defaultPaidMode(companyId, initialSaleType),
   );
   const [paidAmount, setPaidAmount] = useState(() => (defaults && !defaults.isPaid ? (defaults.paidAmount ?? "") : ""));
   const [settlementType, setSettlementType] = useState<SettlementType>(defaults?.settlementType ?? "cash");
   const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
-  const [saleType, setSaleType] = useState<SaleType>(() => defaults?.saleType ?? DEFAULT_SALE_TYPE);
   const [settlementAccounts, setSettlementAccounts] = useState<Record<string, string>>({});
 
   // --- Draft ----------------------------------------------------------------
@@ -317,7 +321,7 @@ export function SaleFormPage({
   // Creating a sale used to navigate to the one just created, which put the next
   // sale two clicks away — the shop enters them back to back. It empties the form
   // instead; the success message links to what was created.
-  function resetForm() {
+  function resetForm(keepDate = false) {
     // The sale is stored; the copy of it that was only in this browser has
     // nothing left to protect. Cleared before the state updates so a render that
     // throws on the way out can't leave the finished sale sitting there as an
@@ -326,16 +330,16 @@ export function SaleFormPage({
     setLines([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
     setContactId(counterId(companyId));
     setCustomerText(DEFAULT_CUSTOMER);
-    setDiscountTotal("0");
+    setDiscountTotal("");
     setTaxId(taxSettings[companyId]?.default_sales_tax_id ?? "");
-    setShippingTotal("0");
-    setIsPaid(defaultPaidMode(companyId));
+    setShippingTotal("");
+    setIsPaid(defaultPaidMode(companyId, DEFAULT_SALE_TYPE));
     setPaidAmount("");
     setSettlementType("cash");
-    setDocumentDate(todayISO());
+    if (!keepDate) setDocumentDate(todayISO());
     setSaleType(DEFAULT_SALE_TYPE);
     setSettlementAccounts({});
-    formRef.current?.reset();
+
     focusCell(0, 0);
   }
 
@@ -343,7 +347,7 @@ export function SaleFormPage({
   // saved. Confirms only when there's something to lose, so an empty form clears
   // without a prompt.
   function clearForm() {
-    const started = lines.some((l) => l.itemText.trim() || l.quantity.trim() || l.unitPrice.trim());
+    const started = lines.some((l) => l.itemText.trim() || l.quantity.trim() || l.unitPrice.trim()) || !!paidAmount;
     if (started && !confirm("Clear this sale and start over?")) return;
     resetForm();
   }
@@ -400,7 +404,7 @@ export function SaleFormPage({
       setOperationId(crypto.randomUUID());
       if (onDone) onDone();
       else if (isEdit) router.push("/sales/invoices");
-      else resetForm();
+      else resetForm(true);
     }
     return result;
   }, undefined);
@@ -509,9 +513,8 @@ export function SaleFormPage({
   // Clamped the same way the server clamps it, so the balance on screen is the
   // balance that gets stored.
   const paidNow = round1(
-    isPaid === "yes" ? grandTotal : isPaid === "partial" ? Math.min(Math.max(Number(paidAmount) || 0, 0), grandTotal) : 0,
+    isPaid === "yes" ? grandTotal : isPaid === "partial" ? Math.max(Number(paidAmount) || 0, 0) : 0,
   );
-  const balance = round1(grandTotal - paidNow);
 
   // What this customer owed before today. Fetched on the customer (never on
   // every keystroke of the grid), and dropped to zero for a walk-in with no
@@ -532,14 +535,16 @@ export function SaleFormPage({
   // Shown only when there is something to show — a customer square with us adds
   // two lines of nothing to every invoice otherwise.
   const totalDue = round1(grandTotal + previousBalance);
+  const totalBalance = round1(totalDue - paidNow);
+  const isDirectPayment = !isEdit && lines.every((l) => !l.itemText?.trim() && !l.quantity?.trim()) && paidNow > 0;
   const totalsBlock = (
     <>
       <span>Subtotal: {money(subtotal)}</span>
       <span className="font-semibold">Grand Total: {money(grandTotal)}</span>
-      {previousBalance > 0 && (
+      {previousBalance !== 0 && (
         <>
-          <span className="text-steel">Previous Balance: {money(previousBalance)}</span>
-          <span className="font-semibold text-navy-800">Total Due: {money(totalDue)}</span>
+          <span className="text-steel">Previous Balance ({previousBalance > 0 ? "Receivable" : "Payable"}): {money(Math.abs(previousBalance))}</span>
+          <span className="font-semibold text-navy-800">{totalDue >= 0 ? `Total Due: ${money(totalDue)}` : `Total Due (Payable): ${money(Math.abs(totalDue))}`}</span>
         </>
       )}
     </>
@@ -632,7 +637,22 @@ export function SaleFormPage({
               {/* Counter is preselected rather than left blank: it's what nearly
                   every sale is, and the other two exist to be told apart from it
                   when the takings are reconciled. */}
-              <select name="saleType" required value={saleType} onChange={(e) => setSaleType(e.target.value as SaleType)} className={fieldClass}>
+              <select
+                name="saleType"
+                required
+                value={saleType}
+                onChange={(e) => {
+                  const nextType = e.target.value as SaleType;
+                  const prevType = saleType;
+                  setSaleType(nextType);
+                  if (nextType === "balochistan") {
+                    setIsPaid("no");
+                  } else if (prevType === "balochistan" && nextType === "counter") {
+                    setIsPaid("yes");
+                  }
+                }}
+                className={fieldClass}
+              >
                 {SALE_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
@@ -653,7 +673,7 @@ export function SaleFormPage({
         <div className="flex flex-col gap-2">
           <span className={sectionTitleClass}>Items</span>
           <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
-            <table className="sale-items-grid w-full border-collapse text-sm">
+            <table className="sale-items-grid w-full md:table-fixed border-collapse text-sm">
               <thead>
                 <tr>
                   <th className={`${thClass} w-10 text-right`}>#</th>
@@ -717,7 +737,7 @@ export function SaleFormPage({
                         data-cell={`${r}-3`}
                         type="number"
                         min="0"
-                        step="0.1"
+                        step="any"
                         placeholder="Rate"
                         aria-label={`Rate list for line ${r + 1}`}
                         value={line.listPrice}
@@ -730,7 +750,7 @@ export function SaleFormPage({
                         data-cell={`${r}-4`}
                         type="number"
                         min="0"
-                        step="0.1"
+                        step="any"
                         placeholder="Price"
                         aria-label={`Unit price for line ${r + 1}`}
                         value={line.unitPrice}
@@ -771,16 +791,18 @@ export function SaleFormPage({
 
         {/* --- totals: discount/tax/shipping applied after items, grand total last --- */}
         <div className="flex flex-col gap-3 rounded border border-sand p-3">
-          <span className={sectionTitleClass}>Totals</span>
+
           <div className="flex flex-wrap gap-3">
             {/* Text, not number: "5%" has to be typeable. What goes to the
                 server is still the resolved amount in the hidden field. */}
             <label className={`${labelClass} w-full sm:w-40`}>
-              <span className={labelTextClass}>Discount</span>
+
               <input
                 type="text"
                 inputMode="decimal"
-                placeholder="0 or 5%"
+                data-type="number"
+                placeholder="Discount"
+                aria-label="Discount"
                 data-shortcut="d"
                 value={discountTotal}
                 onChange={(e) => setDiscountTotal(e.target.value)}
@@ -789,20 +811,22 @@ export function SaleFormPage({
               <input type="hidden" name="discountTotal" value={discountAmount.toFixed(2)} />
             </label>
             <label className={`${labelClass} w-full sm:w-56`}>
-              <span className={labelTextClass}>Tax</span>
-              <select name="taxId" data-shortcut="t" value={taxId} onChange={(event) => setTaxId(event.target.value)} className={fieldClass}>
-                <option value="">No tax</option>
+
+              <select name="taxId" data-shortcut="t" aria-label="Tax" value={taxId} onChange={(event) => setTaxId(event.target.value)} className={fieldClass}>
+                <option value="">Tax</option>
                 {taxOptions.map((tax) => <option key={tax.id} value={tax.id}>{tax.name} ({tax.rate}%)</option>)}
               </select>
               {selectedTax && <span className="text-xs text-steel">{taxInclusive ? "Included in taxable prices" : "Added to taxable products"}</span>}
             </label>
             <label className={`${labelClass} w-full sm:w-40`}>
-              <span className={labelTextClass}>Shipping Total</span>
+
               <input
                 name="shippingTotal"
                 type="number"
                 min="0"
                 step="0.1"
+                placeholder="Shipping"
+                aria-label="Shipping"
                 data-shortcut="s"
                 value={shippingTotal}
                 onChange={(e) => setShippingTotal(e.target.value)}
@@ -832,7 +856,7 @@ export function SaleFormPage({
               <input
                 type="number"
                 min="0"
-                max={grandTotal}
+                placeholder="Paid"
                 step="0.1"
                 value={paidAmount}
                 onChange={(e) => setPaidAmount(e.target.value)}
@@ -843,7 +867,9 @@ export function SaleFormPage({
           {isPaid !== "no" && (
             <div className="flex flex-col justify-center gap-0.5 self-stretch pt-5 text-sm">
               <span className="text-steel">Paid: {money(paidNow)}</span>
-              <span className={balance > 0 ? "font-semibold text-error" : "font-semibold text-success"}>Balance: {money(balance)}</span>
+              <span className={totalBalance > 0 ? "font-semibold text-error" : totalBalance < 0 ? "font-semibold text-navy-800" : "font-semibold text-success"}>
+                {totalBalance > 0 ? `Balance: ${money(totalBalance)}` : totalBalance < 0 ? `Balance (Payable): ${money(Math.abs(totalBalance))}` : `Balance: ${money(0)}`}
+              </span>
             </div>
           )}
         </div>
@@ -899,9 +925,9 @@ export function SaleFormPage({
             <p role="status" aria-live="polite" className={successTextClass}>{state?.queued ? "Saved on this device — waiting to sync." : "Saved."}</p>
           ) : (
             <p role="status" aria-live="polite" className={successTextClass}>
-              Sale created — form cleared for the next one.{" "}
+              {state.isPayment ? "Payment recorded — form cleared for the next one." : "Sale created — form cleared for the next one."}{" "}
               {state.id && (
-                <Link href={`/sales/${state.id}`} className="underline">
+                <Link href={state.isPayment ? "/payments" : `/sales/${state.id}`} className="underline">
                   View it
                 </Link>
               )}
@@ -913,7 +939,19 @@ export function SaleFormPage({
             disabled={pending}
             className={`h-12 w-full rounded bg-navy-800 px-6 text-base font-semibold text-white hover:bg-navy-700 disabled:opacity-40 sm:w-fit${confirming ? " ring-2 ring-warning" : ""}`}
           >
-            {pending ? (isEdit ? "Saving…" : "Creating…") : confirming ? "Confirm & Save" : isEdit ? "Save" : "Create Sale"}
+            {pending
+              ? isEdit
+                ? "Saving…"
+                : isDirectPayment
+                  ? "Recording…"
+                  : "Creating…"
+              : confirming
+                ? "Confirm & Save"
+                : isEdit
+                  ? "Save"
+                  : isDirectPayment
+                    ? "Record Payment"
+                    : "Create Sale"}
           </button>
           <button
             type="button"

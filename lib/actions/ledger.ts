@@ -36,6 +36,7 @@ import {
 } from "@/lib/ledger-constants";
 import { isOpeningBalanceDirection, openingLedgerSide, openingStatementAmount } from "@/lib/ledger-opening-constants";
 import { readPartySettlement, settleableAfterEdit } from "@/lib/queries/party-ledger";
+import { formatTime } from "@/lib/format";
 
 // This file edits documents and ledger entries on both sides of the book and
 // re-settles what they were paid with, so a write here can change every list that
@@ -459,6 +460,8 @@ export type PartyLedgerEntry = {
   id: string; // ledger entry id
   documentId: string; // document id (for deletion)
   date: string;
+  createdAt?: string;
+  time?: string;
   type: LedgerEntryType;
   code: string | null; // document type code (e.g. SALES_INVOICE) for routing
   documentStatus: string;
@@ -554,6 +557,7 @@ async function readPartyLedger(
       ledgerId: ledgerEntries.id,
       documentId: documents.id,
       date: documents.documentDate,
+      createdAt: documents.createdAt,
       code: documentTypes.code,
       documentStatus: documents.status,
       number: documents.number,
@@ -681,9 +685,18 @@ async function readPartyLedger(
   let openingBalance = 0;
   const openingDocumentIds: string[] = [];
   for (const r of filteredRows) {
-    const type = codeToLedgerType(r.code);
+    let type = codeToLedgerType(r.code);
     const debit = Number(r.debit ?? 0);
     const credit = Number(r.credit ?? 0);
+
+    if (r.code === "SALES_INVOICE" && credit > 0 && debit === 0) {
+      type = "payment_received";
+    } else if (r.code === "PURCHASE_INVOICE" && debit > 0 && credit === 0) {
+      type = "payment_made";
+    }
+
+    const timeStr = r.createdAt ? formatTime(r.createdAt) : undefined;
+    const createdAtStr = r.createdAt ? (typeof r.createdAt === "string" ? r.createdAt : r.createdAt.toISOString()) : undefined;
 
     if (type === "opening_balance") {
       // Debit means the party owes us, which is the direction the statement
@@ -697,6 +710,8 @@ async function readPartyLedger(
         id: r.ledgerId,
         documentId: r.documentId,
         date: r.date,
+        createdAt: createdAtStr,
+        time: timeStr,
         type,
         code: r.code,
         documentStatus: r.documentStatus,
@@ -715,6 +730,8 @@ async function readPartyLedger(
       id: r.ledgerId,
       documentId: r.documentId,
       date: r.date,
+      createdAt: createdAtStr,
+      time: timeStr,
       type,
       code: r.code,
       documentStatus: r.documentStatus,

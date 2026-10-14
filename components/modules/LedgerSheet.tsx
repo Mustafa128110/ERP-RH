@@ -49,7 +49,7 @@ function Side({ title, rows, amountOf }: { title: string; rows: ContactLedgerBal
   return (
     <div className="mt-6">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-navy-800">{title}</h2>
-      <table className="mt-2 w-full border-collapse text-sm">
+      <table className="mt-2 w-full table-fixed border-collapse text-sm">
         <thead>
           <tr className="border-y border-sand">
             <th className="py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-steel">Contact</th>
@@ -162,7 +162,7 @@ export function ContactStatementDocument({ company, row }: { company: Letterhead
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-navy-800">Recent payments</h2>
-        <table className="mt-2 w-full border-collapse text-sm">
+        <table className="mt-2 w-full table-fixed border-collapse text-sm">
           <thead>
             <tr className="border-y border-sand">
               <th className="w-32 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-steel">Date</th>

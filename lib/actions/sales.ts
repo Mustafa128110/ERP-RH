@@ -36,6 +36,7 @@ import { recomputeParty, releaseInvoiceAllocations } from "@/lib/actions/payment
 import { changeSummary } from "@/lib/audit-constants";
 import { DEFAULT_SALE_TYPE, isSaleType } from "@/lib/sale-constants";
 import { round1 } from "@/lib/format";
+import { isCounterContact } from "@/lib/contact-scope";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { claimOperation, readOperationId, DuplicateOperationError } from "@/lib/actions/operation-id";
@@ -43,6 +44,7 @@ import { ChequeUnavailableError, linkCheque } from "@/lib/actions/cheque-link";
 import { cachedPageRead, stableReadKey } from "@/lib/read-cache";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
 import { resolveDocumentTax, TaxConfigurationError } from "@/lib/queries/document-tax";
+import { createPayment } from "@/lib/actions/payments";
 
 // A sale writes the invoice, the stock it took out, the customer's ledger and
 // whatever settled it. `purchases` is deliberately absent — this file names no
@@ -240,7 +242,7 @@ export async function getCustomerOutstanding(contactId: string, excludeSaleId?: 
       ),
     );
 
-  return Math.max(0, round1(Number(row?.owed ?? 0)));
+  return round1(Number(row?.owed ?? 0));
 }
 
 export async function getSaleEditorOptions(documentId: string) {
@@ -372,7 +374,7 @@ export async function getInvoice(documentId: string) {
           await companyInPermissionScope(ledgerEntries.companyId, session, "sales"),
         ),
       );
-    previousBalance = Math.max(0, Math.round(Number(bal?.owed ?? 0) * 10) / 10);
+    previousBalance = Math.round(Number(bal?.owed ?? 0) * 10) / 10;
   }
 
   return { ...doc, previousBalance, lines: lineRows };
@@ -410,7 +412,7 @@ function readPayment(formData: FormData, grandTotal: number) {
   // Clamped to the document: a slipped digit (35000 on a 3500 sale) would
   // otherwise credit the drawer with money that never arrived, and a negative
   // would take money out.
-  const entered = Math.min(Math.max(Number(num(formData, "paidAmount", "0")) || 0, 0), grandTotal);
+  const entered = Math.max(Number(num(formData, "paidAmount", "0")) || 0, 0);
   const paidAmount = mode === "yes" ? grandTotal : mode === "partial" ? entered : 0;
   const settlementType = String(formData.get("settlementType") ?? "") as SettlementType;
 
@@ -535,7 +537,7 @@ async function createMarketPurchaseRequests(
   );
 }
 
-export async function createSale(_prevState: (ActionResult & { id?: string }) | undefined, formData: FormData): Promise<ActionResult & { id?: string }> {
+export async function createSale(_prevState: (ActionResult & { id?: string; isPayment?: boolean }) | undefined, formData: FormData): Promise<ActionResult & { id?: string; isPayment?: boolean }> {
   return guard("Couldn't create the sale.", async () => {
   const session = await getLiveSession();
 
@@ -550,7 +552,55 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
   requirePermission(session, "sales", "create", { companyId });
 
   const validLines = readLines(formData);
-  if (validLines.length === 0) return { error: "Add at least one item." };
+  if (validLines.length === 0) {
+    const contactId = opt(formData, "contactId");
+    const contactName = opt(formData, "contactName");
+    const isPaid = String(formData.get("isPaid") ?? "no");
+    const enteredPaid = Math.max(Number(formData.get("paidAmount") ?? 0) || 0, 0);
+
+    if ((contactId || contactName) && isPaid !== "no" && enteredPaid > 0) {
+      const settlementType = (String(formData.get("settlementType") ?? "cash") || "cash") as SettlementType;
+      const bankAccountId = opt(formData, "bankAccountId");
+      const cashAccountId = opt(formData, "cashAccountId");
+      const chequeId = opt(formData, "chequeId");
+
+      if (settlementType === "account" && !bankAccountId) {
+        return { error: "Select a bank account." };
+      }
+      if (settlementType === "cash" && !cashAccountId) {
+        return { error: "Select a cash account." };
+      }
+      if (settlementType === "cheque" && !chequeId) {
+        return { error: "Select a cheque." };
+      }
+
+      const paymentFormData = new FormData();
+      paymentFormData.set("companyId", companyId);
+      if (contactId) paymentFormData.set("contactId", contactId);
+      if (contactName) paymentFormData.set("contactName", contactName);
+      paymentFormData.set("amount", String(enteredPaid));
+      paymentFormData.set("paymentDate", documentDate);
+      paymentFormData.set("paymentType", settlementType);
+      if (bankAccountId) paymentFormData.set("bankAccountId", bankAccountId);
+      if (cashAccountId) paymentFormData.set("cashAccountId", cashAccountId);
+      if (chequeId) paymentFormData.set("chequeId", chequeId);
+      paymentFormData.set("operationId", readOperationId(formData));
+
+      const paymentResult = await createPayment("received", undefined, paymentFormData);
+      if (paymentResult.success) {
+        revalidatePath("/sales");
+        revalidatePath("/sales/invoices");
+        return { success: true, id: paymentResult.id, isPayment: true };
+      }
+      return paymentResult;
+    }
+
+    if ((contactId || contactName) && isPaid === "partial" && enteredPaid <= 0) {
+      return { error: "Enter how much was paid, or set Paid? to No." };
+    }
+
+    return { error: "Add at least one item." };
+  }
 
   const contactId = opt(formData, "contactId");
   const contactName = opt(formData, "contactName");
@@ -675,8 +725,21 @@ export async function createSale(_prevState: (ActionResult & { id?: string }) | 
       // as the other direction, so a part-paid sale's balance lands under the
       // contact's name in the ledger's owed-to-us column. The contact isn't
       // stored on the entry: it hangs off the document, same as the payable side.
-      if (balance > 0) {
-        await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, debit: String(balance) });
+      // For all contacts except Counter, record items sold and any counter payment received.
+      let isCounter = isCounterContact(contactName);
+      if (!isCounter && resolvedContactId) {
+        const [c] = await tx.select({ displayName: contacts.displayName }).from(contacts).where(eq(contacts.id, resolvedContactId)).limit(1);
+        if (isCounterContact(c?.displayName)) isCounter = true;
+      }
+      if (!isCounter) {
+        if (grandTotal > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, debit: String(grandTotal) });
+        }
+        if (paidAmount > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(paidAmount) });
+        } else if (balance < 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(Math.abs(balance)) });
+        }
       }
 
       // A customer who has paid ahead has money sitting on their account with
@@ -910,9 +973,26 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
       // still owed, so paying the rest off on edit clears the ledger row instead of
       // leaving a stale balance under the customer's name.
       await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-      if (balance > 0) {
-        await tx.insert(ledgerEntries).values({ companyId, documentId, debit: String(balance) });
+      let isCounter = isCounterContact(contactName);
+      if (!isCounter && resolvedContactId) {
+        const [c] = await tx.select({ displayName: contacts.displayName }).from(contacts).where(eq(contacts.id, resolvedContactId)).limit(1);
+        if (isCounterContact(c?.displayName)) isCounter = true;
       }
+      if (!isCounter) {
+        if (grandTotal > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId, debit: String(grandTotal) });
+        }
+        if (paidAmount > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(paidAmount) });
+        } else if (balance < 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(Math.abs(balance)) });
+        }
+      }
+
+
+
+
+
 
       // inventory_transactions.document_line_id is ON DELETE RESTRICT, so old
       // movements must go before the lines they point at can be replaced.

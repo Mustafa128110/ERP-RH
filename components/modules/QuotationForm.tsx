@@ -353,16 +353,16 @@ export function QuotationForm({
       </div>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded border border-sand md:overflow-auto">
-        <table className="document-lines-grid w-full min-w-max border-collapse">
+        <table className="document-lines-grid w-full min-w-max md:table-fixed border-collapse">
           <thead>
             <tr className="sticky top-0 z-10 bg-ivory">
               <th className={`${thClass} w-10 text-right`}>#</th>
               <th className={thClass}>Item</th>
-              <th className={thClass}>Unit</th>
-              <th className={`${thClass} text-right`}>Quantity</th>
-              <th className={`${thClass} text-right`}>Rate</th>
-              <th className={`${thClass} text-right`}>Line Total</th>
-              {locked && <th className={`${thClass} text-right`}>Invoiced</th>}
+              <th className={`${thClass} w-32`}>Unit</th>
+              <th className={`${thClass} w-28 text-right`}>Quantity</th>
+              <th className={`${thClass} w-28 text-right`}>Rate</th>
+              <th className={`${thClass} w-32 text-right`}>Line Total</th>
+              {locked && <th className={`${thClass} w-28 text-right`}>Invoiced</th>}
             </tr>
           </thead>
           <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>

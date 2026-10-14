@@ -90,15 +90,15 @@ export function ConvertQuotationDialog({
         </p>
 
         <div className="scroll-thin -mx-1 overflow-x-auto px-1">
-          <table className="w-full min-w-max border-collapse">
+          <table className="w-full min-w-max table-fixed border-collapse">
           <thead>
             <tr className="bg-ivory">
               <th className={thClass}>Item</th>
-              <th className={`${thClass} text-right`}>Quoted</th>
-              <th className={`${thClass} text-right`}>Already invoiced</th>
-              <th className={`${thClass} text-right`}>Left</th>
-              <th className={`${thClass} text-right`}>Invoice now</th>
-              <th className={`${thClass} text-right`}>Rate</th>
+              <th className={`${thClass} w-24 text-right`}>Quoted</th>
+              <th className={`${thClass} w-32 text-right`}>Already invoiced</th>
+              <th className={`${thClass} w-24 text-right`}>Left</th>
+              <th className={`${thClass} w-32 text-right`}>Invoice now</th>
+              <th className={`${thClass} w-28 text-right`}>Rate</th>
             </tr>
           </thead>
           <tbody>

@@ -144,6 +144,16 @@ async function main() {
     assert.notEqual(ids[0], null, "the typed name got a freshly created id");
   }
 
+  // --- Typed names are converted to Title Case when inserted ---
+  {
+    const { tx, inserted } = fakeTx([]);
+    await resolveContactIds(tx, [
+      { companyId: royal, contactId: null, contactName: "lowercase customer" },
+    ]);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0][0].displayName, "Lowercase Customer", "newly typed name is saved in Title Case");
+  }
+
   console.log("resolve-refs checks passed");
 }
 

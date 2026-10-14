@@ -7,7 +7,7 @@ import { categories } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
-import { slugify } from "@/lib/format";
+import { slugify, toTitleCase } from "@/lib/format";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 
@@ -115,7 +115,7 @@ export async function getCategory(categoryId: string) {
 
 function readCategoryForm(formData: FormData) {
   const parentIdRaw = String(formData.get("parentId") ?? "");
-  const name = String(formData.get("name") ?? "").trim();
+  const name = toTitleCase(String(formData.get("name") ?? ""));
   return {
     name,
     slug: slugify(name) || null,
@@ -138,7 +138,7 @@ export async function createCategoriesBatch(rows: CategoryBatchRow[]): Promise<C
 
     const created = await db
       .insert(categories)
-      .values(valid.map((r) => ({ name: r.name.trim(), slug: slugify(r.name) || null, parentId: r.parentId })))
+      .values(valid.map((r) => ({ name: toTitleCase(r.name), slug: slugify(toTitleCase(r.name)) || null, parentId: r.parentId })))
       .returning({ id: categories.id, name: categories.name });
 
     await invalidateLookups(CACHE.categories);

@@ -83,7 +83,14 @@ export function MergeContactsDialog({ onClose, onDone }: { onClose: () => void; 
             <p className="p-3 text-sm text-steel">No contacts match.</p>
           ) : (
             <div className="scroll-thin overflow-x-auto">
-              <table className="w-full min-w-max border-collapse text-sm">
+              <table className="w-full min-w-max table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-56" style={{ width: "14rem" }} />
+                  <col className="w-40" style={{ width: "10rem" }} />
+                  <col className="w-32" style={{ width: "8rem" }} />
+                  <col className="w-44" style={{ width: "11rem" }} />
+                  <col className="w-24" style={{ width: "6rem" }} />
+                </colgroup>
                 <tbody>
                   {visible.map((c) => {
                     const checked = selected.includes(c.id);

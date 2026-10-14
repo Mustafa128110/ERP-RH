@@ -457,7 +457,8 @@ tr[data-pending] {
  * readable rather than requiring a 360px screen to pan across a desktop grid.
  */
 table[data-responsive] {
-  min-width: max-content;
+  table-layout: fixed;
+  min-width: var(--table-min-width, max-content);
 }
 
 table[data-responsive] tr[data-virtual-spacer],
@@ -484,7 +485,7 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
     width: 100%;
   }
   table[data-responsive] {
-    min-width: 0;
+    min-width: 0 !important;
   }
   table[data-responsive] td.hidden {
     display: none;

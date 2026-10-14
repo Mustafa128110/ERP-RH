@@ -9,6 +9,7 @@ import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { toTitleCase } from "@/lib/format";
 
 export async function listBrands() {
   const session = await getSession();
@@ -18,7 +19,7 @@ export async function listBrands() {
 
 function readBrandForm(formData: FormData) {
   return {
-    name: String(formData.get("name") ?? "").trim(),
+    name: toTitleCase(String(formData.get("name") ?? "")),
   };
 }
 
@@ -34,7 +35,10 @@ export async function createBrandsBatch(rows: BrandBatchRow[]): Promise<CreateRe
     const valid = rows.filter((r) => r.name.trim());
     if (valid.length === 0) return { error: "Add at least one brand with a name." };
 
-    const created = await db.insert(brands).values(valid).returning({ id: brands.id, name: brands.name });
+    const created = await db
+      .insert(brands)
+      .values(valid.map((r) => ({ ...r, name: toTitleCase(r.name) })))
+      .returning({ id: brands.id, name: brands.name });
     await invalidateLookups(CACHE.brands);
     // The product list carries each item's brand name, so a rename changes it.
     await invalidateReads(READ_DOMAIN.products);

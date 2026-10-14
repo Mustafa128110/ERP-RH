@@ -23,6 +23,7 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
+import { toTitleCase } from "@/lib/format";
 import { SKU_SCOPE, formatSku, nextSequenceRange, peekSequenceValue } from "@/lib/db/sequences";
 import { ensureDocumentType } from "@/lib/actions/document-numbering";
 import { createStockPurchase } from "@/lib/actions/purchases";
@@ -170,7 +171,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.categoryId)
-        .map((row) => row.categoryName?.trim())
+        .map((row) => toTitleCase(row.categoryName))
         .filter((name): name is string => Boolean(name)),
     ),
   ];
@@ -178,7 +179,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.brandId)
-        .map((row) => row.brandName?.trim())
+        .map((row) => toTitleCase(row.brandName))
         .filter((name): name is string => Boolean(name)),
     ),
   ];
@@ -186,7 +187,7 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
     ...new Set(
       rows
         .filter((row) => !row.unitId)
-        .map((row) => row.unitName?.trim())
+        .map((row) => toTitleCase(row.unitName))
         .filter((name): name is string => Boolean(name)),
     ),
   ];
@@ -232,9 +233,9 @@ async function resolveProductReferences(tx: Tx, rows: ProductReferenceInput[]) {
   for (const row of insertedUnits) unitByName.set(row.name, row.id);
 
   return rows.map((row) => ({
-    categoryId: row.categoryId || categoryByName.get(row.categoryName?.trim() ?? "") || null,
-    brandId: row.brandId || brandByName.get(row.brandName?.trim() ?? "") || null,
-    unitId: row.unitId || unitByName.get(row.unitName?.trim() ?? "") || null,
+    categoryId: row.categoryId || categoryByName.get(toTitleCase(row.categoryName)) || null,
+    brandId: row.brandId || brandByName.get(toTitleCase(row.brandName)) || null,
+    unitId: row.unitId || unitByName.get(toTitleCase(row.unitName)) || null,
   }));
 }
 
@@ -269,7 +270,7 @@ export async function createProductsBatch(
         let skuIndex = 0;
         const withSkus = valid.map((row, index) => ({
           companyId: row.companyId,
-          name: row.name,
+          name: toTitleCase(row.name),
           urduName: row.urduName,
           categoryId: references[index]!.categoryId,
           brandId: references[index]!.brandId,
@@ -676,7 +677,7 @@ export async function updateProductsBatch(
               FROM (VALUES ${sql.join(
                 updates.map(({ row, categoryId, brandId, unitId, sku }) => sql`(
                   ${row.id}::uuid,
-                  ${row.name.trim()}::text,
+                  ${toTitleCase(row.name)}::text,
                   ${row.urduName.trim() || null}::text,
                   ${categoryId}::uuid,
                   ${brandId}::uuid,
@@ -698,7 +699,7 @@ export async function updateProductsBatch(
               .values(
                 creates.map(({ row, categoryId, brandId, unitId, sku }) => ({
                   companyId: row.companyId,
-                  name: row.name.trim(),
+                  name: toTitleCase(row.name),
                   urduName: row.urduName.trim() || null,
                   categoryId,
                   brandId,
@@ -1047,7 +1048,7 @@ export async function mergeProducts(
       // the SKU being kept is one of theirs — items is UNIQUE(company_id, sku),
       // and the row still holding it would not have been deleted yet.
       await tx.delete(items).where(and(inArray(items.id, loserIds), ne(items.id, survivorId)));
-      await tx.update(items).set({ name, sku }).where(eq(items.id, survivorId));
+      await tx.update(items).set({ name: toTitleCase(name), sku }).where(eq(items.id, survivorId));
     });
   } catch (e) {
     return { error: describeDbError(e, "Can't merge — that SKU is already used by another product in this company, or one of these rows is still referenced elsewhere.") };
@@ -1169,13 +1170,13 @@ export async function importProductsCsv(
     if (!name || !companyId) return;
 
     batch.push({
-      name,
+      name: toTitleCase(name),
       sku: (r.sku ?? "").trim(),
       companyId,
       categoryId: categoryByName.get(key(r.category ?? "")) ?? null,
       brandId: brandByName.get(key(r.brand ?? "")) ?? null,
-      categoryName: (r.category ?? "").trim(),
-      brandName: (r.brand ?? "").trim(),
+      categoryName: toTitleCase(r.category),
+      brandName: toTitleCase(r.brand),
       urduName: (r.urduName ?? "").trim() || null,
       taxable: csvBool(r.taxable ?? "", false),
       isActive: csvBool(r.isActive ?? "", true),

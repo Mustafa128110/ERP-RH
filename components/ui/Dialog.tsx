@@ -25,7 +25,8 @@ const SIZE = {
   wide: "max-sm:w-full max-sm:min-w-0 max-sm:max-w-none w-fit min-w-[min(92vw,560px)] max-w-[min(96vw,1600px)]",
   // Roomier fixed width for the line-item editors (sales/stock purchase), where
   // the item column needs to breathe.
-  xwide: "max-sm:w-full w-[min(96vw,1120px)]",
+  xwide: "max-sm:w-full w-[min(98vw,1440px)]",
+  full: "max-sm:w-full w-[min(98vw,1600px)]",
 } as const;
 
 // Dialogs nest — a quick-add popup opens on top of the form that spawned it — so
@@ -41,12 +42,26 @@ const SIZE = {
 const dialogStack: (() => void)[] = [];
 
 function pushDialog(close: () => void) {
-  if (dialogStack.length === 0) document.body.style.overflow = "hidden";
+  if (dialogStack.length === 0) {
+    document.body.style.overflow = "hidden";
+    const main = document.querySelector("main");
+    if (main) {
+      main.dataset.prevOverflow = main.style.overflow;
+      main.style.overflow = "hidden";
+    }
+  }
   dialogStack.push(close);
   return () => {
     const i = dialogStack.indexOf(close);
     if (i >= 0) dialogStack.splice(i, 1);
-    if (dialogStack.length === 0) document.body.style.overflow = "";
+    if (dialogStack.length === 0) {
+      document.body.style.overflow = "";
+      const main = document.querySelector("main");
+      if (main) {
+        main.style.overflow = main.dataset.prevOverflow || "";
+        delete main.dataset.prevOverflow;
+      }
+    }
   };
 }
 
@@ -102,9 +117,74 @@ export function Dialog({
     };
   }, []);
 
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = backdropRef.current;
+    if (!el) return;
+
+    function onWheel(e: WheelEvent) {
+      let cur = e.target as HTMLElement | null;
+      let scrollable: HTMLElement | null = null;
+
+      while (cur && cur !== el) {
+        const style = window.getComputedStyle(cur);
+        const canScrollY = (style.overflowY === "auto" || style.overflowY === "scroll") && cur.scrollHeight > cur.clientHeight;
+        const canScrollX = (style.overflowX === "auto" || style.overflowX === "scroll") && cur.scrollWidth > cur.clientWidth;
+        if (canScrollY || canScrollX) {
+          scrollable = cur;
+          break;
+        }
+        cur = cur.parentElement;
+      }
+
+      if (!scrollable) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+        const maxScrollY = scrollable.scrollHeight - scrollable.clientHeight;
+        const nextY = scrollable.scrollTop + e.deltaY;
+        if (e.deltaY > 0 && nextY >= maxScrollY) {
+          scrollable.scrollTop = maxScrollY;
+          e.preventDefault();
+          e.stopPropagation();
+        } else if (e.deltaY < 0 && nextY <= 0) {
+          scrollable.scrollTop = 0;
+          e.preventDefault();
+          e.stopPropagation();
+        } else {
+          e.stopPropagation();
+        }
+      } else {
+        const maxScrollX = scrollable.scrollWidth - scrollable.clientWidth;
+        const nextX = scrollable.scrollLeft + e.deltaX;
+        if (e.deltaX > 0 && nextX >= maxScrollX) {
+          scrollable.scrollLeft = maxScrollX;
+          e.preventDefault();
+          e.stopPropagation();
+        } else if (e.deltaX < 0 && nextX <= 0) {
+          scrollable.scrollLeft = 0;
+          e.preventDefault();
+          e.stopPropagation();
+        } else {
+          e.stopPropagation();
+        }
+      }
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, []);
+
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-stretch justify-center bg-scrim/50 backdrop-blur-sm sm:items-center sm:p-6 ${
+      ref={backdropRef}
+      className={`fixed inset-0 z-50 flex items-stretch justify-center overscroll-contain bg-scrim/50 backdrop-blur-sm sm:items-center sm:p-6 ${
         hidden ? "hidden" : ""
       }`}
       onClick={onClose}
@@ -118,7 +198,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`flex max-h-[100dvh] ${SIZE[size]} flex-col overflow-hidden border-sand bg-white shadow-xl max-sm:h-[100dvh] max-sm:pb-[env(safe-area-inset-bottom)] sm:max-h-[92vh] sm:rounded-lg sm:border`}
+        className={`flex max-h-[100dvh] ${SIZE[size]} flex-col overscroll-contain overflow-hidden border-sand bg-white shadow-xl max-sm:h-[100dvh] max-sm:pb-[env(safe-area-inset-bottom)] sm:max-h-[92vh] sm:rounded-lg sm:border`}
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-sand px-4 py-3 sm:px-5">
           <h2 className="min-w-0 truncate font-display text-base font-semibold text-navy-800">{title}</h2>
@@ -138,7 +218,7 @@ export function Dialog({
             shrink once the 92vh cap bites — and min-h-0 is what permits that
             shrink, since a flex child otherwise refuses to go below its content
             and the dialog grows past the cap instead of scrolling. */}
-        <div className="scroll-thin min-h-0 flex-auto overflow-y-auto p-4 sm:p-5">{children}</div>
+        <div className="scroll-thin min-h-0 flex-auto overflow-y-auto overscroll-contain p-4 sm:p-5">{children}</div>
 
         {footer && <footer className="shrink-0 border-t border-sand px-4 py-3 sm:px-5">{footer}</footer>}
       </div>

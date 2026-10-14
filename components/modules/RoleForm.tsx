@@ -35,12 +35,12 @@ function PermissionGrid({
 
   return (
     <div className="matrix-scroll scroll-thin overflow-auto rounded border border-sand">
-      <table className="w-full min-w-max border-collapse text-sm">
+      <table className="w-full min-w-max table-fixed border-collapse text-sm">
         <thead>
           <tr className="sticky top-0 z-10 border-b border-sand bg-ivory">
-            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel">Module</th>
+            <th className="w-44 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel">Module</th>
             {catalog.actions.map((a) => (
-              <th key={a} className="px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-steel">
+              <th key={a} className="w-24 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-steel">
                 <div className="flex flex-col items-center gap-1">
                   <span>{label(a)}</span>
                   {/* Column toggle: grant this action across every module that has it. */}

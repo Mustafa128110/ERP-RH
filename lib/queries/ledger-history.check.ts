@@ -30,6 +30,20 @@ async function main(){
  assert.equal((await ledgerHistoryWindow(query,{showCancelled:true,all:true})).total,501);
  assert.equal((await ledgerHistoryWindow(query,{page:99999})).info.page,5);
  assert.equal((await ledgerHistoryWindow(query,{query:"' OR 1=1 --"})).total,0);
- console.log('Ledger history checks passed: 501 entries, complete balances across pages, direction, dates, search, cancellations and full export');
+
+ const tieSource=sql`SELECT * FROM (VALUES
+  (md5('5')::uuid, md5('5')::uuid, '2026-05-01'::date, '2026-05-01 10:00:00'::timestamp, 'PAYMENT_RECEIVED', 'posted', 'REF-5', 0::numeric, 10::numeric),
+  (md5('4')::uuid, md5('4')::uuid, '2026-05-01'::date, '2026-05-01 10:00:00'::timestamp, 'SALES_INVOICE', 'posted', 'REF-4', 20::numeric, 0::numeric),
+  (md5('3')::uuid, md5('3')::uuid, '2026-05-01'::date, '2026-05-01 10:00:00'::timestamp, 'PAYMENT_MADE', 'posted', 'REF-3', 30::numeric, 0::numeric),
+  (md5('2')::uuid, md5('2')::uuid, '2026-05-01'::date, '2026-05-01 10:00:00'::timestamp, 'PURCHASE_INVOICE', 'posted', 'REF-2', 0::numeric, 40::numeric),
+  (md5('1')::uuid, md5('1')::uuid, '2026-05-01'::date, '2026-05-01 10:00:00'::timestamp, 'OPENING_BALANCE', 'posted', 'REF-1', 50::numeric, 0::numeric)
+ ) AS t("ledgerId","documentId","date","createdAt","code","documentStatus","number","debit","credit")`;
+ const tieNames=['ledgerId','documentId','date','createdAt','code','documentStatus','number','debit','credit'];
+ const tieQuery={getSQL:()=>tieSource,getSelectedFields:()=>Object.fromEntries(tieNames.map(name=>[name,{}]))};
+ const tieResult=await ledgerHistoryWindow(tieQuery,{all:true,direction:'asc'});
+ const [r1, r2, r3, r4, r5] = await db.execute<{id:string}>(sql`SELECT md5('1')::uuid AS id UNION ALL SELECT md5('2')::uuid UNION ALL SELECT md5('3')::uuid UNION ALL SELECT md5('4')::uuid UNION ALL SELECT md5('5')::uuid`);
+ assert.deepEqual(tieResult.ids, [r1.id, r2.id, r3.id, r4.id, r5.id]);
+
+ console.log('Ledger history checks passed: 501 entries, complete balances across pages, direction, dates, search, cancellations, tie-breaker ranking and full export');
 }
 main().finally(()=>db.$client.end()).catch(error=>{console.error(error);process.exitCode=1});

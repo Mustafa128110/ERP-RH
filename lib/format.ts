@@ -9,6 +9,17 @@ export function slugify(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
+// Capitalizes each word for typed names (items, contacts, categories, etc.)
+// e.g. "steel shovel heavy" -> "Steel Shovel Heavy"
+export function toTitleCase(value: string | null | undefined): string {
+  if (!value) return "";
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/(?:^|[\s\-_/])\w/g, (match) => match.toUpperCase());
+}
+
 // --- Dates -------------------------------------------------------------------
 // The database speaks ISO (YYYY-MM-DD, what a Postgres `date` column holds and
 // what <input type="date"> submits). Everything a human reads or types is
@@ -30,6 +41,14 @@ export function formatTimestamp(value: string | Date): string {
   const d = value instanceof Date ? value : new Date(value);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${formatDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// Local time "HH:MM:SS".
+export function formatTime(value: string | Date): string {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // A column that mixes dates with words (a report's "Last Sold" can be the word

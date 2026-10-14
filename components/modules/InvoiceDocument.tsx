@@ -224,10 +224,10 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
               <dd className="text-right tabular-nums">+{money(shipping)}</dd>
             </>
           )}
-          {invoice.previousBalance > 0 && (
+          {invoice.previousBalance !== 0 && (
             <>
-              <dt className="text-steel">Previous Balance</dt>
-              <dd className="text-right tabular-nums">{money(invoice.previousBalance)}</dd>
+              <dt className="text-steel">{invoice.previousBalance > 0 ? "Previous Balance (Receivable)" : "Previous Balance (Payable)"}</dt>
+              <dd className="text-right tabular-nums">{money(Math.abs(invoice.previousBalance))}</dd>
             </>
           )}
           <dt className="mt-1 border-t border-sand pt-1 font-semibold text-ink">Grand Total</dt>

@@ -18,6 +18,7 @@ export type ColumnDef = {
   label: string;
   align?: "left" | "right";
   badge?: boolean;
+  width?: number | string;
   // Plain cells sort automatically. A custom renderer opts in explicitly so
   // action/icon columns do not become misleading clickable headers.
   sortable?: boolean;

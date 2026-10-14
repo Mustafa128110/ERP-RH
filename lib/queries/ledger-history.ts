@@ -12,6 +12,16 @@ export async function ledgerHistoryWindow(query:SQLWrapper,request:LedgerHistory
  const page=Math.min(1000000,Math.max(1,Math.floor(request.page||1)));
  const direction=request.direction==='desc'?'desc':'asc';
  const from=request.from||null,to=request.to||null;
+ const hasCreatedAt=names.includes('createdAt');
+ const timeRunning=hasCreatedAt?sql`, "createdAt" ASC`:sql``;
+ const timeSelected=hasCreatedAt?sql`, "createdAt" ${sql.raw(direction)}`:sql``;
+ const rankExpr=sql`CASE
+   WHEN code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY') THEN 1
+   WHEN code IN ('PURCHASE_INVOICE', 'MARKET_PURCHASE') AND (debit IS NULL OR debit = 0) THEN 2
+   WHEN code = 'PAYMENT_MADE' OR (code = 'PURCHASE_INVOICE' AND debit > 0) THEN 3
+   WHEN code = 'SALES_INVOICE' AND (credit IS NULL OR credit = 0) THEN 4
+   WHEN code = 'PAYMENT_RECEIVED' OR (code = 'SALES_INVOICE' AND credit > 0) THEN 5
+   ELSE 6 END`;
  const [result]=await db.execute<{selected:{id:string;balance:number}[];total:number;page:number;opening:number;totalDebit:number;totalCredit:number;openingBalance:number;openingDocumentId:string|null}>(sql`
  WITH source(${sql.join(names.map(name=>sql.identifier(name)),sql`,`)}) AS (${query.getSQL()}),
  active AS (SELECT * FROM source WHERE ${request.showCancelled?sql`true`:sql`"documentStatus"<>'cancelled'`}),
@@ -21,12 +31,12 @@ export async function ledgerHistoryWindow(query:SQLWrapper,request:LedgerHistory
  totals AS (SELECT count(*)::int AS total,coalesce(sum(debit),0)::float8 AS "totalDebit",coalesce(sum(credit),0)::float8 AS "totalCredit",
   least(${page},greatest(1,ceil(count(*)::numeric/${HISTORY_PAGE_SIZE})))::int AS page FROM matched),
  opening AS (SELECT coalesce(sum(debit-credit) FILTER(WHERE date<${from}::date),0)::float8 AS opening,
-  coalesce(sum(debit-credit) FILTER(WHERE code='OPENING_BALANCE'),0)::float8 AS "openingBalance",
-  CASE WHEN count(*) FILTER(WHERE code='OPENING_BALANCE')=1 THEN max("documentId"::text) FILTER(WHERE code='OPENING_BALANCE') END AS "openingDocumentId" FROM active),
- running AS (SELECT "ledgerId" AS id,date,(opening.opening+sum(debit-credit) OVER(ORDER BY date,"ledgerId" ROWS UNBOUNDED PRECEDING))::float8 AS balance FROM matched CROSS JOIN opening),
- selected AS (SELECT * FROM running ORDER BY date ${sql.raw(direction)},id ${sql.raw(direction)}
+  coalesce(sum(debit-credit) FILTER(WHERE code='OPENING_BALANCE' OR code='JOURNAL_ENTRY'),0)::float8 AS "openingBalance",
+  CASE WHEN count(*) FILTER(WHERE code='OPENING_BALANCE' OR code='JOURNAL_ENTRY')=1 THEN max("documentId"::text) FILTER(WHERE code='OPENING_BALANCE' OR code='JOURNAL_ENTRY') END AS "openingDocumentId" FROM active),
+ running AS (SELECT "ledgerId" AS id,date,${hasCreatedAt?sql`"createdAt",`:sql``}code,${rankExpr} AS rank,(opening.opening+sum(debit-credit) OVER(ORDER BY date ASC${timeRunning},${rankExpr} ASC,"ledgerId" ASC ROWS UNBOUNDED PRECEDING))::float8 AS balance FROM matched CROSS JOIN opening),
+ selected AS (SELECT * FROM running ORDER BY date ${sql.raw(direction)}${timeSelected},rank ${sql.raw(direction)},id ${sql.raw(direction)}
   ${request.all?sql``:sql`LIMIT ${HISTORY_PAGE_SIZE} OFFSET (SELECT (page-1)*${HISTORY_PAGE_SIZE} FROM totals)`})
- SELECT totals.*,opening.*,coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'balance',balance) ORDER BY date ${sql.raw(direction)},id ${sql.raw(direction)}) FROM selected),'[]'::jsonb) AS selected FROM totals CROSS JOIN opening
+ SELECT totals.*,opening.*,coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'balance',balance) ORDER BY date ${sql.raw(direction)}${timeSelected},rank ${sql.raw(direction)},id ${sql.raw(direction)}) FROM selected),'[]'::jsonb) AS selected FROM totals CROSS JOIN opening
  `);
  const summary:LedgerHistorySummary={opening:result.opening,totalDebit:result.totalDebit,totalCredit:result.totalCredit,closing:Math.round((result.opening+result.totalDebit-result.totalCredit)*100)/100};
  const info:HistoryInfo={page:result.page,pageSize:HISTORY_PAGE_SIZE,total:result.total,query:search,sort:'date',direction,all:!!request.all};

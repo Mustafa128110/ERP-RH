@@ -607,7 +607,7 @@ export function StockPurchaseCreateForm({
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
         <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
-          <table className="document-lines-grid w-full min-w-[1060px] border-collapse text-sm">
+          <table className="document-lines-grid w-full min-w-[1060px] md:table-fixed border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>

@@ -4,7 +4,7 @@ import { PermissionError } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { items, units, contacts, expenseCategories, categories, brands, locations } from "@/lib/db/schema";
 import { nextSequenceRange, nextSequenceValue, formatSku, SKU_SCOPE } from "@/lib/db/sequences";
-import { slugify } from "@/lib/format";
+import { slugify, toTitleCase } from "@/lib/format";
 
 // Resolvers for line pickers that accept free-typed text: if an id is already
 // chosen, use it; otherwise a non-empty typed name creates a name-only record
@@ -25,7 +25,7 @@ export async function resolveItemId(tx: Tx, companyId: string, id: string | null
     if (existing) return existing.id;
     throw new PermissionError("This item doesn't belong to this company — pick one from this company's catalog.");
   }
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   const [existing] = await tx
     .select({ id: items.id })
@@ -40,7 +40,7 @@ export async function resolveItemId(tx: Tx, companyId: string, id: string | null
 
 export async function resolveUnitId(tx: Tx, id: string | null, name: string | null): Promise<string | null> {
   if (id) return id;
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   const [existing] = await tx.select({ id: units.id }).from(units).where(eq(units.name, n)).limit(1);
   if (existing) return existing.id;
@@ -69,7 +69,7 @@ export async function resolveItemIds(
 
   const wanted = new Map<string, { companyId: string; name: string }>();
   for (const row of rows) {
-    const name = row.itemName?.trim();
+    const name = toTitleCase(row.itemName);
     if (!row.itemId && name) wanted.set(key(row.companyId, name), { companyId: row.companyId, name });
   }
   const pairs = [...wanted.values()];
@@ -90,11 +90,11 @@ export async function resolveItemIds(
     for (const row of inserted) byName.set(key(row.companyId, row.name), row.id);
   }
 
-  return rows.map((row) => row.itemId ?? byName.get(key(row.companyId, row.itemName?.trim() ?? "")) ?? null);
+  return rows.map((row) => row.itemId ?? byName.get(key(row.companyId, toTitleCase(row.itemName))) ?? null);
 }
 
 export async function resolveUnitIds(tx: Tx, rows: { unitId: string | null; unitName: string | null }[]): Promise<(string | null)[]> {
-  const names = [...new Set(rows.filter((row) => !row.unitId).map((row) => row.unitName?.trim()).filter((name): name is string => Boolean(name)))];
+  const names = [...new Set(rows.filter((row) => !row.unitId).map((row) => toTitleCase(row.unitName)).filter((name): name is string => Boolean(name)))];
   const found = names.length ? await tx.select({ id: units.id, name: units.name }).from(units).where(inArray(units.name, names)) : [];
   const byName = new Map(found.map((row) => [row.name, row.id]));
   const missing = names.filter((name) => !byName.has(name));
@@ -102,7 +102,7 @@ export async function resolveUnitIds(tx: Tx, rows: { unitId: string | null; unit
     const inserted = await tx.insert(units).values(missing.map((name) => ({ name }))).returning({ id: units.id, name: units.name });
     for (const row of inserted) byName.set(row.name, row.id);
   }
-  return rows.map((row) => row.unitId ?? byName.get(row.unitName?.trim() ?? "") ?? null);
+  return rows.map((row) => row.unitId ?? byName.get(toTitleCase(row.unitName)) ?? null);
 }
 
 // Categories and brands are global reference data — no company argument, unlike
@@ -110,7 +110,7 @@ export async function resolveUnitIds(tx: Tx, rows: { unitId: string | null; unit
 // from the category tree if it belongs under something.
 export async function resolveCategoryId(tx: Tx, id: string | null, name: string | null): Promise<string | null> {
   if (id) return id;
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   const [existing] = await tx.select({ id: categories.id }).from(categories).where(eq(categories.name, n)).limit(1);
   if (existing) return existing.id;
@@ -125,7 +125,7 @@ export async function resolveCategoryId(tx: Tx, id: string | null, name: string 
 
 export async function resolveBrandId(tx: Tx, id: string | null, name: string | null): Promise<string | null> {
   if (id) return id;
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   const [existing] = await tx.select({ id: brands.id }).from(brands).where(eq(brands.name, n)).limit(1);
   if (existing) return existing.id;
@@ -140,7 +140,7 @@ export async function resolveBrandId(tx: Tx, id: string | null, name: string | n
 // same way a missing symbol marks a unit typed into a sale line.
 export async function resolveLocationId(tx: Tx, id: string | null, name: string | null): Promise<string | null> {
   if (id) return id;
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   const [existing] = await tx.select({ id: locations.id }).from(locations).where(eq(locations.name, n)).limit(1);
   if (existing) return existing.id;
@@ -158,7 +158,7 @@ export async function resolveExpenseCategoryId(tx: Tx, companyId: string, id: st
     if (existing) return existing.id;
     throw new PermissionError("This expense category doesn't belong to this company — pick one from this company's list.");
   }
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   const [existing] = await tx
     .select({ id: expenseCategories.id })
@@ -191,7 +191,7 @@ export async function resolveExpenseCategoryIds(
 
   const wanted = new Map<string, { companyId: string; name: string }>();
   for (const row of rows) {
-    const name = row.expenseCategoryName?.trim();
+    const name = toTitleCase(row.expenseCategoryName);
     if (!row.expenseCategoryId && name) wanted.set(key(row.companyId, name), { companyId: row.companyId, name });
   }
   const pairs = [...wanted.values()];
@@ -212,7 +212,7 @@ export async function resolveExpenseCategoryIds(
     for (const row of inserted) byName.set(key(row.companyId, row.name), row.id);
   }
 
-  return rows.map((row) => row.expenseCategoryId ?? byName.get(key(row.companyId, row.expenseCategoryName?.trim() ?? "")) ?? null);
+  return rows.map((row) => row.expenseCategoryId ?? byName.get(key(row.companyId, toTitleCase(row.expenseCategoryName))) ?? null);
 }
 
 export async function resolveContactId(tx: Tx, companyId: string, id: string | null, name: string | null): Promise<string | null> {
@@ -230,7 +230,7 @@ export async function resolveContactId(tx: Tx, companyId: string, id: string | n
     if (existing) return existing.id;
     throw new PermissionError("This contact doesn't belong to this company — pick one from this company's list.");
   }
-  const n = name?.trim();
+  const n = toTitleCase(name);
   if (!n) return null;
   // This company's own contact first, then a global one (company_id IS NULL),
   // which every company can see. Matching only on company_id used to mint a
@@ -264,7 +264,7 @@ export async function resolveContactIds(
 
   const wanted = new Map<string, { companyId: string; name: string }>();
   for (const r of rows) {
-    const n = r.contactName?.trim();
+    const n = toTitleCase(r.contactName);
     if (!r.contactId && n) wanted.set(key(r.companyId, n), { companyId: r.companyId, name: n });
   }
 
@@ -332,7 +332,7 @@ export async function resolveContactIds(
 
   return rows.map((r) => {
     if (r.contactId) return r.contactId;
-    const n = r.contactName?.trim();
+    const n = toTitleCase(r.contactName);
     return n ? (resolved.get(key(r.companyId, n)) ?? null) : null;
   });
 }

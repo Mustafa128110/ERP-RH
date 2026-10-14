@@ -22,6 +22,15 @@ const ADD_ROWS = 2;
 // back as created. C matters for quick-add — adding a product from inside a
 // sale returns the new product so the caller can drop it straight into the line
 // the user was editing, instead of making them hunt for it in the dropdown.
+function getBatchHeaderWidth(header: string): string {
+  const h = header.toLowerCase();
+  if (h.includes("name") || h.includes("description") || h.includes("email") || h.includes("address")) return "w-52 min-w-[13rem]";
+  if (h.includes("company") || h.includes("category") || h.includes("brand") || h.includes("role") || h.includes("account")) return "w-44 min-w-[11rem]";
+  if (h.includes("active") || h.includes("taxable")) return "w-24 min-w-[6rem]";
+  if (h.includes("rate") || h.includes("price") || h.includes("qty") || h.includes("value") || h.includes("code") || h.includes("sku") || h.includes("unit")) return "w-32 min-w-[8rem]";
+  return "w-36 min-w-[9rem]";
+}
+
 export function BatchAddDialog<T, C = unknown>({
   title,
   onClose,
@@ -287,11 +296,11 @@ export function BatchAddDialog<T, C = unknown>({
       {/* Blank rows are ignored by the server actions, so leaving spares at the
           bottom is harmless — the header stays put while the rows scroll. */}
       <div className="matrix-scroll scroll-thin overflow-auto rounded border border-sand">
-        <table className="w-full min-w-max border-collapse text-sm">
+        <table className="w-full min-w-max table-fixed border-collapse text-sm">
           <thead>
             <tr className="sticky top-0 z-10 bg-ivory">
               {headers.map((h) => (
-                <th key={h} className="whitespace-nowrap border border-sand px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel">
+                <th key={h} className={`whitespace-nowrap border border-sand px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel ${getBatchHeaderWidth(h)}`}>
                   {h}
                 </th>
               ))}

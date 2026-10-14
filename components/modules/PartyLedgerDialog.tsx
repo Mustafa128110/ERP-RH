@@ -1,5 +1,4 @@
 "use client";
-import {HistoryPager} from "@/components/ui/HistoryProvider";
 
 import Link from "next/link";
 import { useActionState, useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
@@ -17,8 +16,9 @@ import {
   type PartyLedgerEntry,
   type PartyLedgerResult,
 } from "@/lib/client-actions/ledger";
-import { getPayment } from "@/lib/client-actions/payments";
+import { getPayment, listChequesForPayments } from "@/lib/client-actions/payments";
 import { getStockPurchase, listChequesForPurchases } from "@/lib/client-actions/purchases";
+import { getSaleEditorOptions } from "@/lib/client-actions/sales";
 import type { AuditRow } from "@/lib/actions/audit";
 import type { PaymentDirection } from "@/lib/client-actions/payments";
 import { LEDGER_TYPE_LABELS, type SettlementState } from "@/lib/ledger-constants";
@@ -28,6 +28,7 @@ import { DetailHover } from "@/components/ui/DetailHover";
 import { DateField } from "@/components/ui/DateField";
 import { PaymentEditForm } from "@/components/modules/PaymentForm";
 import { StockPurchaseCreateForm } from "@/components/modules/StockPurchaseForm";
+import { SaleFormPage } from "@/components/modules/SaleForm";
 import { fieldClass, labelClass, labelTextClass, errorTextClass, confirmNoticeClass, primaryActionClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { INVOICE_COMPANY_NAME } from "@/lib/invoice-pdf";
 import { ledgerGridSelectionProps, computeCellStats, onSelectionChange } from "@/components/ui/ledger-grid";
@@ -61,7 +62,7 @@ function ImpactList({ preview }: { preview: LedgerImpactPreview }) {
         {preview.impacts.length} settlement{preview.impacts.length === 1 ? "" : "s"} affected
       </p>
       <div className="scroll-thin max-h-48 overflow-auto rounded border border-sand">
-        <table className="w-full text-xs">
+        <table className="w-full table-fixed text-xs">
           <tbody>
             {preview.impacts.map((impact, i) => (
               <tr key={i} className="border-b border-sand/50 last:border-0">
@@ -95,6 +96,7 @@ function ImpactList({ preview }: { preview: LedgerImpactPreview }) {
 interface RefCellContext {
   onOpenPayment: (documentId: string) => void;
   onOpenPurchase: (documentId: string) => void;
+  onOpenSale: (documentId: string) => void;
   onOpenOpeningBalance: () => void;
 }
 
@@ -102,58 +104,65 @@ interface RefCellContext {
 function RefCell({ entry, ctx }: { entry: PartyLedgerEntry & { balance: number }; ctx: RefCellContext }) {
   const label = entry.reference ?? "—";
 
-  // Payments: open the payment edit form inline, same popup the payments page uses.
-  if (entry.code === "PAYMENT_RECEIVED" || entry.code === "PAYMENT_MADE") {
-    return (
-      <button
-        type="button"
-        onClick={() => ctx.onOpenPayment(entry.documentId)}
-        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
-        onClickCapture={(e: MouseEvent) => e.stopPropagation()}
-      >
-        {label}
-      </button>
-    );
-  }
-
-  // Purchases/MARKET_PURCHASE: open the stock purchase edit form inline.
-  if (entry.code === "PURCHASE_INVOICE" || entry.code === "MARKET_PURCHASE") {
-    return (
-      <button
-        type="button"
-        onClick={() => ctx.onOpenPurchase(entry.documentId)}
-        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
-        onClickCapture={(e: MouseEvent) => e.stopPropagation()}
-      >
-        {label}
-      </button>
-    );
-  }
-
-  // Sales invoices have an edit route at /sales/[id]
-  if (entry.code === "SALES_INVOICE") {
-    return (
-      <Link
-        href={`/sales/${entry.documentId}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
-        onClick={(e: MouseEvent) => e.stopPropagation()}
-      >
-        {label}
-      </Link>
-    );
-  }
-
   // Opening balance rows open the balance editor — same panel as the "Edit" button
   // on the opening-balance card, so the ref is editable the same way the button is.
-  if (entry.isOpeningBalance) {
+  if (entry.isOpeningBalance || entry.type === "opening_balance") {
     return (
       <button
         type="button"
-        onClick={() => ctx.onOpenOpeningBalance()}
+        onClick={(e: MouseEvent) => {
+          e.stopPropagation();
+          ctx.onOpenOpeningBalance();
+        }}
         className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
-        onClickCapture={(e: MouseEvent) => e.stopPropagation()}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  // Sales invoices (item sold or sale counter payment): open the sale edit popup.
+  if (entry.code === "SALES_INVOICE" || entry.type === "item_sold") {
+    return (
+      <button
+        type="button"
+        onClick={(e: MouseEvent) => {
+          e.stopPropagation();
+          ctx.onOpenSale(entry.documentId);
+        }}
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
+      >
+        {label}
+      </button>
+    );
+  }
+
+  // Purchases (item bought or purchase counter payment): open the stock purchase edit form inline.
+  if (entry.code === "PURCHASE_INVOICE" || entry.code === "MARKET_PURCHASE" || entry.type === "item_bought") {
+    return (
+      <button
+        type="button"
+        onClick={(e: MouseEvent) => {
+          e.stopPropagation();
+          ctx.onOpenPurchase(entry.documentId);
+        }}
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
+      >
+        {label}
+      </button>
+    );
+  }
+
+  // Payments: open the payment edit form inline, same popup the payments page uses.
+  if (entry.code === "PAYMENT_RECEIVED" || entry.code === "PAYMENT_MADE" || entry.type === "payment_received" || entry.type === "payment_made") {
+    return (
+      <button
+        type="button"
+        onClick={(e: MouseEvent) => {
+          e.stopPropagation();
+          ctx.onOpenPayment(entry.documentId);
+        }}
+        className="underline decoration-dotted decoration-zinc-400 underline-offset-4 hover:text-navy-800"
       >
         {label}
       </button>
@@ -209,29 +218,32 @@ function DescriptionCell({ entry }: { entry: PartyLedgerEntry }) {
     return (
       <DetailHover
         trigger={<span className="cursor-help border-b border-dotted border-steel">{label}</span>}
-        width={480}
+        width={640}
+        extraHeight={Math.min(260, 40 + entry.lineItems.length * 36)}
       >
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-steel">Line Items</p>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b-2 border-sand">
-              <th className="py-1.5 pr-6 text-left text-xs font-semibold text-steel">Item</th>
-              <th className="py-1.5 w-28 text-right text-xs font-semibold text-steel">Qty</th>
-              <th className="py-1.5 w-24 text-right text-xs font-semibold text-steel">Rate</th>
-              <th className="py-1.5 w-28 text-right text-xs font-semibold text-steel">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entry.lineItems.map((l, i) => (
-              <tr key={i} className="border-b border-sand/50 last:border-0">
-                <td className="py-2 pr-6 text-ink">{l.itemName}</td>
-                <td className="py-2 text-right tabular-nums text-ink">{l.quantity}{l.unitSymbol ? ` ${l.unitSymbol}` : ""}</td>
-                <td className="py-2 text-right tabular-nums text-steel">{money(l.rate)}</td>
-                <td className="py-2 text-right tabular-nums font-medium text-ink">{money(l.lineTotal)}</td>
+        <div className="scroll-thin min-h-0 max-h-56 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+          <table className="w-full table-auto border-collapse text-sm">
+            <thead className="sticky top-0 bg-white">
+              <tr className="border-b-2 border-sand">
+                <th className="py-1.5 pr-4 text-left text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Item</th>
+                <th className="py-1.5 px-3 text-right text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Qty</th>
+                <th className="py-1.5 px-3 text-right text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Rate</th>
+                <th className="py-1.5 pl-3 text-right text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Amount</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entry.lineItems.map((l, i) => (
+                <tr key={i} className="border-b border-sand/50 last:border-0 whitespace-nowrap">
+                  <td className="py-1.5 pr-4 text-ink whitespace-nowrap" title={l.itemName}>{l.itemName}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-ink whitespace-nowrap">{l.quantity}{l.unitSymbol ? ` ${l.unitSymbol}` : ""}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-steel whitespace-nowrap">{money(l.rate)}</td>
+                  <td className="py-1.5 pl-3 text-right tabular-nums font-medium text-ink whitespace-nowrap">{money(l.lineTotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </DetailHover>
     );
   }
@@ -281,24 +293,26 @@ function SettlementCell({ entry }: { entry: PartyLedgerEntry & { balance: number
 
   const isPayment = entry.type === "payment_received" || entry.type === "payment_made";
   return (
-    <DetailHover trigger={pill} width={380}>
+    <DetailHover trigger={pill} width={480} extraHeight={Math.min(200, 40 + links.length * 28)}>
       <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-steel">
         {isPayment ? "Applied to" : "Settled by"}
       </p>
-      <table className="w-full text-sm">
-        <tbody>
-          {links.map((link, i) => (
-            <tr key={`${link.documentId}-${i}`} className="border-b border-sand/50 last:border-0">
-              <td className="py-1.5 pr-4 whitespace-nowrap tabular-nums text-steel">{formatDate(link.date)}</td>
-              <td className="py-1.5 pr-4 text-ink">
-                {TYPE_LABELS[link.type]}
-                {link.reference ? ` ${link.reference}` : ""}
-              </td>
-              <td className="py-1.5 text-right tabular-nums font-medium text-ink">{money(link.amount)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="scroll-thin min-h-0 max-h-48 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+        <table className="w-full table-auto border-collapse text-sm">
+          <tbody>
+            {links.map((link, i) => (
+              <tr key={`${link.documentId}-${i}`} className="border-b border-sand/50 last:border-0 whitespace-nowrap">
+                <td className="py-1.5 pr-3 whitespace-nowrap tabular-nums text-steel">{formatDate(link.date)}</td>
+                <td className="py-1.5 px-3 text-ink whitespace-nowrap">
+                  {TYPE_LABELS[link.type]}
+                  {link.reference ? ` ${link.reference}` : ""}
+                </td>
+                <td className="py-1.5 pl-3 text-right tabular-nums font-medium text-ink whitespace-nowrap">{money(link.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p className="mt-2 border-t border-sand pt-1.5 text-xs text-steel">
         {money(settled)} of {money(total)}
         {settled < total ? ` · ${money(total - settled)} still open` : ""}
@@ -322,7 +336,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const [toDate, setToDate] = useState("");
   const [search, setSearch] = useState("");
   const [page,setPage]=useState(1);
-  const [all,setAll]=useState(false);
+  const all = true;
   const [exporting,setExporting]=useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
   const [desc, setDesc] = useState<boolean>(() => {
@@ -354,16 +368,24 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   } | null>(null);
   const [editingPayment, setEditingPayment] = useState<{ id: string; detail: NonNullable<Awaited<ReturnType<typeof getPayment>>>; cheques: { id: string; name: string; companyId: string | null }[] } | null>(null);
   const [editingPurchase, setEditingPurchase] = useState<{ id: string; detail: NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>; cheques: { id: string; name: string; companyId: string | null }[] } | null>(null);
-  const warmPayment = useRef(new Map<string, NonNullable<Awaited<ReturnType<typeof getPayment>>>>());
-  const warmPurchase = useRef(new Map<string, NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>>());
+  const [editingSale, setEditingSale] = useState<{ id: string; detail: NonNullable<Awaited<ReturnType<typeof getSaleEditorOptions>>>["detail"]; options: NonNullable<Awaited<ReturnType<typeof getSaleEditorOptions>>>["options"] } | null>(null);
+
+  const warmPayment = useRef(new Map<string, { detail: NonNullable<Awaited<ReturnType<typeof getPayment>>>; cheques: { id: string; name: string; companyId: string | null }[] }>());
+  const warmPurchase = useRef(new Map<string, { detail: NonNullable<Awaited<ReturnType<typeof getStockPurchase>>>; cheques: { id: string; name: string; companyId: string | null }[] }>());
+  const warmSale = useRef(new Map<string, NonNullable<Awaited<ReturnType<typeof getSaleEditorOptions>>>>());
 
   // Load the option sets once, on demand, and stash them so every open form
   // reuses them rather than each fetching its own copy.
   async function loadFormOptions() {
     if (formOptions) return;
-    const bundle = await getLedgerInlineOptions();
-    setFormOptions({ payment: bundle.paymentOptions, purchase: bundle.purchaseOptions });
+    try {
+      const bundle = await getLedgerInlineOptions();
+      setFormOptions({ payment: bundle.paymentOptions, purchase: bundle.purchaseOptions });
+    } catch {
+      // background fetch fail handled on retry
+    }
   }
+
 
   async function openPaymentEdit(documentId: string) {
     if (!formOptions) await loadFormOptions();
@@ -371,26 +393,50 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     // produced it — a ref clicked twice in quick succession reuses the first fetch.
     const cached = warmPayment.current.get(documentId);
     if (cached) {
-      setEditingPayment({ id: documentId, detail: cached, cheques: [] });
+      setEditingPayment({ id: documentId, detail: cached.detail, cheques: cached.cheques });
       return;
     }
-    const [detail, cheques] = await Promise.all([getPayment(documentId), listChequesForPurchases(documentId)]);
-    if (!detail) return;
-    warmPayment.current.set(documentId, detail);
-    setEditingPayment({ id: documentId, detail, cheques });
+    try {
+      const [detail, cheques] = await Promise.all([getPayment(documentId), listChequesForPayments(documentId)]);
+      if (!detail) return;
+      warmPayment.current.set(documentId, { detail, cheques });
+      setEditingPayment({ id: documentId, detail, cheques });
+    } catch {
+      // handled
+    }
   }
 
   async function openPurchaseEdit(documentId: string) {
     if (!formOptions) await loadFormOptions();
     const cached = warmPurchase.current.get(documentId);
     if (cached) {
-      setEditingPurchase({ id: documentId, detail: cached, cheques: [] });
+      setEditingPurchase({ id: documentId, detail: cached.detail, cheques: cached.cheques });
       return;
     }
-    const [detail, cheques] = await Promise.all([getStockPurchase(documentId), listChequesForPurchases(documentId)]);
-    if (!detail) return;
-    warmPurchase.current.set(documentId, detail);
-    setEditingPurchase({ id: documentId, detail, cheques });
+    try {
+      const [detail, cheques] = await Promise.all([getStockPurchase(documentId), listChequesForPurchases(documentId)]);
+      if (!detail) return;
+      warmPurchase.current.set(documentId, { detail, cheques });
+      setEditingPurchase({ id: documentId, detail, cheques });
+    } catch {
+      // handled
+    }
+  }
+
+  async function openSaleEdit(documentId: string) {
+    const cached = warmSale.current.get(documentId);
+    if (cached) {
+      setEditingSale({ id: documentId, detail: cached.detail, options: cached.options });
+      return;
+    }
+    try {
+      const ready = await getSaleEditorOptions(documentId);
+      if (!ready) return;
+      warmSale.current.set(documentId, ready);
+      setEditingSale({ id: documentId, detail: ready.detail, options: ready.options });
+    } catch {
+      // handled
+    }
   }
 
   // Context for the Ref cells: they only need the openers, not the whole
@@ -399,6 +445,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const refCellContext: RefCellContext = {
     onOpenPayment: openPaymentEdit,
     onOpenPurchase: openPurchaseEdit,
+    onOpenSale: openSaleEdit,
     onOpenOpeningBalance: () => setEditOpening(true),
   };
 
@@ -407,6 +454,9 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   }
   function closePurchaseEdit() {
     setEditingPurchase(null);
+  }
+  function closeSaleEdit() {
+    setEditingSale(null);
   }
 
   // Persist sort direction
@@ -527,7 +577,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
 
   return (
     <>
-    <Dialog title={`Statement of Account — ${contactName}`} onClose={onClose} size="xwide">
+    <Dialog title={`Statement of Account — ${contactName}`} onClose={onClose} size="full">
       {loading && <p className="py-8 text-center text-sm text-steel">Loading…</p>}
       {error && <p className="py-8 text-center text-sm text-error">{error}</p>}
 
@@ -652,7 +702,6 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
           {/* §7 — what was changed on this account, and by whom. Field-level
               old → new comes from `changeSummary`, so it reads the same here as
               it does on the audit page. */}
-          {data.history&&<HistoryPager history={{info:data.history,pending:loading,change:values=>{if(values.page!==undefined)setPage(Number(values.page));if(Object.hasOwn(values,"all"))setAll(values.all==="1");}}}/>}
           {historyOpen && (
             <div className="rounded border border-sand bg-white">
               {history === null ? (
@@ -660,8 +709,8 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               ) : history.length === 0 ? (
                 <p className="p-3 text-xs text-steel">Nothing has been edited or deleted on this account.</p>
               ) : (
-                <div className="scroll-thin max-h-56 overflow-auto">
-                  <table className="w-full text-xs">
+                <div className="scroll-thin max-h-56 overflow-y-auto overflow-x-hidden">
+                  <table className="w-full table-fixed text-xs">
                     <thead className="sticky top-0 bg-ivory/90 backdrop-blur">
                       <tr className="border-b border-sand">
                         <th className="w-36 px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-steel">When</th>
@@ -709,20 +758,30 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               </p>
             </div>
           ) : (
-            <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
-              <table className="w-full min-w-[76rem] border-collapse text-sm">
+            <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-y-auto overflow-x-hidden rounded-lg border border-sand bg-white">
+              <table className="w-full table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-36" style={{ width: "9rem" }} />
+                  <col />
+                  <col className="w-28" style={{ width: "7rem" }} />
+                  <col className="w-32" style={{ width: "8rem" }} />
+                  <col className="w-32" style={{ width: "8rem" }} />
+                  <col className="w-36" style={{ width: "9rem" }} />
+                  <col className="w-28" style={{ width: "7rem" }} />
+                  <col className="w-12" style={{ width: "3rem" }} />
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">
-                    <th className="w-40 cursor-pointer select-none py-2.5 pl-8 pr-8 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => {setPage(1);setDesc((d) => !d);}}>
+                    <th className="cursor-pointer select-none py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => {setPage(1);setDesc((d) => !d);}}>
                       Date {desc ? "↓" : "↑"}
                     </th>
-                    <th className="w-64 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description</th>
-                    <th className="w-36 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Ref</th>
-                    <th className="w-40 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Debit</th>
-                    <th className="w-40 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Credit</th>
-                    <th className="w-44 py-2.5 pr-6 text-center text-xs font-semibold uppercase tracking-wide text-steel">Balance</th>
-                    <th className="w-28 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Status</th>
-                    <th className="w-12 py-2.5"></th>
+                    <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description</th>
+                    <th className="py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Ref</th>
+                    <th className="py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Debit</th>
+                    <th className="py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Credit</th>
+                    <th className="py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Balance</th>
+                    <th className="py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Status</th>
+                    <th className="py-2.5 px-1"></th>
                   </tr>
                 </thead>
                 <tbody
@@ -735,24 +794,27 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                 >
                   {entriesWithBalance.map((e, i) => (
                     <tr key={`${e.id}-${i}`} className={`border-b border-sand/50 ${i % 2 === 1 ? "bg-ivory/30" : ""}`}>
-                      <td className="whitespace-nowrap py-2.5 pl-8 pr-8 tabular-nums text-steel">{formatDate(e.date)}</td>
-                      <td className="py-2"><DescriptionCell entry={e} /></td>
-                      <td className="py-2 text-center text-xs tabular-nums text-steel">
+                      <td className="whitespace-nowrap py-2.5 px-3 text-center tabular-nums text-steel">
+                        <div>{formatDate(e.date)}</div>
+                        {e.time && <span className="block text-[11px] text-steel/80">{e.time}</span>}
+                      </td>
+                      <td className="py-2 px-3"><DescriptionCell entry={e} /></td>
+                      <td className="py-2 px-3 text-center text-xs tabular-nums text-steel">
                         <RefCell entry={e} ctx={refCellContext} />
                       </td>
-                      <td className="py-2.5 pr-4 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{e.debit > 0 ? money(e.debit) : ""}</td>
-                      <td className="py-2.5 pr-4 text-right tabular-nums text-success" data-cell tabIndex={-1}>{e.credit > 0 ? money(e.credit) : ""}</td>
-                      <td className={`py-2.5 pr-6 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`} data-cell tabIndex={-1}>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{e.debit > 0 ? money(e.debit) : ""}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-success" data-cell tabIndex={-1}>{e.credit > 0 ? money(e.credit) : ""}</td>
+                      <td className={`py-2.5 px-3 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`} data-cell tabIndex={-1}>
                         {money(e.balance)}
                       </td>
-                      <td className="py-2 text-center">
+                      <td className="py-2 px-3 text-center">
                         {e.documentStatus === "cancelled" ? (
                           <span className="rounded border border-steel/30 bg-ivory px-1.5 py-0.5 text-[10px] font-medium text-steel">Cancelled</span>
                         ) : (
                           <SettlementCell entry={e} />
                         )}
                       </td>
-                      <td className="py-2 pr-2 text-center">
+                      <td className="py-2 px-1 text-center">
                         <button
                           type="button"
                           title="Delete this entry"
@@ -768,10 +830,10 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-sand bg-ivory/50 font-semibold">
-                    <td colSpan={3} className="py-2 pl-4 text-xs uppercase tracking-wide text-steel">Totals</td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{money(summary.totalDebit)}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums text-success" data-cell tabIndex={-1}>{money(summary.totalCredit)}</td>
-                    <td className={`py-2 pr-4 text-right tabular-nums ${summary.closing > 0 ? "text-error" : summary.closing < 0 ? "text-success" : "text-ink"}`}>
+                    <td colSpan={3} className="py-2 px-3 text-xs uppercase tracking-wide text-steel">Totals</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{money(summary.totalDebit)}</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-success" data-cell tabIndex={-1}>{money(summary.totalCredit)}</td>
+                    <td className={`py-2 px-3 text-right tabular-nums ${summary.closing > 0 ? "text-error" : summary.closing < 0 ? "text-success" : "text-ink"}`}>
                       {money(summary.closing)}
                     </td>
                     <td colSpan={2}></td>
@@ -884,7 +946,9 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               cashAccountOptions={formOptions ? formOptions.payment.cashAccountOptions : []}
               chequeOptions={editingPayment.cheques}
               onDone={() => {
+                const id = editingPayment.id;
                 closePaymentEdit();
+                warmPayment.current.delete(id);
                 void reload();
                 setHistory(null);
               }}
@@ -912,7 +976,32 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               conversionOptions={formOptions ? formOptions.purchase.conversionOptions : []}
               taxSettings={formOptions ? formOptions.purchase.taxSettings : {}}
               onDone={() => {
+                const id = editingPurchase.id;
                 closePurchaseEdit();
+                warmPurchase.current.delete(id);
+                void reload();
+                setHistory(null);
+              }}
+            />
+          </div>
+        </Dialog>
+      )}
+
+      {editingSale && (
+        <Dialog title="Edit Sale" onClose={closeSaleEdit} size="xwide">
+          <div className="flex flex-col gap-3">
+            <Link href={`/sales/invoices/${editingSale.id}`} target="_blank" className="w-fit text-sm font-medium text-navy-800 hover:underline">
+              Printable invoice ↗
+            </Link>
+            <SaleFormPage
+              saleId={editingSale.id}
+              defaults={editingSale.detail}
+              {...editingSale.options}
+              chequeOptions={editingSale.options.chequeOptions}
+              onDone={() => {
+                const id = editingSale.id;
+                closeSaleEdit();
+                warmSale.current.delete(id);
                 void reload();
                 setHistory(null);
               }}
@@ -1174,7 +1263,7 @@ export function PartyLedgerPrintDocument({
         </dl>
       </div>
 
-      <table className="mt-6 w-full border-collapse text-sm">
+      <table className="mt-6 w-full table-fixed border-collapse text-sm">
         <thead>
           <tr className="border-y-2 border-navy-800">
             <th className="w-28 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel">Date</th>
@@ -1188,7 +1277,10 @@ export function PartyLedgerPrintDocument({
         <tbody>
           {entries.map((e, i) => (
             <tr key={`${e.id}-${i}`} className={`border-b border-sand ${i % 2 === 1 ? "bg-zinc-50" : ""}`}>
-              <td className="py-1.5 tabular-nums text-steel whitespace-nowrap">{formatDate(e.date)}</td>
+              <td className="py-1.5 tabular-nums text-steel whitespace-nowrap">
+                <div>{formatDate(e.date)}</div>
+                {e.time && <div className="text-[10px] text-steel/80">{e.time}</div>}
+              </td>
               <td className="py-1.5 pr-4">
                 <span>{TYPE_LABELS[e.type]}</span>
                 {e.lineItems && e.lineItems.length > 0 && (

@@ -292,20 +292,36 @@ export function InvoiceManager({
       const items = itemsBySaleId?.get(id);
       if (!items || items.length === 0) return String(row.customer ?? "—");
       return (
-        <DetailHover trigger={<span className="border-b border-dotted border-steel">{String(row.customer ?? "—")}</span>} width={380}>
-          <div className="flex flex-col">
-            <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b-2 border-sand pb-1 text-[10px] font-semibold uppercase tracking-wide text-steel">
-              <span>Item</span>
-              <span className="text-right">Qty</span>
-              <span className="text-right">Rate</span>
-            </div>
-            {items.map((it, i) => (
-              <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b border-sand/50 py-1.5 last:border-0">
-                <span className="truncate pr-2 text-sm text-ink">{it.name}</span>
-                <span className="w-16 text-right text-sm tabular-nums text-ink">{it.qty}</span>
-                <span className="w-24 text-right text-sm tabular-nums font-medium text-ink">{it.rate}</span>
-              </div>
-            ))}
+        <DetailHover
+          trigger={<span className="border-b border-dotted border-steel">{String(row.customer ?? "—")}</span>}
+          width={600}
+          extraHeight={Math.min(260, 40 + items.length * 36)}
+        >
+          <div className="scroll-thin min-h-0 max-h-56 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+            <table className="w-full table-auto border-collapse text-sm">
+              <thead className="sticky top-0 bg-white">
+                <tr className="border-b-2 border-sand">
+                  <th className="py-1.5 pr-4 text-left text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Item</th>
+                  <th className="py-1.5 px-3 text-right text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Qty</th>
+                  <th className="py-1.5 pl-3 text-right text-[10px] font-semibold uppercase tracking-wide text-steel whitespace-nowrap">Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i} className="border-b border-sand/50 last:border-0 whitespace-nowrap">
+                    <td className="py-1.5 pr-4 text-ink whitespace-nowrap" title={it.name}>
+                      {it.name}
+                    </td>
+                    <td className="py-1.5 px-3 text-right tabular-nums text-ink whitespace-nowrap">
+                      {it.qty}
+                    </td>
+                    <td className="py-1.5 pl-3 text-right tabular-nums font-medium text-ink whitespace-nowrap">
+                      {it.rate}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </DetailHover>
       );
@@ -358,7 +374,21 @@ export function InvoiceManager({
             </label>
             <p className="text-sm text-steel">Returned quantities restore stock at the recorded sale cost and create a customer credit. A refund can then be recorded as a normal payment out.</p>
             <div className="overflow-x-auto rounded border border-sand">
-              <table className="w-full text-sm"><thead className="bg-ivory text-left text-steel"><tr><th className="p-2">Item</th><th className="p-2 text-right">Sold</th><th className="p-2 text-right">Already returned</th><th className="p-2 text-right">Return now</th></tr></thead>
+              <table className="w-full min-w-[32rem] table-fixed text-sm">
+                <colgroup>
+                  <col className="w-56" style={{ width: "14rem" }} />
+                  <col className="w-24" style={{ width: "6rem" }} />
+                  <col className="w-32" style={{ width: "8rem" }} />
+                  <col className="w-32" style={{ width: "8rem" }} />
+                </colgroup>
+                <thead className="bg-ivory text-left text-steel">
+                  <tr>
+                    <th className="p-2">Item</th>
+                    <th className="p-2 text-right">Sold</th>
+                    <th className="p-2 text-right">Already returned</th>
+                    <th className="p-2 text-right">Return now</th>
+                  </tr>
+                </thead>
                 <tbody>{returning.lines.map((line) => <tr key={line.sourceLineId} className="border-t border-sand"><td className="p-2 text-ink">{line.itemName ?? "Uncatalogued line"}{line.unitSymbol ? ` · ${line.unitSymbol}` : ""}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 text-right tabular-nums">{line.returnedQuantity}</td><td className="p-2 text-right"><input type="number" min="0" max={line.availableQuantity} step="0.001" value={returnQuantities[line.sourceLineId] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [line.sourceLineId]: event.target.value }))} className="w-24 rounded border border-sand px-2 py-1 text-right" aria-label={`Return quantity for ${line.itemName ?? "line"}`} /></td></tr>)}</tbody>
               </table>
             </div>

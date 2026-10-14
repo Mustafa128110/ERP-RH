@@ -38,7 +38,8 @@ export function DetailHover({
   lines,
   footer,
   children,
-  width = 272,
+  panelClassName,
+  width = 560,
   extraHeight = 0,
   placement = "bottom",
   // A long list is truncated rather than scrolled: the panel is
@@ -55,6 +56,7 @@ export function DetailHover({
   lines?: { text: string; note?: string; value?: ReactNode }[];
   footer?: string;
   children?: ReactNode;
+  panelClassName?: string;
   width?: number;
   extraHeight?: number;
   placement?: "bottom" | "right";
@@ -71,7 +73,7 @@ export function DetailHover({
   return (
     <HoverCard
       triggerClassName="underline decoration-dotted decoration-zinc-400 underline-offset-4"
-      panelClassName="w-max"
+      panelClassName={`w-max ${panelClassName ?? ""}`}
       panelWidth={width}
       estimatedHeight={estimatedHeight}
       placement={placement}

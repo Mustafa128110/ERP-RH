@@ -9,6 +9,7 @@ import { requireGlobalPermission } from "@/lib/auth/permissions";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
+import { toTitleCase } from "@/lib/format";
 
 const locationTypes = locationTypeEnum.enumValues;
 
@@ -20,7 +21,7 @@ export async function listLocations() {
 
 function readLocationForm(formData: FormData) {
   return {
-    name: String(formData.get("name") ?? "").trim(),
+    name: toTitleCase(String(formData.get("name") ?? "")),
     code: String(formData.get("code") ?? "").trim() || null,
     locationType: String(formData.get("locationType") ?? "") as (typeof locationTypes)[number],
   };
@@ -40,7 +41,10 @@ export async function createLocationsBatch(rows: LocationBatchRow[]): Promise<Cr
     const valid = rows.filter((r) => r.name.trim() && locationTypes.includes(r.locationType));
     if (valid.length === 0) return { error: "Add at least one location with a name and type." };
 
-    const created = await db.insert(locations).values(valid).returning({ id: locations.id, name: locations.name });
+    const created = await db
+      .insert(locations)
+      .values(valid.map((r) => ({ ...r, name: toTitleCase(r.name) })))
+      .returning({ id: locations.id, name: locations.name });
     await invalidateLookups(CACHE.locations);
     // Stock on hand is reported per location, by name.
     await invalidateReads(READ_DOMAIN.stock);

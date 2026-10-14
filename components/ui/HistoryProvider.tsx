@@ -34,10 +34,8 @@ export function HistoryControls({sortOptions=[]}:{sortOptions?:{key:string;label
  return <div className="flex flex-wrap items-center gap-3 print:hidden"><input type="search" aria-label="Search full history" value={query} placeholder="Search full history…" onChange={event=>{setQuery(event.target.value);history.change({q:event.target.value,page:1},true);}} className="rounded border border-sand p-2 text-sm"/>{sortOptions.length>0&&<><select aria-label="Sort history by" value={history.info.sort} onChange={event=>history.change({sort:event.target.value,page:1})} className="rounded border border-sand p-2 text-sm"><option value="">Default order</option>{sortOptions.map(option=><option key={option.key} value={option.key}>{option.label}</option>)}</select><button type="button" onClick={()=>history.change({order:history.info.direction==='asc'?'desc':'asc',page:1})}>{history.info.direction==='asc'?'Ascending':'Descending'}</button></>}<HistoryPager history={history}/></div>;
 }
 export function HistoryPager({history}:{history:Context}){
- const {info,pending,change}=history;
+ const {info,pending}=history;
  return <div className="flex flex-wrap items-center gap-3 text-sm text-steel print:hidden" aria-busy={pending}>
-  <span>{pending?"Loading…":info.recordTotal!==undefined&&info.recordTotal!==info.total?`${info.recordTotal.toLocaleString()} matching records in ${info.total.toLocaleString()} groups`:`${info.total.toLocaleString()} matching records`}{!info.all&&` · Page ${info.page} of ${Math.max(1,Math.ceil(info.total/info.pageSize))}`}</span>
-  {!info.all&&<><button type="button" disabled={pending||info.page<=1} onClick={()=>change({page:info.page-1})}>Previous</button><button type="button" disabled={pending||info.page*info.pageSize>=info.total} onClick={()=>change({page:info.page+1})}>Next</button></>}
-  <button type="button" disabled={pending} onClick={()=>change({all:info.all?null:"1",page:1})}>{info.all?"Use pages":"Load all matches for print or export"}</button>
+  <span>{pending?"Loading…":info.recordTotal!==undefined&&info.recordTotal!==info.total?`${info.recordTotal.toLocaleString()} matching records in ${info.total.toLocaleString()} groups`:`${info.total.toLocaleString()} matching records`}</span>
  </div>;
 }

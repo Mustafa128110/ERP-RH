@@ -56,12 +56,12 @@ import {
   hasRecordedPurchaseSettlement,
   purchasePaidMode,
   purchaseSettlementAmount,
-  remainingPurchasePayable,
   requestedPurchaseSettlement,
   type PurchasePaidMode,
 } from "@/lib/purchase-edit-rules";
 import { formatDate, landedUnitCost, perUnitShare, resolveAdjustment, round1, toISODate } from "@/lib/format";
 import { bankAccountLabel } from "@/lib/account-label";
+import { isCounterContact } from "@/lib/contact-scope";
 import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { financialDocumentError, itemBearingLines } from "@/lib/financial-input";
 import { resolveBaseQuantities, MissingUnitConversionError } from "@/lib/queries/unit-conversion";
@@ -626,9 +626,19 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
       //
       // Either way the credit/settlement is the goods portion only: the
       // shipping has already left the building, as the expense below.
-      const remainingPayable = remainingPurchasePayable(grandTotal, shippingAmount, purchasePaidAmount);
-      if (documentType.affectsPayable && remainingPayable > 0) {
-        await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(remainingPayable) });
+      let isCounter = isCounterContact(contactName);
+      if (!isCounter && resolvedContactId) {
+        const [c] = await tx.select({ displayName: contacts.displayName }).from(contacts).where(eq(contacts.id, resolvedContactId)).limit(1);
+        if (isCounterContact(c?.displayName)) isCounter = true;
+      }
+      if (!isCounter && documentType.affectsPayable) {
+        const goodsAmount = Math.max(0, Number(grandTotal) - Number(shippingAmount));
+        if (goodsAmount > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, credit: String(goodsAmount) });
+        }
+        if (purchasePaidAmount > 0) {
+          await tx.insert(ledgerEntries).values({ companyId, documentId: doc.id, debit: String(purchasePaidAmount) });
+        }
       }
       if (hasPurchasePayment) {
         if (chequeId) {
@@ -1010,9 +1020,19 @@ export async function updateStockPurchase(
     // Freight is never in this ledger row, and later PAYMENT_MADE documents keep
     // their own debit rows and allocations.
     await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-    const remainingPayable = remainingPurchasePayable(grandTotal, shippingAmount, purchasePaidAmount);
-    if (remainingPayable > 0 && documentType?.affectsPayable) {
-      await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(remainingPayable) });
+    let isCounter = isCounterContact(contactName);
+    if (!isCounter && resolvedContactId) {
+      const [c] = await tx.select({ displayName: contacts.displayName }).from(contacts).where(eq(contacts.id, resolvedContactId)).limit(1);
+      if (isCounterContact(c?.displayName)) isCounter = true;
+    }
+    if (!isCounter && documentType?.affectsPayable) {
+      const goodsAmount = Math.max(0, Number(grandTotal) - Number(shippingAmount));
+      if (goodsAmount > 0) {
+        await tx.insert(ledgerEntries).values({ companyId, documentId, credit: String(goodsAmount) });
+      }
+      if (purchasePaidAmount > 0) {
+        await tx.insert(ledgerEntries).values({ companyId, documentId, debit: String(purchasePaidAmount) });
+      }
     }
 
     // Re-write the freight expense for the current shipping figure — the old

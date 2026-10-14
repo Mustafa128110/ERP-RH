@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatDate, landedUnitCost, money, perUnitShare, qty, resolveAdjustment, round1, toISODate } from "./format";
+import { formatDate, landedUnitCost, money, perUnitShare, qty, resolveAdjustment, round1, toISODate, toTitleCase } from "./format";
 
 // The formatting rules the whole app now reads money, quantities and dates
 // through. No database needed:
@@ -88,5 +88,15 @@ assert.equal(resolveAdjustment("abc", 10000), 0, "nonsense is nothing, not NaN")
 assert.equal(resolveAdjustment("%", 10000), 0);
 // Percentages resolve to a real amount, so they round like every other one.
 assert.equal(resolveAdjustment("7.5%", 999), 74.9);
+
+// --- Title Case for typed names ---------------------------------------------
+assert.equal(toTitleCase("steel shovel heavy"), "Steel Shovel Heavy");
+assert.equal(toTitleCase("STEEL SHOVEL HEAVY"), "Steel Shovel Heavy");
+assert.equal(toTitleCase("  steel   shovel  "), "Steel Shovel");
+assert.equal(toTitleCase("shovel-wooden handle"), "Shovel-Wooden Handle");
+assert.equal(toTitleCase("10mm bolt"), "10mm Bolt");
+assert.equal(toTitleCase(""), "");
+assert.equal(toTitleCase(null), "");
+assert.equal(toTitleCase(undefined), "");
 
 console.log("format checks passed");

@@ -10,6 +10,7 @@ import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/qu
 import { guard, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { directUnitMergeError } from "@/lib/unit-merge";
+import { toTitleCase } from "@/lib/format";
 
 // A unit symbol is printed on every sale line, purchase line and stock row, and
 // on-hand is totalled per unit — so renaming "Bag" is visible on three screens.
@@ -30,7 +31,7 @@ export async function getUnit(unitId: string) {
 
 function readUnitForm(formData: FormData) {
   return {
-    name: String(formData.get("name") ?? "").trim(),
+    name: toTitleCase(String(formData.get("name") ?? "")),
     symbol: String(formData.get("symbol") ?? "").trim() || null,
   };
 }
@@ -52,7 +53,7 @@ export async function createUnitsBatch(rows: UnitBatchRow[]): Promise<CreateResu
 
     const created = await db
       .insert(units)
-      .values(valid.map((r) => ({ name: r.name.trim(), symbol: r.symbol.trim() || null })))
+      .values(valid.map((r) => ({ name: toTitleCase(r.name), symbol: r.symbol.trim() || null })))
       .returning({ id: units.id, name: units.name, symbol: units.symbol });
     await invalidateLookups(CACHE.units);
     await invalidateReads(...READS);

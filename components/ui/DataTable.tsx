@@ -11,13 +11,44 @@ import { Icon } from "./Icon";
 import { iconButtonClass } from "./form-styles";
 import { matchesTableSearch, parseTableSearch } from "@/lib/search-query";
 import { compareTableValues, tableColumnSortKey } from "@/lib/table-sort";
-import { HistoryPager, useHistory } from "./HistoryProvider";
+import { useHistory } from "./HistoryProvider";
 
 // Every list gets a row number in front, so a row can be pointed at out loud
 // ("line 14") without reading its contents back. It's synthesised rather than a
 // real column — the count is the row's position on screen, not data anyone stores.
 const SNO_KEY = "__sno";
 const snoColumn: ColumnDef = { key: SNO_KEY, label: "#", align: "right" };
+const SELECT_COL_WIDTH = 44;
+
+function getColWidth(col: ColumnDef): number {
+  if (typeof col.width === "number") return col.width;
+  if (typeof col.width === "string") {
+    const parsed = parseInt(col.width, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  const key = col.key.toLowerCase();
+  if (key === SNO_KEY) return 56;
+  if (["pdf", "png", "download"].includes(key)) return 64;
+  if (key === "return") return 80;
+  if (["statement", "action", "actions"].includes(key)) return 96;
+  if (col.badge || ["status", "display_status", "state"].includes(key)) return 100;
+  if (["isdefault", "default"].includes(key)) return 80;
+  if (key === "age") return 70;
+  if (["date", "documentdate", "duedate", "validuntil", "timestamp", "createdat"].includes(key)) return 120;
+  if (["qty", "quantity"].includes(key)) return 90;
+  if (["rate", "unitprice", "unitcost", "cost", "price", "retailprice"].includes(key)) return 110;
+  if (["total", "paid", "balance", "grandtotal", "paidamount", "amount", "debit", "credit", "linetotal", "stock", "creditbalance", "debtbalance"].includes(key)) return 130;
+  if (col.align === "right") return 120;
+  if (["sku", "code", "number", "ref", "salenumber", "chequenumber", "ordernumber"].includes(key)) return 130;
+  if (["saletype", "type", "kind", "method"].includes(key)) return 130;
+  if (["unit", "symbol"].includes(key)) return 90;
+  if (["phone"].includes(key)) return 130;
+  if (["company", "sellingcompany", "buyingcompany", "category", "brand", "location", "fromlocation", "tolocation", "account", "fromaccount", "toaccount", "bankname", "bank", "username", "user", "role"].includes(key)) return 140;
+  if (["accountnumber", "iban"].includes(key)) return 180;
+  if (["customer", "supplier", "party", "contact", "name", "displayname"].includes(key)) return 220;
+  if (["item", "itemname", "description", "summary", "notes", "reason", "lines", "address"].includes(key)) return 240;
+  return 150;
+}
 
 // Keys that exist to drive rendering rather than to be read — searching them
 // would match "true" against a typed "tru".
@@ -483,12 +514,11 @@ export function DataTable({
   }
 
   const allColumns = [snoColumn, ...columns];
+  const totalTableWidth = (selectable ? SELECT_COL_WIDTH : 0) + allColumns.reduce((sum, col) => sum + getColWidth(col), 0);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {search}
-      {remote && <HistoryPager history={remote} />}
-      {remote && !remote.info.all && remote.info.total > rows.length && <p className="hidden print:block">This printout contains page {remote.info.page} only. Load all matching records to print the full list.</p>}
       {visible.length > 150 && <div className="flex shrink-0 items-center justify-between text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
       {/* tabIndex makes the list itself focusable, which is what gives the arrow
           keys somewhere to arrive. Clicking any row focuses it as a side effect. */}
@@ -506,11 +536,26 @@ export function DataTable({
             Nothing matches “{query.trim()}”. Press Esc to clear the search.
           </p>
         ) : (
-          <table data-responsive aria-rowcount={visible.length + 1} className="w-full border-collapse text-sm md:min-w-max">
+          <table
+            data-responsive
+            aria-rowcount={visible.length + 1}
+            className="w-full table-fixed border-collapse text-sm md:min-w-max"
+            style={{ minWidth: `${totalTableWidth}px`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
+          >
+            <colgroup>
+              {selectable && <col style={{ width: `${SELECT_COL_WIDTH}px` }} className="w-11" />}
+              {allColumns.map((col) => (
+                <col
+                  key={col.key}
+                  style={{ width: `${getColWidth(col)}px` }}
+                  className={col.hideOnMobile ? "hidden md:table-column" : ""}
+                />
+              ))}
+            </colgroup>
             <thead>
               <tr className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
                 {selectable && (
-                  <th className="w-10 px-4 py-2.5">
+                  <th className="w-11 px-4 py-2.5" style={{ width: `${SELECT_COL_WIDTH}px` }}>
                     <input
                       type="checkbox"
                       aria-label={allSelected ? "Clear selection" : remote && !remote.info.all ? "Select rows on this page" : "Select all rows"}
@@ -526,15 +571,16 @@ export function DataTable({
                   const isActive = sortKey === columnSortKey;
                   return (
                     <th
+                      style={{ width: `${getColWidth(col)}px` }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
-                      className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
+                      className={`truncate whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
                         col.align === "right" ? "text-right" : "text-left"
                       }${col.hideOnMobile ? " hidden md:table-cell" : ""}${
                         sortable ? " cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200" : ""
                       }`}
                     >
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex max-w-full items-center gap-1 truncate">
                         {col.label}
                         {isActive && (
                           <Icon
@@ -575,7 +621,7 @@ export function DataTable({
                   </>
                 );
                 const cellClass = (col: ColumnDef) =>
-                  `whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                  `truncate whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
                     col.align === "right" ? "text-right tabular-nums" : "text-left"
                   }${col.hideOnMobile ? " hidden md:table-cell" : ""}`;
 
@@ -607,7 +653,7 @@ export function DataTable({
                     }`}
                   >
                     {selectable && (
-                      <td data-label="Select" className="px-4 py-2.5">
+                      <td data-label="Select" className="w-11 px-4 py-2.5" style={{ width: `${SELECT_COL_WIDTH}px` }}>
                         <input
                           type="checkbox"
                           aria-label={`Select ${String(row[columns[0]?.key ?? idKey] ?? "row")}`}
@@ -619,7 +665,7 @@ export function DataTable({
                     )}
                     {href
                       ? allColumns.map((col) => (
-                          <td key={col.key} data-label={col.label} className={`p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}>
+                          <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px` }} className={`p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}>
                             <Link href={href} className={`block ${cellClass(col)}`}>
                               {body(col)}
                             </Link>
@@ -630,6 +676,7 @@ export function DataTable({
                             <td
                               key={col.key}
                               data-label={col.label}
+                              style={{ width: `${getColWidth(col)}px` }}
                               className={`${col.label ? "cursor-pointer " : ""}p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}
                               onMouseDown={col.label ? undefined : (event) => event.stopPropagation()}
                               onClick={col.label ? () => onRowClick(row) : (event) => event.stopPropagation()}
@@ -638,7 +685,7 @@ export function DataTable({
                             </td>
                           ))
                         : allColumns.map((col) => (
-                            <td key={col.key} data-label={col.label} className={cellClass(col)}>
+                            <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px` }} className={cellClass(col)}>
                               {body(col)}
                             </td>
                           ))}

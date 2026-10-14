@@ -92,13 +92,13 @@ const buildColumns = (): ColumnDef[] => [
           width={300}
           heading="Methods"
         >
-          <table className="w-full text-sm">
+          <table className="w-full table-auto border-collapse text-sm">
             <tbody>
               {methods.map((m, i) => (
-                <tr key={i} className="border-b border-sand/50 last:border-0">
-                  <td className="py-1.5 pr-4 text-ink">{m.method}</td>
-                  <td className="whitespace-nowrap py-1.5 pr-4 text-steel">{m.number}</td>
-                  <td className="py-1.5 text-right tabular-nums text-ink">{m.amount}</td>
+                <tr key={i} className="border-b border-sand/50 last:border-0 whitespace-nowrap">
+                  <td className="py-1.5 pr-3 text-ink whitespace-nowrap">{m.method}</td>
+                  <td className="whitespace-nowrap py-1.5 px-3 text-steel">{m.number}</td>
+                  <td className="py-1.5 pl-3 text-right tabular-nums text-ink whitespace-nowrap">{m.amount}</td>
                 </tr>
               ))}
             </tbody>

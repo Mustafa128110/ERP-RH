@@ -359,6 +359,25 @@ export function ProductsBatchEditDialog({
   // unit has its own column, so this is the number alone.
   const onHand = (row: EditRow) => (known(row)?.stock ?? []).reduce((sum, s) => sum + s.onHand, 0);
 
+  const PRODUCT_EDIT_HEADER_WIDTHS: Record<string, string> = {
+    Company: "w-40",
+    "Item Name": "w-64",
+    SKU: "w-32",
+    "Urdu Name": "w-40",
+    Category: "w-36",
+    Brand: "w-36",
+    Tax: "w-32",
+    Active: "w-20",
+    "Base Stock Unit": "w-36",
+    "In Stock": "w-28",
+    "Sales Rate": "w-32",
+    Supplier: "w-44",
+    "Qty Received": "w-32",
+    "Purchase Rate": "w-32",
+    "Stock Level Should Be": "w-44",
+    Currently: "w-28",
+  };
+
   const headers = [
     "Company",
     "Item Name",
@@ -500,7 +519,7 @@ export function ProductsBatchEditDialog({
           </fieldset>
 
           <div className="scroll-thin overflow-auto rounded border border-sand">
-            <table className="w-full min-w-max border-collapse text-sm">
+            <table className="w-full min-w-max table-fixed border-collapse text-sm">
               <thead>
                 <tr className="sticky top-0 z-10 bg-ivory">
                   <th className="w-10 border border-sand px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-steel">
@@ -509,7 +528,7 @@ export function ProductsBatchEditDialog({
                   {headers.map((h) => (
                     <th
                       key={h}
-                      className="whitespace-nowrap border border-sand px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel"
+                      className={`whitespace-nowrap border border-sand px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel ${PRODUCT_EDIT_HEADER_WIDTHS[h] ?? "w-36"}`}
                     >
                       {h}
                     </th>

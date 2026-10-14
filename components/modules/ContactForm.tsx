@@ -240,6 +240,19 @@ const EDIT_HEADERS = [
   "Active",
 ];
 
+const EDIT_HEADER_WIDTHS: Record<string, string> = {
+  Name: "w-52",
+  Scope: "w-44",
+  "Company Name": "w-48",
+  Phone: "w-36",
+  Email: "w-48",
+  Address: "w-56",
+  City: "w-36",
+  "Tax Number": "w-36",
+  "Credit Limit": "w-32",
+  Active: "w-20",
+};
+
 // An empty cell in a row someone opened to complete is the thing they came for,
 // so it says so rather than looking the same as a field that's deliberately blank.
 const missingCell = (value: string | null) => `${batchCellClass} ${(value ?? "").trim() === "" ? "bg-brass-100" : ""}`;
@@ -346,13 +359,13 @@ export function ContactsBatchEditDialog({
         <p className="text-sm text-steel">Loading…</p>
       ) : (
         <div className="scroll-thin overflow-auto rounded border border-sand">
-          <table className="w-full min-w-max border-collapse text-sm">
+          <table className="w-full min-w-max table-fixed border-collapse text-sm">
             <thead>
               <tr className="sticky top-0 z-10 bg-ivory">
                 {EDIT_HEADERS.map((h) => (
                   <th
                     key={h}
-                    className="whitespace-nowrap border border-sand px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel"
+                    className={`whitespace-nowrap border border-sand px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-steel ${EDIT_HEADER_WIDTHS[h] ?? "w-36"}`}
                   >
                     {h}
                   </th>

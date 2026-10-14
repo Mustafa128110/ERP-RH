@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 // Portals to <body> with fixed positioning computed from the trigger's own rect —
@@ -19,7 +19,7 @@ export function HoverCard({
   triggerClassName,
   panelClassName,
   estimatedHeight = 160,
-  panelWidth = 260,
+  panelWidth = 560,
   placement = "bottom",
   children,
 }: {
@@ -34,7 +34,7 @@ export function HoverCard({
   placement?: "bottom" | "right";
   children: React.ReactNode;
 }) {
-  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number; maxWidth: number } | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,30 +59,95 @@ export function HoverCard({
 
   function show() {
     cancelClose();
-    const rect = ref.current?.getBoundingClientRect();
-    if (!rect) return;
+    const triggerEl = ref.current;
+    if (!triggerEl) return;
+    const rect = triggerEl.getBoundingClientRect();
 
+    // Boundary container: if inside a modal dialog or marked boundary, stay inside it
+    const container = triggerEl.closest<HTMLElement>('[role="dialog"], [data-hover-container]');
+    const containerRect = container?.getBoundingClientRect();
+
+    const minLeft = containerRect ? Math.max(EDGE, containerRect.left + EDGE) : EDGE;
+    const maxRight = containerRect ? Math.min(window.innerWidth - EDGE, containerRect.right - EDGE) : window.innerWidth - EDGE;
+    const minTop = containerRect ? Math.max(EDGE, containerRect.top + EDGE) : EDGE;
+    const maxBottom = containerRect ? Math.min(window.innerHeight - EDGE, containerRect.bottom - EDGE) : window.innerHeight - EDGE;
+
+    const availableWidth = Math.max(60, maxRight - minLeft);
+    const maxPanelWidth = Math.min(panelWidth, availableWidth);
+
+    let left: number;
     if (placement === "right") {
-      const flipLeft = rect.right + GAP + panelWidth + EDGE > window.innerWidth;
-      setPos({
-        left: flipLeft ? Math.max(EDGE, rect.left - GAP - panelWidth) : rect.right + GAP,
-        top: Math.max(EDGE, Math.min(rect.top + rect.height / 2 - estimatedHeight / 2, window.innerHeight - estimatedHeight - EDGE)),
-        maxHeight: window.innerHeight - 2 * EDGE,
-      });
-      return;
+      const fitsRight = rect.right + GAP + maxPanelWidth <= maxRight;
+      left = fitsRight ? rect.right + GAP : Math.max(minLeft, rect.left - GAP - maxPanelWidth);
+    } else {
+      if (rect.left + maxPanelWidth <= maxRight) {
+        left = Math.max(minLeft, rect.left);
+      } else {
+        left = Math.max(minLeft, Math.min(rect.right - maxPanelWidth, maxRight - maxPanelWidth));
+      }
     }
 
-    const spaceBelow = window.innerHeight - rect.bottom - GAP - EDGE;
-    const spaceAbove = rect.top - GAP - EDGE;
+    const spaceBelow = maxBottom - rect.bottom - GAP;
+    const spaceAbove = rect.top - minTop - GAP;
     const flipUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(60, flipUp ? spaceAbove : spaceBelow);
 
     setPos({
-      left: Math.max(EDGE, Math.min(rect.left, window.innerWidth - panelWidth - EDGE)),
+      left,
       top: flipUp ? undefined : rect.bottom + GAP,
       bottom: flipUp ? window.innerHeight - rect.top + GAP : undefined,
-      maxHeight: Math.max(flipUp ? spaceAbove : spaceBelow, 80),
+      maxHeight: availableHeight,
+      maxWidth: maxPanelWidth,
     });
   }
+
+  // Prevent wheel scrolling on the hover panel from propagating or chaining to the background.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || !pos) return;
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const scrollable = panel?.querySelector<HTMLElement>(".overflow-y-auto, .overflow-auto, [data-scrollable]");
+      if (!scrollable) return;
+
+      if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+        scrollable.scrollTop += e.deltaY;
+      } else {
+        scrollable.scrollLeft += e.deltaX;
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      e.stopPropagation();
+    }
+
+    panel.addEventListener("wheel", onWheel, { passive: false });
+    panel.addEventListener("touchmove", onTouchMove, { passive: true });
+    return () => {
+      panel.removeEventListener("wheel", onWheel);
+      panel.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [pos]);
+
+  // Close panel if the window or containing scroll container scrolls (outside the hover panel itself)
+  useEffect(() => {
+    if (!pos) return;
+    function onScrollOrResize(e: Event) {
+      if (panelRef.current && (panelRef.current === e.target || panelRef.current.contains(e.target as Node))) {
+        return;
+      }
+      setPos(null);
+    }
+    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+    };
+  }, [pos]);
 
   return (
     // Focus shows it too: on the collapsed sidebar the icon is the only thing
@@ -103,8 +168,15 @@ export function HoverCard({
             role="tooltip"
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
-            style={{ left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
-            className={`fixed z-50 overflow-hidden rounded-lg border border-sand bg-white p-3 text-sm text-ink shadow-xl ${panelClassName ?? ""}`}
+            style={{
+              left: pos.left,
+              top: pos.top,
+              bottom: pos.bottom,
+              maxHeight: pos.maxHeight,
+              maxWidth: pos.maxWidth,
+              boxSizing: "border-box",
+            }}
+            className={`fixed z-[60] flex flex-col overscroll-contain overflow-hidden rounded-lg border border-sand bg-white p-3 text-sm text-ink shadow-xl ${panelClassName ?? ""}`}
           >
             {children}
           </div>,

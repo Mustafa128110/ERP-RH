@@ -96,16 +96,25 @@ function MarketPurchaseManagerBody({
       <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) on this page waiting for confirmation`} />
       <HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/>
       <div className="overflow-x-auto rounded border border-sand bg-white">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full min-w-[64rem] table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-10" style={{ width: "2.5rem" }} />
+            <col className="w-32" style={{ width: "8rem" }} />
+            <col className="w-56" style={{ width: "14rem" }} />
+            <col className="w-64" style={{ width: "16rem" }} />
+            <col className="w-32" style={{ width: "8rem" }} />
+            <col className="w-40" style={{ width: "10rem" }} />
+            <col className="w-36" style={{ width: "9rem" }} />
+          </colgroup>
           <thead className="bg-ivory text-left text-xs uppercase tracking-wide text-steel">
             <tr>
-              <th className="border-b border-sand p-2" />
-              <th className="border-b border-sand p-2">Sale</th>
-              <th className="border-b border-sand p-2">Company / Customer</th>
-              <th className="border-b border-sand p-2">Item</th>
-              <th className="border-b border-sand p-2 text-right">Quantity</th>
-              <th className="border-b border-sand p-2 text-right">Market Unit Cost</th>
-              <th className="border-b border-sand p-2 text-right">Cost</th>
+              <th className="w-10 border-b border-sand p-2" />
+              <th className="w-32 border-b border-sand p-2">Sale</th>
+              <th className="w-56 border-b border-sand p-2">Company / Customer</th>
+              <th className="w-64 border-b border-sand p-2">Item</th>
+              <th className="w-32 border-b border-sand p-2 text-right">Quantity</th>
+              <th className="w-40 border-b border-sand p-2 text-right">Market Unit Cost</th>
+              <th className="w-36 border-b border-sand p-2 text-right">Cost</th>
             </tr>
           </thead>
           <tbody>
@@ -114,13 +123,13 @@ function MarketPurchaseManagerBody({
               const companyLocked = Boolean(selectedCompany && selectedCompany !== row.companyId);
               return (
                 <tr key={row.id} className={checked ? "bg-brass-50" : "hover:bg-ivory/60"}>
-                  <td className="border-b border-sand p-2 text-center"><input type="checkbox" checked={checked} disabled={companyLocked} onChange={() => toggle(row)} className="h-4 w-4 accent-navy-800" /></td>
-                  <td className="border-b border-sand p-2"><span className="font-medium text-navy-800">{row.saleNumber}</span><br /><span className="text-xs text-steel">{formatDate(row.saleDate)}</span></td>
-                  <td className="border-b border-sand p-2">{row.company}<br /><span className="text-xs text-steel">{row.customer ?? "Counter"}</span></td>
-                  <td className="border-b border-sand p-2">{row.item}</td>
-                  <td className="border-b border-sand p-2 text-right tabular-nums">{qty(row.quantity)} {row.unit ?? ""}</td>
-                  <td className="border-b border-sand p-2"><input type="number" min="0.01" step="0.01" value={costs[row.id] ?? ""} onFocus={() => !checked && toggle(row)} onChange={(event) => setCosts((current) => ({ ...current, [row.id]: event.target.value }))} className={`${fieldClass} ml-auto w-32 text-right`} placeholder="Actual cost" /></td>
-                  <td className="border-b border-sand p-2 text-right tabular-nums">{costs[row.id] ? money(Number(row.quantity) * Number(costs[row.id])) : "—"}</td>
+                  <td className="w-10 border-b border-sand p-2 text-center"><input type="checkbox" checked={checked} disabled={companyLocked} onChange={() => toggle(row)} className="h-4 w-4 accent-navy-800" /></td>
+                  <td className="w-32 border-b border-sand p-2 truncate"><span className="font-medium text-navy-800">{row.saleNumber}</span><br /><span className="text-xs text-steel">{formatDate(row.saleDate)}</span></td>
+                  <td className="w-56 border-b border-sand p-2 truncate">{row.company}<br /><span className="text-xs text-steel">{row.customer ?? "Counter"}</span></td>
+                  <td className="w-64 border-b border-sand p-2 truncate">{row.item}</td>
+                  <td className="w-32 border-b border-sand p-2 text-right tabular-nums">{qty(row.quantity)} {row.unit ?? ""}</td>
+                  <td className="w-40 border-b border-sand p-2"><input type="number" min="0.01" step="0.01" value={costs[row.id] ?? ""} onFocus={() => !checked && toggle(row)} onChange={(event) => setCosts((current) => ({ ...current, [row.id]: event.target.value }))} className={`${fieldClass} ml-auto w-32 text-right`} placeholder="Actual cost" /></td>
+                  <td className="w-36 border-b border-sand p-2 text-right tabular-nums">{costs[row.id] ? money(Number(row.quantity) * Number(costs[row.id])) : "—"}</td>
                 </tr>
               );
             })}

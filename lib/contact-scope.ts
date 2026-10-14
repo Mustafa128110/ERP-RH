@@ -13,3 +13,9 @@ export const inCompany =
   (companyId: string) =>
   <T extends { companyId: string | null }>(option: T) =>
     !option.companyId || option.companyId === companyId;
+
+// Identifies the default walk-in counter customer who does not hold a personal account.
+export function isCounterContact(displayName?: string | null): boolean {
+  return (displayName ?? "").trim().toLowerCase() === "counter";
+}
+
