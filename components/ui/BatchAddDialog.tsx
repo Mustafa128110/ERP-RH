@@ -38,7 +38,6 @@ export function BatchAddDialog<T, C = unknown>({
   headers,
   renderRow,
   onSubmit,
-  onQueue: _onQueue,
   onDone,
   initialRows = 5,
   toolbar,
