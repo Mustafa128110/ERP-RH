@@ -67,6 +67,7 @@ const buildColumns = (): ColumnDef[] => [
   {
     key: "type",
     label: "Type",
+    width: 60,
     sortable: true,
     render: (row) => (
       <span title={String(row.type)} className={String(row.type) === "Received" ? "text-emerald-600" : "text-red-500"}>
@@ -75,10 +76,12 @@ const buildColumns = (): ColumnDef[] => [
     ),
   },
   { key: "contact", label: "Contact" },
-  { key: "amount", label: "Amount", align: "right" },
+  { key: "amount", label: "Amount", align: "right", width: 150, paddingRight: 28 },
   {
     key: "method",
     label: "Method",
+    width: 150,
+    paddingLeft: 24,
     // A grouped row folded several payments together; when they paid by different
     // means the cell says "Mixed" and hovering lists which — naming one would
     // claim the others went the same way. The raw methods ride on the row as
@@ -107,7 +110,7 @@ const buildColumns = (): ColumnDef[] => [
       );
     },
   },
-  { key: "company", label: "Company" },
+  { key: "company", label: "Company", width: 150, paddingLeft: 24 },
 ];
 
 // What a payment row can honestly take from the form before the server has

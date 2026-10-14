@@ -177,7 +177,7 @@ export function StockPurchaseManager({
   // table's keyboard navigation instead of being the one that hasn't got it.
   const columns: ColumnDef[] = [
     { key: "date", label: "Date" },
-    { key: "item", label: "Item", render: (row) => stacked(row, (it) => it.itemName) },
+    { key: "item", label: "Item", width: 340, render: (row) => stacked(row, (it) => it.itemName) },
     { key: "qty", label: "Qty", align: "right", render: (row) => stacked(row, (it) => it.qty) },
     { key: "unitPrice", label: "Unit Price", align: "right", render: (row) => stacked(row, (it) => it.unitPrice) },
     // Price plus this unit's share of the delivery's shipping, discount and tax
@@ -197,7 +197,7 @@ export function StockPurchaseManager({
       ),
     },
     { key: "supplier", label: "Supplier" },
-    { key: "company", label: "Company" },
+    { key: "company", label: "Company", width: 100 },
   ];
 
   useNewEntry(() => setOpen(true));

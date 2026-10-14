@@ -795,8 +795,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                   {entriesWithBalance.map((e, i) => (
                     <tr key={`${e.id}-${i}`} className={`border-b border-sand/50 ${i % 2 === 1 ? "bg-ivory/30" : ""}`}>
                       <td className="whitespace-nowrap py-2.5 px-3 text-center tabular-nums text-steel">
-                        <div>{formatDate(e.date)}</div>
-                        {e.time && <span className="block text-[11px] text-steel/80">{e.time}</span>}
+                        {formatDate(e.date)}
                       </td>
                       <td className="py-2 px-3"><DescriptionCell entry={e} /></td>
                       <td className="py-2 px-3 text-center text-xs tabular-nums text-steel">
@@ -1278,8 +1277,7 @@ export function PartyLedgerPrintDocument({
           {entries.map((e, i) => (
             <tr key={`${e.id}-${i}`} className={`border-b border-sand ${i % 2 === 1 ? "bg-zinc-50" : ""}`}>
               <td className="py-1.5 tabular-nums text-steel whitespace-nowrap">
-                <div>{formatDate(e.date)}</div>
-                {e.time && <div className="text-[10px] text-steel/80">{e.time}</div>}
+                {formatDate(e.date)}
               </td>
               <td className="py-1.5 pr-4">
                 <span>{TYPE_LABELS[e.type]}</span>

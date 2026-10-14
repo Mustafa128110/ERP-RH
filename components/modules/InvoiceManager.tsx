@@ -52,7 +52,7 @@ type InvoiceItem = { name: string; qty: string; rate: string; unit: string };
 const columns: ColumnDef[] = [
   { key: "date", label: "Date" },
   { key: "customer", label: "Customer" },
-  { key: "company", label: "Company" },
+  { key: "company", label: "Company", width: 100 },
   { key: "total", label: "Total", align: "right" },
   { key: "paid", label: "Paid", align: "right" },
   { key: "balance", label: "Balance", align: "right" },
@@ -247,6 +247,7 @@ export function InvoiceManager({
   const downloadColumn = (format: "pdf" | "png", pendingId: string | null): ColumnDef => ({
     key: format,
     label: "",
+    width: 76,
     render: (row) => (
       <button
         type="button"
@@ -270,6 +271,7 @@ export function InvoiceManager({
   const returnColumn: ColumnDef = {
     key: "return",
     label: "",
+    width: 90,
     render: (row) => String(row.status) === "Cancelled" ? "—" : (
       <button
         type="button"

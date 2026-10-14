@@ -92,8 +92,8 @@ const buildColumns = (byRowId: Map<string, DayGroup<Expense>>): ColumnDef[] => [
       );
     },
   },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "method", label: "Method" },
+  { key: "amount", label: "Amount", align: "right", width: 150, paddingRight: 28 },
+  { key: "method", label: "Method", width: 150, paddingLeft: 24 },
   { key: "company", label: "Company" },
   { key: "user", label: "Created By" },
 ];

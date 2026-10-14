@@ -28,9 +28,9 @@ function getColWidth(col: ColumnDef): number {
   }
   const key = col.key.toLowerCase();
   if (key === SNO_KEY) return 56;
-  if (["pdf", "png", "download"].includes(key)) return 64;
-  if (key === "return") return 80;
-  if (["statement", "action", "actions"].includes(key)) return 96;
+  if (["pdf", "png", "download"].includes(key)) return 76;
+  if (key === "return") return 90;
+  if (["statement", "action", "actions"].includes(key)) return 120;
   if (col.badge || ["status", "display_status", "state"].includes(key)) return 100;
   if (["isdefault", "default"].includes(key)) return 80;
   if (key === "age") return 70;
@@ -48,6 +48,15 @@ function getColWidth(col: ColumnDef): number {
   if (["customer", "supplier", "party", "contact", "name", "displayname"].includes(key)) return 220;
   if (["item", "itemname", "description", "summary", "notes", "reason", "lines", "address"].includes(key)) return 240;
   return 150;
+}
+
+const isActionCol = (key: string) => ["return", "pdf", "png", "download", "statement", "action", "actions"].includes(key.toLowerCase());
+
+function getColPadding(col: ColumnDef): React.CSSProperties {
+  const style: React.CSSProperties = {};
+  if (typeof col.paddingLeft === "number") style.paddingLeft = `${col.paddingLeft}px`;
+  if (typeof col.paddingRight === "number") style.paddingRight = `${col.paddingRight}px`;
+  return style;
 }
 
 // Keys that exist to drive rendering rather than to be read — searching them
@@ -571,10 +580,10 @@ export function DataTable({
                   const isActive = sortKey === columnSortKey;
                   return (
                     <th
-                      style={{ width: `${getColWidth(col)}px` }}
+                      style={{ width: `${getColWidth(col)}px`, ...getColPadding(col) }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
-                      className={`truncate whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
+                      className={`${isActionCol(col.key) ? "" : "truncate "}whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
                         col.align === "right" ? "text-right" : "text-left"
                       }${col.hideOnMobile ? " hidden md:table-cell" : ""}${
                         sortable ? " cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200" : ""
@@ -621,7 +630,7 @@ export function DataTable({
                   </>
                 );
                 const cellClass = (col: ColumnDef) =>
-                  `truncate whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                  `${isActionCol(col.key) ? "" : "truncate "}whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
                     col.align === "right" ? "text-right tabular-nums" : "text-left"
                   }${col.hideOnMobile ? " hidden md:table-cell" : ""}`;
 
@@ -666,7 +675,7 @@ export function DataTable({
                     {href
                       ? allColumns.map((col) => (
                           <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px` }} className={`p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}>
-                            <Link href={href} className={`block ${cellClass(col)}`}>
+                            <Link href={href} className={`block ${cellClass(col)}`} style={getColPadding(col)}>
                               {body(col)}
                             </Link>
                           </td>
@@ -681,11 +690,11 @@ export function DataTable({
                               onMouseDown={col.label ? undefined : (event) => event.stopPropagation()}
                               onClick={col.label ? () => onRowClick(row) : (event) => event.stopPropagation()}
                             >
-                              <span className={`block ${cellClass(col)}`}>{body(col)}</span>
+                              <span className={`block ${cellClass(col)}`} style={getColPadding(col)}>{body(col)}</span>
                             </td>
                           ))
                         : allColumns.map((col) => (
-                            <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px` }} className={cellClass(col)}>
+                            <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px`, ...getColPadding(col) }} className={cellClass(col)}>
                               {body(col)}
                             </td>
                           ))}

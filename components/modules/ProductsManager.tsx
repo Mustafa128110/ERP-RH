@@ -17,11 +17,14 @@ import { Icon } from "@/components/ui/Icon";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 
+const SETUP_COL_WIDTH = 100;
+
 // No S.No column here — DataTable numbers every row itself.
 const columns: ColumnDef[] = [
   {
     key: "setup",
     label: "Setup",
+    width: SETUP_COL_WIDTH,
     render: (row) => (
       <span className="inline-flex items-center gap-1" aria-label="Product setup status">
         {row._missingCategory === true && <span title="Missing category" className="h-2.5 w-2.5 rounded-full bg-red-500" />}
@@ -35,6 +38,7 @@ const columns: ColumnDef[] = [
     key: "name",
     label: "Item Name",
     sortable: true,
+    width: 340,
     // Product names remain plain database values.  Setup state is intentionally
     // kept in its own column so a red marker never becomes part of the name.
     render: (row) => (
@@ -118,6 +122,7 @@ export function ProductsManager({
     {
       key: "unitRules",
       label: "Unit Rules",
+      width: SETUP_COL_WIDTH,
       render: (row) => {
         const ruleIds = String(row._ruleIds ?? "").split(",").filter(Boolean);
         const assigned = ruleIds
@@ -141,6 +146,7 @@ export function ProductsManager({
     {
       key: "baseQuantity",
       label: "Base Quantity",
+      width: SETUP_COL_WIDTH,
       render: (row) => {
         const baseUnitId = String(row._baseUnitId ?? "");
         const dot = baseUnitId ? dotByKey.get(`base-unit:${baseUnitId}`) : undefined;
