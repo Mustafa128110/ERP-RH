@@ -173,7 +173,7 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
         <p className="safe-wrap text-sm text-steel">{[invoice.customerCity, invoice.customerPhone].filter(Boolean).join(" · ")}</p>
       </div>
 
-      <div className="invoice-lines scroll-thin overflow-x-hidden md:overflow-x-auto print:overflow-visible">
+      <div className="invoice-lines matrix-scroll scroll-thin overflow-x-auto print:overflow-visible">
         <table className="w-full min-w-[30rem] border-collapse text-sm print:min-w-0">
         <thead>
           <tr className="border-y border-sand">

@@ -471,100 +471,71 @@ table[data-responsive] tr[data-virtual-spacer] td {
 }
 table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
 
-/* Mobile lists keep the one shared DataTable component and its keyboard model,
- * but stop asking a 360px screen to impersonate a desktop spreadsheet. The
- * existing cells become labelled facts; no information is dropped and a
- * user-entered name or large amount has a real wrapping boundary. */
+/* Mobile lists maintain proper tabular form with horizontal scrolling,
+ * sticky headers, and clear column alignment. */
 @media (max-width: 767px) {
   .mobile-data-list {
-    overflow-x: hidden;
-  }
-  table[data-responsive],
-  table[data-responsive] tbody {
-    display: block;
-    width: 100%;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
   table[data-responsive] {
-    min-width: 0 !important;
-  }
-  table[data-responsive] td.hidden {
-    display: none;
+    display: table !important;
+    min-width: 0;
+    width: var(--table-min-width, max-content) !important;
+    table-layout: fixed;
+    border-collapse: collapse;
   }
   table[data-responsive] thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
+    display: table-header-group !important;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  table[data-responsive] thead tr {
+    display: table-row !important;
+  }
+  table[data-responsive] thead th {
+    display: table-cell !important;
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.75rem !important;
   }
   table[data-responsive] tbody {
-    padding: 0.5rem;
+    display: table-row-group !important;
+    padding: 0;
   }
-  table[data-responsive] tr {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    position: relative;
-    width: 100%;
-    margin-bottom: 0.5rem;
-    overflow: hidden;
-    border: 1px solid var(--color-sand);
-    border-radius: var(--radius-md);
-    background: var(--color-white);
-  }
-  table[data-responsive] tr:last-child {
-    margin-bottom: 0;
-  }
-  table[data-responsive] td,
-  table[data-responsive] td.p-0 {
-    display: flex;
-    width: auto;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.3rem;
-    min-width: 0;
-    padding: 0.625rem 0.75rem !important;
+  table[data-responsive] tbody tr {
+    display: table-row !important;
     border: 0;
-    border-bottom: 1px solid var(--color-sand);
-    white-space: normal;
-    overflow-wrap: anywhere;
+    border-radius: 0;
+    margin-bottom: 0;
+    background: transparent;
   }
-  table[data-responsive] td:last-child {
-    border-bottom: 0;
+  table[data-responsive] td {
+    display: table-cell !important;
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.8125rem !important;
+    line-height: 1.25rem !important;
+    border-bottom: 1px solid var(--color-sand) !important;
+    vertical-align: middle !important;
+    white-space: nowrap !important;
+  }
+  table[data-responsive] td.p-0 {
+    padding: 0 !important;
+  }
+  table[data-responsive] td.p-0 > a,
+  table[data-responsive] td.p-0 > span {
+    display: block !important;
+    padding: 0.5rem 0.75rem !important;
+    white-space: nowrap !important;
   }
   table[data-responsive] td::before {
-    content: attr(data-label);
-    min-width: 0;
-    color: var(--color-steel);
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.025em;
-    text-transform: uppercase;
+    display: none !important;
+    content: none !important;
   }
   table[data-responsive] td[data-label=""] {
-    min-height: 3.25rem;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-end;
-  }
-  table[data-responsive] td[data-label=""]::before {
-    display: none;
-  }
-  table[data-responsive] td > *,
-  table[data-responsive] td a,
-  table[data-responsive] td span {
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
-  table[data-responsive] td a {
-    padding: 0 !important;
-    white-space: normal;
-  }
-  table[data-responsive] .truncate {
-    overflow: visible;
-    white-space: normal;
-    text-overflow: clip;
+    min-height: 0;
+    display: table-cell !important;
   }
 }
 
@@ -725,60 +696,48 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
     font-size: 0.75rem;
   }
 
-  .invoice-lines table,
-  .invoice-lines tbody,
-  .invoice-lines tr,
-  .invoice-lines td {
-    display: block;
-    width: 100%;
+  .invoice-lines {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
   .invoice-lines table {
-    min-width: 0;
+    min-width: 28rem;
+    display: table !important;
+    border-collapse: collapse;
   }
   .invoice-lines thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
+    display: table-header-group !important;
+    position: static;
+    width: auto;
+    height: auto;
+    clip: auto;
+    overflow: visible;
   }
-  .invoice-lines tr {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-bottom: 0.5rem;
-    overflow: hidden;
-    border: 1px solid var(--color-sand);
-    border-radius: var(--radius-md);
+  .invoice-lines thead tr {
+    display: table-row !important;
+  }
+  .invoice-lines thead th {
+    display: table-cell !important;
+  }
+  .invoice-lines tbody {
+    display: table-row-group !important;
+  }
+  .invoice-lines tbody tr {
+    display: table-row !important;
+    border-bottom: 1px solid var(--color-sand) !important;
+    background: transparent;
+    border-radius: 0;
+    margin-bottom: 0;
   }
   .invoice-lines td {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.5rem;
-    min-width: 0;
-    padding: 0.625rem 0.75rem;
-    border: 0;
-    border-bottom: 1px solid var(--color-sand);
-    overflow-wrap: anywhere;
+    display: table-cell !important;
+    padding: 0.5rem 0.5rem !important;
+    border-bottom: 1px solid var(--color-sand) !important;
+    vertical-align: middle !important;
   }
   .invoice-lines td::before {
-    content: attr(data-label);
-    color: var(--color-steel);
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.025em;
-    text-transform: uppercase;
-  }
-  .invoice-lines td:nth-child(2) {
-    grid-column: 1 / -1;
-    grid-template-columns: minmax(0, 1fr);
-    font-weight: 600;
-  }
-  .invoice-lines td:nth-child(2)::before {
-    display: none;
-  }
-  .invoice-lines td:last-child,
-  .invoice-lines td:nth-last-child(2) {
-    border-bottom: 0;
+    display: none !important;
+    content: none !important;
   }
 
   /* Other document editors share the sale principle without pretending every
