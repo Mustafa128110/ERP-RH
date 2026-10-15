@@ -55,14 +55,14 @@ export function ConvertQuotationDialog({
            the quantity inputs live in the body, so the app-wide Ctrl+Enter
            handler (KeyboardShortcuts) may submit it from anywhere in this
            dialog. */
-        <form action={action} data-dialog-submit className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+        <form action={action} data-dialog-submit className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 w-full">
           <input type="hidden" name="quantitiesJson" value={JSON.stringify(Object.fromEntries(chosen))} />
           <input type="hidden" name="documentDate" value={documentDate} />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
             <span className="text-sm text-steel">Invoice total</span>
             <span className="text-base font-semibold tabular-nums text-navy-800">{money(round1(total))}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-3 w-full sm:w-auto">
             {state?.error && <p className={errorTextClass}>{state.error}</p>}
             <button type="button" onClick={onClose} className={secondaryActionClass}>
               Cancel
@@ -89,7 +89,7 @@ export function ConvertQuotationDialog({
           touched either.
         </p>
 
-        <div className="scroll-thin -mx-1 overflow-x-auto px-1">
+        <div className="matrix-scroll scroll-thin -mx-1 overflow-x-auto px-1">
           <table className="w-full min-w-max table-fixed border-collapse">
           <thead>
             <tr className="bg-ivory">

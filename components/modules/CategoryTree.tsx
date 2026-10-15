@@ -62,7 +62,8 @@ function TreeNode({ node, depth, h }: { node: CategoryNode; depth: number; h: Ha
         <button
           type="button"
           onClick={() => setAddOpen((v) => !v)}
-          className="flex h-6 w-6 items-center justify-center rounded border border-sand text-navy-800 opacity-0 transition group-hover:opacity-100 hover:bg-ivory"
+          className="flex h-7 w-7 sm:h-6 sm:w-6 items-center justify-center rounded border border-sand text-navy-800 opacity-100 sm:opacity-0 sm:transition sm:group-hover:opacity-100 hover:bg-ivory"
+          aria-label="Add sub-category"
           title="Add sub-category"
         >
           +

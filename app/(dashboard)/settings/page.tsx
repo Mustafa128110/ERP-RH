@@ -32,12 +32,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <h1 className="text-xl text-navy-800">Settings</h1>
           <p className="text-sm text-steel">Thresholds and text this app actually reads. Stored per company.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {overview && overview.companies.length > 1 && (
             <StockFilter param="company" allLabel={overview.companies[0]?.name ?? "Company"} options={overview.companies.map((c) => ({ id: c.id, name: c.name }))} />
           )}

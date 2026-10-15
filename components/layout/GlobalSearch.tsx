@@ -24,9 +24,17 @@ export function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
   // Every in-flight search carries the sequence it was started at; a slow reply
   // to an earlier keystroke must not overwrite the results for a later one.
   const seq = useRef(0);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   useEffect(() => {
     const q = query.trim();
@@ -104,7 +112,7 @@ export function GlobalSearch() {
             setOpen(false);
           }
         }}
-        placeholder="Search everything…   Ctrl+K"
+        placeholder={isMobile ? "Search…" : "Search everything…   Ctrl+K"}
         aria-label="Search everything"
         role="combobox"
         aria-expanded={open}
@@ -116,7 +124,7 @@ export function GlobalSearch() {
       {open && (
         <ul
           id={LIST_ID}
-          className="scroll-thin absolute left-0 top-full z-50 mt-1 max-h-96 w-full overflow-auto rounded-md border border-sand bg-white py-1 text-sm shadow-xl"
+          className="scroll-thin absolute left-0 top-full z-50 mt-1 max-h-96 w-full overflow-auto rounded-md border border-sand bg-white py-1 text-sm shadow-xl max-sm:fixed max-sm:inset-x-2 max-sm:top-14 max-sm:w-auto max-sm:max-h-[60vh]"
         >
           {hits.length === 0 ? (
             <li className="px-3 py-2 text-steel">Nothing matches “{query.trim()}”.</li>

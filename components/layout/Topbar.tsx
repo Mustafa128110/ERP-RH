@@ -130,7 +130,7 @@ export function Topbar({
         type="button"
         onClick={openNav}
         aria-label="Open navigation"
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-steel hover:bg-ivory hover:text-navy-800 md:hidden"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-steel hover:bg-ivory hover:text-navy-800 md:hidden"
       >
         {/* Three rules rather than an icon font — no dependency, scales cleanly. */}
         <span className="flex flex-col gap-[3px]" aria-hidden>
@@ -175,7 +175,7 @@ export function Topbar({
           onClick={() => setMenuOpen((open) => !open)}
           aria-label="Account and settings"
           aria-expanded={menuOpen}
-          className="flex h-10 w-10 items-center justify-center rounded-md text-lg leading-none text-steel hover:bg-ivory hover:text-navy-800"
+          className="flex h-11 w-11 items-center justify-center rounded-md text-lg leading-none text-steel hover:bg-ivory hover:text-navy-800"
         >
           ⋮
         </button>
@@ -190,6 +190,18 @@ export function Topbar({
                 {scopeSelect("h-11 w-full rounded-md border border-sand bg-transparent px-2 text-sm text-ink disabled:opacity-60")}
               </label>
             )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                openShortcuts();
+              }}
+              className="mb-2 flex h-11 w-full items-center justify-between rounded-md border border-sand px-3 text-sm font-medium text-steel hover:bg-ivory"
+            >
+              <span>Keyboard shortcuts</span>
+              <span className="font-mono text-xs">?</span>
+            </button>
 
             {/* The mobile menu unmounts when it closes, which also resets the
                 armed confirm — a fresh menu always starts unarmed. */}

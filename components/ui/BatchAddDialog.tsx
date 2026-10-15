@@ -190,7 +190,7 @@ export function BatchAddDialog<T, C = unknown>({
       onClose={onClose}
       size="wide"
       footer={
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 w-full">
           {!autoAppend && (
             <button
               type="button"
@@ -198,13 +198,13 @@ export function BatchAddDialog<T, C = unknown>({
                 setTouched(true);
                 setRows((prev) => [...prev, ...Array.from({ length: ADD_ROWS }, emptyRow)]);
               }}
-              className="mr-auto text-sm font-medium text-navy-800 hover:underline"
+              className="text-left text-sm font-medium text-navy-800 hover:underline py-1 sm:py-0"
             >
               + Add {ADD_ROWS} rows
             </button>
           )}
-          <div className="ml-auto flex items-center gap-3">
-            {error && <p className="text-sm text-error">{error}</p>}
+          <div className="flex flex-wrap items-center justify-end gap-3 w-full sm:w-auto sm:ml-auto">
+            {error && <p className="text-sm text-error w-full sm:w-auto text-right">{error}</p>}
             <button type="button" onClick={onClose} className="h-10 rounded px-4 text-sm text-steel hover:bg-ivory">
               Cancel
             </button>

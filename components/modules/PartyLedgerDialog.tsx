@@ -675,7 +675,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">Search</span>
               <input type="text" placeholder="Item or ref…" value={search} onChange={(e) => {setPage(1);setSearch(e.target.value);}} className="h-8 w-36 rounded border border-sand px-1.5 text-xs text-ink" />
             </label>
-            <div className="ml-auto flex gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-1.5 w-full sm:w-auto sm:ml-auto">
               <button
                 type="button"
                 onClick={() => setHistoryOpen((v) => !v)}
@@ -709,8 +709,8 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               ) : history.length === 0 ? (
                 <p className="p-3 text-xs text-steel">Nothing has been edited or deleted on this account.</p>
               ) : (
-                <div className="scroll-thin max-h-56 overflow-y-auto overflow-x-hidden">
-                  <table className="w-full table-fixed text-xs">
+                <div className="matrix-scroll scroll-thin max-h-56 overflow-auto">
+                  <table className="w-full min-w-[500px] table-fixed text-xs">
                     <thead className="sticky top-0 bg-ivory/90 backdrop-blur">
                       <tr className="border-b border-sand">
                         <th className="w-36 px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-steel">When</th>
@@ -758,8 +758,8 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               </p>
             </div>
           ) : (
-            <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-y-auto overflow-x-hidden rounded-lg border border-sand bg-white">
-              <table className="w-full table-fixed border-collapse text-sm">
+            <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
+              <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-36" style={{ width: "9rem" }} />
                   <col />

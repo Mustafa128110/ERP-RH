@@ -31,7 +31,7 @@ export function ComboBox({
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [rect, setRect] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
@@ -43,7 +43,21 @@ export function ComboBox({
 
   function place() {
     const r = inputRef.current?.getBoundingClientRect();
-    if (r) setRect({ top: r.bottom, left: r.left, width: r.width });
+    if (!r) return;
+    const minWidth = Math.min(window.innerWidth - 16, Math.max(r.width, 240));
+    let left = r.left;
+    if (left + minWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - 8 - minWidth);
+    }
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const flipUp = spaceBelow < 180 && spaceAbove > spaceBelow;
+    setRect({
+      top: flipUp ? undefined : r.bottom,
+      bottom: flipUp ? window.innerHeight - r.top : undefined,
+      left,
+      width: minWidth,
+    });
   }
   function openList() {
     place();
@@ -54,23 +68,26 @@ export function ComboBox({
 
   // Position is fixed (to escape the table's overflow clip), so a scroll or
   // resize would leave the list floating — close it instead of chasing.
-  //
-  // The scroll listener has to be capture-phase to see scrolls on ancestors,
-  // which means it also sees the list's own overflow scrolling — so wheeling the
-  // list closed it before you could reach anything below the visible slice.
-  // Scrolls originating inside the list are its own business.
+  // When the input is focused, typing or soft keyboards may cause viewport
+  // scrolls; reposition if the input is still on screen rather than dropping the list.
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    const onScroll = (e: Event) => {
+    const onScrollOrResize = (e: Event) => {
       if (e.target instanceof Node && listRef.current?.contains(e.target)) return;
+      if (document.activeElement === inputRef.current) {
+        const r = inputRef.current?.getBoundingClientRect();
+        if (r && r.bottom >= 0 && r.top <= window.innerHeight) {
+          place();
+          return;
+        }
+      }
       setOpen(false);
     };
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", close);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
     return () => {
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
     };
   }, [open]);
 
@@ -171,8 +188,8 @@ export function ComboBox({
           id={listId}
           role="listbox"
           onScroll={event => setScrollTop(event.currentTarget.scrollTop)}
-          style={{ position: "fixed", top: rect.top, left: rect.left, width: rect.width, zIndex: 60, maxHeight: PICKER_HEIGHT }}
-          className="scroll-thin mt-1 overflow-auto rounded-md border border-sand bg-white text-sm shadow-lg"
+          style={{ position: "fixed", top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width, zIndex: 60, maxHeight: PICKER_HEIGHT }}
+          className={`scroll-thin ${rect.bottom !== undefined ? "mb-1" : "mt-1"} overflow-auto rounded-md border border-sand bg-white text-sm shadow-lg`}
         >
           <li aria-hidden style={{ height: visibleWindow.first * PICKER_ROW_HEIGHT }} />
           {filtered.slice(visibleWindow.first, visibleWindow.last).map((o, offset) => {

@@ -29,7 +29,20 @@ export function StockLevels({ items }: { items: StockItem[] }) {
 
   const columns: ColumnDef[] = [
     { key: "sku", label: "SKU", hideOnMobile: true },
-    { key: "itemName", label: "Product" },
+    {
+      key: "itemName",
+      label: "Product",
+      render: (row) => (
+        <div>
+          <span>{String(row.itemName)}</span>
+          {row.sku ? (
+            <span className="mt-0.5 block font-mono text-xs text-steel md:hidden">
+              SKU: {String(row.sku)}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
     { key: "company", label: "Company" },
     {
       key: "location",

@@ -253,22 +253,22 @@ function CostSheet() {
     <div className="flex flex-col gap-6">
       {/* Global controls */}
       <div className="flex flex-wrap items-end gap-4 rounded border border-sand bg-white p-4">
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[140px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">RMB → PKR</span>
           <input
             type="number"
             step="0.01"
             value={exchangeRate}
             onChange={(e) => setExchangeRate(e.target.value)}
-            className="w-28 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-28 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[140px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Disc Rate (CC/FC)</span>
           <select
             value={discRate}
             onChange={(e) => setDiscRate(Number(e.target.value) as DiscRate)}
-            className="rounded border border-sand px-2 py-1.5 text-sm"
+            className="w-full sm:w-auto rounded border border-sand px-2 py-1.5 text-sm"
           >
             {DISC_RATES.map((r) => (
               <option key={r} value={r}>
@@ -277,12 +277,12 @@ function CostSheet() {
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[140px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Shovel Rate (CC/FC)</span>
           <select
             value={shovelRate}
             onChange={(e) => setShovelRate(Number(e.target.value) as ShovelRate)}
-            className="rounded border border-sand px-2 py-1.5 text-sm"
+            className="w-full sm:w-auto rounded border border-sand px-2 py-1.5 text-sm"
           >
             {SHOVEL_RATES.map((r) => (
               <option key={r} value={r}>
@@ -646,74 +646,74 @@ function TaxSheet() {
     <div className="flex flex-col gap-6">
       {/* Global controls */}
       <div className="flex flex-wrap items-end gap-4 rounded border border-sand bg-white p-4">
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">USD → PKR</span>
           <input
             type="number"
             step="0.01"
             value={usdRate}
             onChange={(e) => setUsdRate(e.target.value)}
-            className="w-28 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-28 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Customs Duty %</span>
           <input
             type="number"
             step="0.01"
             value={customsDutyPct}
             onChange={(e) => setCustomsDutyPct(e.target.value)}
-            className="w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Add. Customs %</span>
           <input
             type="number"
             step="0.01"
             value={addCustomsDutyPct}
             onChange={(e) => setAddCustomsDutyPct(e.target.value)}
-            className="w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Regulatory %</span>
           <input
             type="number"
             step="0.01"
             value={regulatoryDutyPct}
             onChange={(e) => setRegulatoryDutyPct(e.target.value)}
-            className="w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Sales Tax %</span>
           <input
             type="number"
             step="0.01"
             value={salesTaxPct}
             onChange={(e) => setSalesTaxPct(e.target.value)}
-            className="w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Add. Sales Tax %</span>
           <input
             type="number"
             step="0.01"
             value={addSalesTaxPct}
             onChange={(e) => setAddSalesTaxPct(e.target.value)}
-            className="w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-1 min-w-[110px] sm:flex-initial sm:w-auto flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Income Tax %</span>
           <input
             type="number"
             step="0.01"
             value={incomeTaxPct}
             onChange={(e) => setIncomeTaxPct(e.target.value)}
-            className="w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
+            className="w-full sm:w-20 rounded border border-sand px-2 py-1.5 text-sm tabular-nums"
           />
         </label>
       </div>

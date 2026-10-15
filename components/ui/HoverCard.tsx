@@ -141,11 +141,19 @@ export function HoverCard({
       }
       setPos(null);
     }
+    function onPointerDown(e: PointerEvent | MouseEvent) {
+      const target = e.target as Node;
+      if (ref.current && ref.current.contains(target)) return;
+      if (panelRef.current && panelRef.current.contains(target)) return;
+      setPos(null);
+    }
     window.addEventListener("resize", onScrollOrResize);
     window.addEventListener("scroll", onScrollOrResize, true);
+    document.addEventListener("pointerdown", onPointerDown);
     return () => {
       window.removeEventListener("resize", onScrollOrResize);
       window.removeEventListener("scroll", onScrollOrResize, true);
+      document.removeEventListener("pointerdown", onPointerDown);
     };
   }, [pos]);
 
@@ -158,6 +166,15 @@ export function HoverCard({
       onMouseLeave={scheduleClose}
       onFocus={show}
       onBlur={() => setPos(null)}
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, select, textarea")) return;
+        if (pos) {
+          setPos(null);
+        } else {
+          show();
+        }
+      }}
       className={triggerClassName}
     >
       {trigger}
@@ -176,7 +193,7 @@ export function HoverCard({
               maxWidth: pos.maxWidth,
               boxSizing: "border-box",
             }}
-            className={`fixed z-[60] flex flex-col overscroll-contain overflow-hidden rounded-lg border border-sand bg-white p-3 text-sm text-ink shadow-xl ${panelClassName ?? ""}`}
+            className={`fixed z-[60] flex flex-col overscroll-contain overflow-hidden rounded-lg border border-sand bg-white p-3 text-sm text-ink shadow-xl max-w-[calc(100vw-1rem)] ${panelClassName ?? ""}`}
           >
             {children}
           </div>,

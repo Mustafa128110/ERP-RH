@@ -41,19 +41,26 @@ const columns: ColumnDef[] = [
     // Product names remain plain database values.  Setup state is intentionally
     // kept in its own column so a red marker never becomes part of the name.
     render: (row) => (
-      <DetailHover
-        trigger={String(row.name)}
-        heading={String(row.name)}
-        rows={[
-          { label: "SKU", value: String(row.sku) },
-          { label: "On hand", value: String(row.onHand) },
-          { label: "Category", value: String(row.category) },
-          { label: "Brand", value: String(row.brand) },
-          { label: "Company", value: String(row.company) },
-        ]}
-        footer={row._missingCategory === true ? "Created from a sale or purchase line — no category yet." : undefined}
-        extraHeight={row._missingCategory === true ? 16 : 0}
-      />
+      <div>
+        <DetailHover
+          trigger={String(row.name)}
+          heading={String(row.name)}
+          rows={[
+            { label: "SKU", value: String(row.sku) },
+            { label: "On hand", value: String(row.onHand) },
+            { label: "Category", value: String(row.category) },
+            { label: "Brand", value: String(row.brand) },
+            { label: "Company", value: String(row.company) },
+          ]}
+          footer={row._missingCategory === true ? "Created from a sale or purchase line — no category yet." : undefined}
+          extraHeight={row._missingCategory === true ? 16 : 0}
+        />
+        {row.sku ? (
+          <span className="mt-0.5 block font-mono text-xs text-steel md:hidden">
+            SKU: {String(row.sku)}
+          </span>
+        ) : null}
+      </div>
     ),
   },
   { key: "salesRate", label: "Sales Rate", align: "right" },
