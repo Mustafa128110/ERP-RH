@@ -32,7 +32,7 @@ import { ADJUSTMENT_REASONS, type AdjustmentReason } from "@/lib/adjustment-cons
 import { locationIdOrNull } from "@/lib/location-constants";
 import { purchaseRowError, recordsQty, writesDocument } from "@/lib/product-edit-rules";
 import { queryProductRates, type ProductRateRow } from "@/lib/queries/products";
-import { rebuildItemBaseQuantities } from "@/lib/queries/unit-conversion";
+import { assertConsistentRuleGraphs, rebuildItemBaseQuantities } from "@/lib/queries/unit-conversion";
 import { guard, describeDbError, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { cachedPageRead } from "@/lib/read-cache";
@@ -367,6 +367,8 @@ export interface ProductEditRow {
   // The one unit in which this product's stock is calculated. It is a product
   // setting, separate from the unit used on the last purchase.
   baseUnitId: string | null;
+  // Unit conversion rules currently assigned to this product.
+  ruleIds: string[];
   // Everything the last purchase of this item already answered, so the edit grid
   // opens with those cells filled in rather than blank: who it came from, the
   // unit it was bought in, and what it cost. Editing them writes to the same
@@ -392,6 +394,7 @@ export interface ProductEditData {
   // company; units and locations are global.
   supplierOptions: { id: string; name: string; companyId: string | null }[];
   unitOptions: { id: string; name: string }[];
+  ruleOptions: { id: string; name: string }[];
   locationOptions: { id: string; name: string }[];
 }
 
@@ -403,7 +406,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
   const session = await getSession();
   requirePermission(session, "products", "view");
 
-  const empty: ProductEditData = { rows: [], supplierOptions: [], unitOptions: [], locationOptions: [] };
+  const empty: ProductEditData = { rows: [], supplierOptions: [], unitOptions: [], ruleOptions: [], locationOptions: [] };
   if (itemIds.length === 0) return empty;
 
   const rows = await db
@@ -509,13 +512,26 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     WHERE dl.item_id IN (${idList})
       AND dt.code IN ('PURCHASE_INVOICE', 'STOCK_OPENING')
     ORDER BY dl.item_id, d.document_date DESC, dl.line_no DESC`);
-  const [stockRows, rateRows, lastPurchaseRows, supplierOpts, unitOpts, locationOpts] = await Promise.all([
+  const ruleScope = await companyInPermissionScope(unitConversions.companyId, session, "products");
+  const [stockRows, rateRows, lastPurchaseRows, supplierOpts, unitOpts, locationOpts, assignedRuleRows, ruleOpts] = await Promise.all([
     stockRowsPromise,
     rateRowsPromise,
     lastPurchaseRowsPromise,
     getContactOptions(),
     getUnits(),
     getLocations(),
+    db
+      .select({
+        itemId: itemUnitConversionRules.itemId,
+        ruleId: itemUnitConversionRules.ruleId,
+      })
+      .from(itemUnitConversionRules)
+      .where(inArray(itemUnitConversionRules.itemId, ids)),
+    db
+      .select({ id: unitConversions.id, name: unitConversions.name })
+      .from(unitConversions)
+      .where(ruleScope)
+      .orderBy(unitConversions.name),
   ]);
   const ratesById = new Map(rateRows.map((row) => [row.id, row]));
   const lastPurchaseById = new Map(lastPurchaseRows.map((row) => [row.item_id, row]));
@@ -526,6 +542,12 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     stock.push({ ...row, onHand: Number(row.onHand) });
     stockByItem.set(row.itemId, stock);
   }
+  const rulesByItem = new Map<string, string[]>();
+  for (const row of assignedRuleRows) {
+    const list = rulesByItem.get(row.itemId) ?? [];
+    list.push(row.ruleId);
+    rulesByItem.set(row.itemId, list);
+  }
 
   return {
     rows: rows.map((r) => ({
@@ -533,6 +555,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
       taxable: r.taxable ?? false,
       isActive: r.isActive ?? true,
       baseUnitId: r.baseUnitId,
+      ruleIds: rulesByItem.get(r.id) ?? [],
       lastSupplierId: lastPurchaseById.get(r.id)?.contact_id ?? null,
       lastUnitId: lastPurchaseById.get(r.id)?.unit_id ?? null,
       // A `date` column comes back as YYYY-MM-DD, which is what the form wants.
@@ -543,6 +566,7 @@ export async function getProductsForEdit(itemIds: string[]): Promise<ProductEdit
     })),
     supplierOptions: supplierOpts.map((c) => ({ id: c.id, name: c.displayName, companyId: c.companyId })),
     unitOptions: unitOpts.map((u) => ({ id: u.id, name: u.symbol ? `${u.name} (${u.symbol})` : u.name })),
+    ruleOptions: ruleOpts,
     locationOptions: locationOpts.map((l) => ({ id: l.id, name: l.name })),
   };
 
@@ -569,6 +593,7 @@ export interface ProductEditInput {
   isActive: boolean;
   unitId: string;
   unitName: string;
+  ruleIds?: string[];
   supplierId: string;
   supplierName: string;
   purchaseQty: string;
@@ -785,6 +810,31 @@ export async function updateProductsBatch(
           if (!itemId || !companyId) throw new RowError(`Row ${index + 1} (${row.name.trim()}): the product could not be saved.`);
           return { row, index, itemId, companyId, unitId };
         });
+
+        const rowsWithRuleSync = saved.filter(({ row }) => row.ruleIds !== undefined);
+        if (rowsWithRuleSync.length > 0) {
+          const syncItemIds = rowsWithRuleSync.map(({ itemId }) => itemId);
+          await tx
+            .delete(itemUnitConversionRules)
+            .where(inArray(itemUnitConversionRules.itemId, syncItemIds));
+
+          const ruleEntries: { itemId: string; ruleId: string }[] = [];
+          for (const { itemId, row } of rowsWithRuleSync) {
+            for (const ruleId of new Set(row.ruleIds ?? [])) {
+              if (ruleId) ruleEntries.push({ itemId, ruleId });
+            }
+          }
+          if (ruleEntries.length > 0) {
+            await tx.insert(itemUnitConversionRules).values(ruleEntries).onConflictDoNothing();
+          }
+        }
+
+        try {
+          await assertConsistentRuleGraphs(tx, saved.map((row) => row.itemId));
+        } catch (e) {
+          throw new RowError(e instanceof Error ? e.message : "The assigned rules conflict for one of the products.");
+        }
+
         await rebuildItemBaseQuantities(tx, saved.map((row) => row.itemId));
         return null;
       })
@@ -807,6 +857,7 @@ export async function updateProductsBatch(
     await invalidateReads(...READS);
     revalidatePath("/inventory/products");
     revalidatePath("/inventory/stock");
+    revalidatePath("/inventory/unit-conversions");
     await recordAudit({
       action: "update",
       entity: "product",

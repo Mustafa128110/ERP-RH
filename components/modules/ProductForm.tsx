@@ -25,6 +25,7 @@ import { errorTextClass, inputClass, labelClass, labelTextClass, TRANSPORT_ERROR
 import { ADJUSTMENT_REASONS } from "@/lib/adjustment-constants";
 import { UNASSIGNED_LABEL, UNASSIGNED_LOCATION, locationFormValue } from "@/lib/location-constants";
 import { money, qty, todayISO } from "@/lib/format";
+import type { Row } from "@/lib/table";
 
 type Option = { id: string; name: string };
 
@@ -81,6 +82,7 @@ type EditRow = {
   taxable: boolean;
   isActive: boolean;
   unit: ComboValue;
+  ruleIds: string[];
   supplier: ComboValue;
   purchaseQty: string;
   purchaseRate: string;
@@ -109,6 +111,7 @@ const toEditRow = (r: ProductEditRow, data: ProductEditData): EditRow => {
     taxable: r.taxable,
     isActive: r.isActive,
     unit: combo(r.baseUnitId, data.unitOptions),
+    ruleIds: r.ruleIds ?? [],
     supplier: combo(r.lastSupplierId, data.supplierOptions),
     // Quantity stays blank on purpose: it means "how many arrived now", and the
     // answer to that is never "the same as last time".
@@ -134,6 +137,7 @@ const newEditRow = (companyId: string): EditRow => ({
   taxable: false,
   isActive: true,
   unit: { ...blankCombo },
+  ruleIds: [],
   supplier: { ...blankCombo },
   purchaseQty: "",
   purchaseRate: "",
@@ -176,6 +180,8 @@ export function ProductsBatchEditDialog({
   companyOptions,
   categoryOptions,
   brandOptions,
+  unitOptions = [],
+  ruleOptions = [],
   onClose,
   onDone,
   onSaving,
@@ -187,6 +193,8 @@ export function ProductsBatchEditDialog({
   companyOptions: Option[];
   categoryOptions: Option[];
   brandOptions: Option[];
+  unitOptions?: Option[];
+  ruleOptions?: Option[];
   onClose: () => void;
   onDone: () => void;
   // The list's hook: the ticked rows take what was typed and this grid steps
@@ -198,7 +206,7 @@ export function ProductsBatchEditDialog({
   // made inside the transition below, so React puts the stored values back —
   // and brings this grid out of hiding with every typed cell still in it — the
   // moment that transition ends without a save having happened.
-  onSaving?: (edits: { id: string; values: Record<string, string> }[]) => void;
+  onSaving?: (edits: { id: string; values: Partial<Row> }[]) => void;
   // Set by the list while this batch is in flight. The grid goes to
   // `display: none` rather than closing, so an error keeps every typed cell.
   hidden?: boolean;
@@ -213,6 +221,11 @@ export function ProductsBatchEditDialog({
   const [pending, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
+
+  const [batchBaseUnitId, setBatchBaseUnitId] = useState("");
+  const [batchRuleId, setBatchRuleId] = useState("");
+  const availableUnits = data?.unitOptions ?? unitOptions;
+  const availableRules = data?.ruleOptions ?? ruleOptions;
 
   // "We bought more" and "the shelf says twelve" are different statements and
   // write different documents, so the dialog makes you say which — once, for the
@@ -288,11 +301,15 @@ export function ProductsBatchEditDialog({
     return rows
       .filter((r) => r.id)
       .map((r) => {
-        const values: Record<string, string> = {
+        const values: Partial<Row> = {
           name: r.name.trim(),
           sku: r.sku.trim(),
           category: r.category.text.trim(),
           brand: r.brand.text.trim(),
+          _baseUnitId: r.unit.id || null,
+          _hasBaseUnit: Boolean(r.unit.id),
+          _ruleIds: r.ruleIds.filter(Boolean).join(","),
+          _hasUnitRule: r.ruleIds.length > 0,
         };
         const company = companyOptions.find((c) => c.id === r.companyId)?.name;
         if (company) values.company = company;
@@ -327,6 +344,7 @@ export function ProductsBatchEditDialog({
             isActive: r.isActive,
             unitId: r.unit.id,
             unitName: r.unit.text,
+            ruleIds: r.ruleIds,
             supplierId: r.supplier.id,
             supplierName: r.supplier.text,
             purchaseQty: r.purchaseQty,
@@ -372,7 +390,8 @@ export function ProductsBatchEditDialog({
     Brand: "w-36",
     Tax: "w-32",
     Active: "w-20",
-    "Base Stock Unit": "w-36",
+    "Base Quantity": "w-44",
+    "Unit Rules": "w-64",
     "In Stock": "w-28",
     "Sales Rate": "w-32",
     Supplier: "w-44",
@@ -391,7 +410,8 @@ export function ProductsBatchEditDialog({
     "Brand",
     "Tax",
     "Active",
-    "Base Stock Unit",
+    "Base Quantity",
+    "Unit Rules",
     "In Stock",
     "Sales Rate",
     ...(mode === "purchase" ? ["Supplier", "Qty Received", "Purchase Rate"] : []),
@@ -522,6 +542,92 @@ export function ProductsBatchEditDialog({
             )}
           </fieldset>
 
+          <fieldset className="flex flex-col gap-3 rounded border border-sand p-3">
+            <legend className="px-1 text-sm font-medium text-ink">Base Quantity &amp; Unit Rules (Batch)</legend>
+            <div className="flex flex-wrap items-center gap-6">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-steel">Base Quantity:</span>
+                <select
+                  value={batchBaseUnitId}
+                  onChange={(e) => setBatchBaseUnitId(e.target.value)}
+                  className="h-8 rounded border border-sand bg-transparent px-2 text-xs text-ink outline-none"
+                >
+                  <option value="">Select unit</option>
+                  {availableUnits.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!batchBaseUnitId}
+                  onClick={() => {
+                    const picked = availableUnits.find((u) => u.id === batchBaseUnitId);
+                    if (picked) {
+                      setRows((prev) => prev.map((r) => ({ ...r, unit: { id: picked.id, text: picked.name } })));
+                      setBatchBaseUnitId("");
+                    }
+                  }}
+                  className="h-8 rounded border border-sand px-2.5 text-xs font-medium text-steel hover:bg-ivory disabled:opacity-40"
+                >
+                  Assign to All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRows((prev) => prev.map((r) => ({ ...r, unit: { id: "", text: "" } })));
+                  }}
+                  className="h-8 rounded border border-error/30 px-2.5 text-xs font-medium text-error hover:bg-error/5"
+                  title="Remove base quantity from all products in this edit"
+                >
+                  Remove Base Quantity (All)
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-steel">Unit Rules:</span>
+                <select
+                  value={batchRuleId}
+                  onChange={(e) => setBatchRuleId(e.target.value)}
+                  className="h-8 rounded border border-sand bg-transparent px-2 text-xs text-ink outline-none"
+                >
+                  <option value="">Select rule</option>
+                  {availableRules.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!batchRuleId}
+                  onClick={() => {
+                    setRows((prev) =>
+                      prev.map((r) =>
+                        r.ruleIds.includes(batchRuleId) ? r : { ...r, ruleIds: [...r.ruleIds, batchRuleId] }
+                      )
+                    );
+                    setBatchRuleId("");
+                  }}
+                  className="h-8 rounded border border-sand px-2.5 text-xs font-medium text-steel hover:bg-ivory disabled:opacity-40"
+                >
+                  Assign to All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRows((prev) => prev.map((r) => ({ ...r, ruleIds: [] })));
+                  }}
+                  className="h-8 rounded border border-error/30 px-2.5 text-xs font-medium text-error hover:bg-error/5"
+                  title="Remove all unit rules from all products in this edit"
+                >
+                  Remove Unit Rules (All)
+                </button>
+              </div>
+            </div>
+          </fieldset>
+
           <div className="scroll-thin overflow-auto rounded border border-sand">
             <table className="w-full min-w-max table-fixed border-collapse text-sm">
               <thead>
@@ -612,7 +718,99 @@ export function ProductsBatchEditDialog({
                         className="h-5 w-5 rounded border-sand"
                       />
                     </td>
-                    <ComboCell value={row.unit} options={data.unitOptions} placeholder="Unit" onChange={(unit) => update(i, { unit })} />
+                    <td className={cellClass}>
+                      <div className="flex items-center">
+                        <div className="min-w-0 flex-1">
+                          <ComboBox
+                            value={row.unit.text}
+                            options={availableUnits}
+                            placeholder="Base Unit"
+                            className={cellInputClass}
+                            onChange={(text) => {
+                              const trimmed = text.trim();
+                              const matched =
+                                availableUnits.find((o) => o.name === text) ??
+                                availableUnits.find((o) => o.name.toLowerCase() === trimmed.toLowerCase());
+                              update(i, { unit: { text, id: matched?.id ?? "" } });
+                            }}
+                          />
+                        </div>
+                        {(row.unit.id || row.unit.text) && (
+                          <button
+                            type="button"
+                            onClick={() => update(i, { unit: { id: "", text: "" } })}
+                            className="px-1.5 py-1 text-xs font-bold text-steel hover:text-error shrink-0"
+                            title="Remove base quantity"
+                            aria-label={`Remove base quantity for row ${i + 1}`}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className={`${cellClass} p-1`}>
+                      <div className="flex flex-col gap-1 min-w-[12rem]">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {row.ruleIds.map((rId) => {
+                            const rule = availableRules.find((r) => r.id === rId);
+                            const ruleName = rule?.name ?? rId;
+                            return (
+                              <span
+                                key={rId}
+                                className="inline-flex max-w-[11rem] items-center gap-1 truncate rounded border border-sand/60 bg-navy-800/5 px-1.5 py-0.5 text-xs font-medium text-ink"
+                                title={ruleName}
+                              >
+                                <span className="truncate">{ruleName}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => update(i, { ruleIds: row.ruleIds.filter((id) => id !== rId) })}
+                                  className="shrink-0 font-bold leading-none text-steel hover:text-error"
+                                  title={`Remove rule: ${ruleName}`}
+                                  aria-label={`Remove unit rule ${ruleName} from row ${i + 1}`}
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            );
+                          })}
+                          {row.ruleIds.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => update(i, { ruleIds: [] })}
+                              className="px-0.5 text-[10px] text-steel hover:text-error underline"
+                              title="Remove all unit rules"
+                              aria-label={`Remove all unit rules from row ${i + 1}`}
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        {availableRules.filter((r) => !row.ruleIds.includes(r.id)).length > 0 && (
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                update(i, { ruleIds: [...row.ruleIds, e.target.value] });
+                              }
+                            }}
+                            className="h-6 w-full cursor-pointer rounded border border-sand bg-transparent px-1 text-xs text-steel outline-none focus:text-ink"
+                            aria-label={`Assign unit rule to row ${i + 1}`}
+                          >
+                            <option value="">+ Assign rule…</option>
+                            {availableRules
+                              .filter((r) => !row.ruleIds.includes(r.id))
+                              .map((r) => (
+                                <option key={r.id} value={r.id}>
+                                  {r.name}
+                                </option>
+                              ))}
+                          </select>
+                        )}
+                        {row.ruleIds.length === 0 && availableRules.length === 0 && (
+                          <span className="text-xs text-steel">—</span>
+                        )}
+                      </div>
+                    </td>
 
                     {/* Read-only: both are derived from documents, so they change
                         by recording a movement or raising a sale, not by typing

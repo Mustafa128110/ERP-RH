@@ -11,7 +11,7 @@ import { companyInPermissionScope } from "@/lib/auth/scope";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
-import { rebuildItemBaseQuantities } from "@/lib/queries/unit-conversion";
+import { assertConsistentRuleGraphs, rebuildItemBaseQuantities } from "@/lib/queries/unit-conversion";
 import { expandUnitConversionOptions } from "@/lib/unit-conversion";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -55,50 +55,7 @@ async function scopedRule(id: string, action: "view" | "create" | "edit" | "dele
   return { session, rule };
 }
 
-// Multiple rules may form a chain, but every path must agree.  A contradiction
-// would make both stock and unit-price conversion ambiguous, so reject it while
-// the assignment/update transaction can still roll back safely.
-async function assertConsistentRuleGraphs(tx: Tx, itemIds: string[]) {
-  const ids = [...new Set(itemIds.filter(Boolean))];
-  if (ids.length === 0) return;
-  const [assignments, rules] = await Promise.all([
-    tx
-      .select({ ruleId: unitConversions.id, itemId: itemUnitConversionRules.itemId, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier })
-      .from(itemUnitConversionRules)
-      .innerJoin(unitConversions, eq(unitConversions.id, itemUnitConversionRules.ruleId))
-      .where(inArray(itemUnitConversionRules.itemId, ids)),
-    tx.select({ ruleId: unitConversions.id, fromUnitId: unitConversions.fromUnitId, toUnitId: unitConversions.toUnitId, multiplier: unitConversions.multiplier }).from(unitConversions),
-  ]);
-  const rows = expandUnitConversionOptions(assignments, rules);
-  const byItem = new Map<string, typeof rows>();
-  for (const row of rows) byItem.set(row.itemId, [...(byItem.get(row.itemId) ?? []), row]);
-  for (const [itemId, rules] of byItem) {
-    const graph = new Map<string, { to: string; factor: number }[]>();
-    for (const rule of rules) {
-      const factor = Number(rule.multiplier);
-      graph.set(rule.fromUnitId, [...(graph.get(rule.fromUnitId) ?? []), { to: rule.toUnitId, factor }]);
-      graph.set(rule.toUnitId, [...(graph.get(rule.toUnitId) ?? []), { to: rule.fromUnitId, factor: 1 / factor }]);
-    }
-    const known = new Map<string, number>();
-    for (const first of graph.keys()) {
-      if (known.has(first)) continue;
-      known.set(first, 1);
-      const queue = [first];
-      for (let cursor = 0; cursor < queue.length; cursor++) {
-        const from = queue[cursor];
-        const fromFactor = known.get(from)!;
-        for (const edge of graph.get(from) ?? []) {
-          const next = fromFactor * edge.factor;
-          const seen = known.get(edge.to);
-          if (seen === undefined) { known.set(edge.to, next); queue.push(edge.to); }
-          else if (Math.abs(seen - next) > Math.max(1, Math.abs(seen), Math.abs(next)) * 0.000001) {
-            throw new Error(`The selected rules conflict for a product (${itemId}).`);
-          }
-        }
-      }
-    }
-  }
-}
+
 
 // A rule can affect products without being assigned to them directly. For
 // example, changing the shared dozen-to-piece rule changes every product whose

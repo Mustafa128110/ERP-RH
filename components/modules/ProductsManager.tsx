@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ProductBatchAddDialog, ProductsBatchEditDialog } from "@/components/modules/ProductForm";
 import { MergeProductsDialog } from "@/components/modules/MergeProductsDialog";
-import { ProductAssignmentDialog } from "@/components/modules/ProductAssignmentDialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -113,7 +112,6 @@ export function ProductsManager({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
-  const [assignment, setAssignment] = useState<"rule" | "base-unit" | null>(null);
   const [dotHelpOpen, setDotHelpOpen] = useState(false);
   const dots = useMemo(() => setupDots(ruleOptions, unitOptions), [ruleOptions, unitOptions]);
   const dotByKey = useMemo(() => new Map(dots.map((dot) => [`${dot.kind}:${dot.id}`, dot])), [dots]);
@@ -210,24 +208,6 @@ export function ProductsManager({
         </button>
         <button
           type="button"
-          onClick={() => setAssignment("rule")}
-          disabled={selected.length === 0}
-          title={selected.length === 0 ? "Tick the products that should use the rule" : undefined}
-          className="h-11 rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          Assign Rule
-        </button>
-        <button
-          type="button"
-          onClick={() => setAssignment("base-unit")}
-          disabled={selected.length === 0}
-          title={selected.length === 0 ? "Tick the products that should use the base unit" : undefined}
-          className="h-11 rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          Assign Base Unit
-        </button>
-        <button
-          type="button"
           onClick={() => setMergeOpen(true)}
           className="h-11 rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory"
         >
@@ -276,6 +256,8 @@ export function ProductsManager({
           companyOptions={companyOptions}
           categoryOptions={categoryOptions}
           brandOptions={brandOptions}
+          unitOptions={unitOptions}
+          ruleOptions={ruleOptions}
           hidden={selected.some((id) => pending.includes(id))}
           onClose={() => setEditOpen(false)}
           onDone={closeEdit}
@@ -294,19 +276,6 @@ export function ProductsManager({
       )}
 
       {mergeOpen && <MergeProductsDialog onClose={() => setMergeOpen(false)} onDone={closeMerge} />}
-
-      {assignment && (
-        <ProductAssignmentDialog
-          kind={assignment}
-          itemIds={selected}
-          options={assignment === "rule" ? ruleOptions : unitOptions}
-          onClose={() => setAssignment(null)}
-          onDone={() => {
-            setAssignment(null);
-            setSelected([]);
-          }}
-        />
-      )}
 
       {dotHelpOpen && (
         <Dialog title="Product Setup Dot Guide" size="wide" onClose={() => setDotHelpOpen(false)}>
