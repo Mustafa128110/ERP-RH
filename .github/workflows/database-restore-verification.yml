@@ -43,7 +43,7 @@ jobs:
       AWS_DEFAULT_REGION: auto
       VERIFY_DATABASE_URL: postgresql://restore_verify:restore_verify_only@localhost:5432/restore_verify
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate required secrets
         shell: bash
         run: |
