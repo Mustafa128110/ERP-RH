@@ -11,7 +11,7 @@ import { Icon } from "./Icon";
 import { iconButtonClass } from "./form-styles";
 import { matchesTableSearch, parseTableSearch } from "@/lib/search-query";
 import { compareSortedRows, parseTableSorts, promoteTableSort, tableColumnSortKey, type TableSort } from "@/lib/table-sort";
-import { useGlobalColumnWidths } from "./useGlobalColumnWidths";
+import { useTableColumnLayout } from "./useGlobalColumnWidths";
 import { useHistory } from "./HistoryProvider";
 
 // Every list gets a row number in front, so a row can be pointed at out loud
@@ -19,38 +19,7 @@ import { useHistory } from "./HistoryProvider";
 // real column — the count is the row's position on screen, not data anyone stores.
 const SNO_KEY = "__sno";
 const snoColumn: ColumnDef = { key: SNO_KEY, label: "#", align: "right" };
-const SELECT_COL_WIDTH = 44;
-
-function defaultColWidth(col: ColumnDef): number {
-  if (typeof col.width === "number") return col.width;
-  if (typeof col.width === "string") {
-    const parsed = parseInt(col.width, 10);
-    if (!isNaN(parsed)) return parsed;
-  }
-  const key = col.key.toLowerCase();
-  if (key === SNO_KEY) return 100;
-  if (["pdf", "png", "download"].includes(key)) return 76;
-  if (key === "return") return 90;
-  if (["statement", "action", "actions"].includes(key)) return 120;
-  if (col.badge || ["status", "display_status", "state"].includes(key)) return 100;
-  if (["isdefault", "default"].includes(key)) return 80;
-  if (key === "age") return 70;
-  if (["date", "documentdate", "duedate", "validuntil", "timestamp", "createdat"].includes(key)) return 120;
-  if (["qty", "quantity"].includes(key)) return 90;
-  if (["rate", "unitprice", "unitcost", "cost", "price", "retailprice"].includes(key)) return 110;
-  if (["total", "paid", "balance", "grandtotal", "paidamount", "amount", "debit", "credit", "linetotal", "stock", "creditbalance", "debtbalance"].includes(key)) return 130;
-  if (col.align === "right") return 120;
-  if (["sku", "code", "number", "ref", "salenumber", "chequenumber", "ordernumber"].includes(key)) return 130;
-  if (["saletype", "type", "kind", "method"].includes(key)) return 130;
-  if (["unit", "symbol"].includes(key)) return 90;
-  if (["phone"].includes(key)) return 130;
-  if (["company", "sellingcompany", "buyingcompany", "category", "brand", "location", "fromlocation", "tolocation", "account", "fromaccount", "toaccount", "bankname", "bank", "username", "user", "role"].includes(key)) return 140;
-  if (["accountnumber", "iban"].includes(key)) return 180;
-  if (["customer", "supplier", "party", "contact", "name", "displayname"].includes(key)) return 220;
-  if (["item", "itemname", "description", "summary", "notes", "reason", "lines", "address"].includes(key)) return 240;
-  return 150;
-}
-
+const SELECT_COL_WIDTH = 48;
 
 function getColPadding(col: ColumnDef): React.CSSProperties {
   const style: React.CSSProperties = {};
@@ -151,7 +120,9 @@ export function DataTable({
   "use no memo"; // The virtualizer owns mutable measurements and subscriptions.
   const router = useRouter();
   const allColumns = useMemo(() => [snoColumn, ...columns.filter((column) => column.key !== "company")], [columns]);
-  const getColWidth = useGlobalColumnWidths(allColumns, rows, defaultColWidth);
+  const selectable = selected !== undefined && onSelectedChange !== undefined;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { getWidth: getColWidth, minimumWidth: totalTableWidth, tableWidth } = useTableColumnLayout(allColumns, rows, scrollRef, selectable);
   // Which row the highlight is on, and where a Shift-extended range started.
   // -1 until the list is actually used: an untouched page shouldn't already be
   // pointing at its first row.
@@ -191,7 +162,6 @@ export function DataTable({
   const anchor = useRef(0);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Recomputed only when the rows themselves change, so typing filters against
   // a prepared index rather than re-stringifying every row on every keystroke.
@@ -255,7 +225,6 @@ export function DataTable({
     scrollRef.current?.scrollTo({ top: 0 });
   }
 
-  const selectable = selected !== undefined && onSelectedChange !== undefined;
   const selectedSet = new Set(selected ?? []);
   // Ids of what's on screen. Select-all ticks the filtered set, which is what
   // "search for the ones that need fixing, then tick them all" needs it to mean.
@@ -473,10 +442,9 @@ export function DataTable({
     );
   }
 
-  const totalTableWidth = (selectable ? SELECT_COL_WIDTH : 0) + allColumns.reduce((sum, col) => sum + getColWidth(col), 0);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       {search}
       {visible.length > 150 && <div className="flex shrink-0 items-center justify-between text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
       {/* tabIndex makes the list itself focusable, which is what gives the arrow
@@ -496,17 +464,18 @@ export function DataTable({
           </p>
         ) : (
           <table
+            data-column-layout="managed"
             data-responsive
             aria-rowcount={visible.length + 1}
             className="table-fixed border-collapse text-sm md:min-w-max"
-            style={{ width: `${totalTableWidth}px`, minWidth: `${totalTableWidth}px`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
+            style={{ width: `${tableWidth}px`, minWidth: `${totalTableWidth}px`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
           >
             <colgroup>
               {selectable && <col style={{ width: `${SELECT_COL_WIDTH}px` }} className="w-11" />}
               {allColumns.map((col) => (
                 <col
                   key={col.key}
-                  style={{ width: `${getColWidth(col)}px` }}
+                  style={{ width: getColWidth(col) }}
                   className={col.hideOnMobile ? "hidden md:table-column" : ""}
                 />
               ))}
@@ -532,7 +501,8 @@ export function DataTable({
                   return (
                     <th
                       data-column-key={col.key}
-                      style={{ width: `${getColWidth(col)}px`, ...getColPadding(col) }}
+                      data-sortable={sortable || undefined}
+                      style={{ width: getColWidth(col), ...getColPadding(col) }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
                       className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
@@ -626,7 +596,7 @@ export function DataTable({
                     )}
                     {href
                       ? allColumns.map((col) => (
-                          <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px` }} className={`p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}>
+                          <td key={col.key} data-label={col.label} style={{ width: getColWidth(col) }} className={`p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}>
                             <Link href={href} className={`block ${cellClass(col)}`} style={getColPadding(col)}>
                               {body(col)}
                             </Link>
@@ -637,7 +607,7 @@ export function DataTable({
                             <td
                               key={col.key}
                               data-label={col.label}
-                              style={{ width: `${getColWidth(col)}px` }}
+                              style={{ width: getColWidth(col) }}
                               className={`${col.label ? "cursor-pointer " : ""}p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}
                               onMouseDown={col.label ? undefined : (event) => event.stopPropagation()}
                               onClick={col.label ? () => onRowClick(row) : (event) => event.stopPropagation()}
@@ -646,7 +616,7 @@ export function DataTable({
                             </td>
                           ))
                         : allColumns.map((col) => (
-                            <td key={col.key} data-label={col.label} style={{ width: `${getColWidth(col)}px`, ...getColPadding(col) }} className={cellClass(col)}>
+                            <td key={col.key} data-label={col.label} style={{ width: getColWidth(col), ...getColPadding(col) }} className={cellClass(col)}>
                               {body(col)}
                             </td>
                           ))}

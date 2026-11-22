@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
-import { columnWidthKey, fittedColumnWidth } from "@/lib/column-widths";
+import { useEffect, useState, useSyncExternalStore, type RefObject } from "react";
+import { columnWidthKey, createColumnLayout, fittedColumnWidth, minimumColumnWidth } from "@/lib/column-widths";
 import type { ColumnDef, Row } from "@/lib/table";
 
-const STORAGE = "erp:global-column-widths:v1";
+// v1 mixed fixed page widths into content measurements. Start with actual minima.
+const STORAGE = "erp:global-column-widths:v2";
 let widths: Record<string, number> = {};
 const empty: Record<string, number> = {};
 const listeners = new Set<() => void>();
@@ -31,7 +32,8 @@ export const globalColumnWidths = {
   },
 };
 
-export function useGlobalColumnWidths(columns: ColumnDef[], rows: Row[], fallback: (column: ColumnDef) => number) {
+export function useGlobalColumnWidths(columns: ColumnDef[], rows: Row[]) {
+  // Page-specific width hints are excluded: only content measurements are shared.
   const shared = useSyncExternalStore(subscribe, snapshot, serverSnapshot);
   useEffect(() => {
     let changed = false;
@@ -51,8 +53,8 @@ export function useGlobalColumnWidths(columns: ColumnDef[], rows: Row[], fallbac
     context.font = `${14 * scale}px ${getComputedStyle(document.body).fontFamily}`;
     for (const column of columns) {
       const key = columnWidthKey(column.key);
-      const texts = rows.map((row) => row[column.key]).filter((value) => typeof value === "string" || typeof value === "number");
-      const measured = fittedColumnWidth(context.measureText(column.label.toUpperCase()).width, texts.map((value) => context.measureText(String(value)).width), key === "serial" ? 100 : fallback(column));
+      const texts = key === "serial" ? [rows.length] : rows.map((row) => row[column.key]).filter((value) => typeof value === "string" || typeof value === "number");
+      const measured = fittedColumnWidth(context.measureText(column.label.toUpperCase()).width, texts.map((value) => context.measureText(String(value)).width), minimumColumnWidth(key));
       if (measured > (next[key] ?? 0)) { next[key] = measured; changed = true; }
     }
     if (changed) {
@@ -60,6 +62,39 @@ export function useGlobalColumnWidths(columns: ColumnDef[], rows: Row[], fallbac
       try { localStorage.setItem(STORAGE, JSON.stringify(widths)); } catch { /* In-memory global sizing remains available. */ }
       for (const listener of listeners) listener();
     }
-  }, [columns, rows, fallback]);
-  return (column: ColumnDef) => Math.max(fallback(column), shared[columnWidthKey(column.key)] ?? 0);
+  }, [columns, rows]);
+  return (column: ColumnDef) => Math.max(minimumColumnWidth(column.key), shared[columnWidthKey(column.key)] ?? 0);
+}
+
+const mobileSnapshot = () => window.matchMedia("(max-width: 767px)").matches;
+const desktopSnapshot = () => false;
+function subscribeMobile(listener: () => void) {
+  const media = window.matchMedia("(max-width: 767px)");
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+
+export function useTableColumnLayout(columns: ColumnDef[], rows: Row[], container: RefObject<HTMLElement | null>, selectable = false) {
+  const getMinimum = useGlobalColumnWidths(columns, rows);
+  const mobile = useSyncExternalStore(subscribeMobile, mobileSnapshot, desktopSnapshot);
+  const [availableWidth, setAvailableWidth] = useState(0);
+  const hasRows = rows.length > 0;
+  useEffect(() => {
+    const element = container.current;
+    if (!element) return;
+    const measure = () => {
+      const style = getComputedStyle(element);
+      setAvailableWidth(Math.max(0, element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  // A first record replaces DataTable's empty placeholder with the scroll area.
+  }, [container, hasRows]);
+  const visible = columns.filter(column => !mobile || !column.hideOnMobile);
+  const layoutColumns = [...(selectable ? [{key: "__select", minimum: 48}] : []), ...visible.map(column => ({key: column.key, minimum: getMinimum(column)}))];
+  const layout = createColumnLayout(layoutColumns, availableWidth);
+  const widths = new Map(layoutColumns.map((column, index) => [column.key, layout.widths[index]]));
+  return {minimumWidth: layout.minimumWidth, tableWidth: layout.tableWidth, getWidth: (column: ColumnDef) => widths.get(column.key) ?? "0px"};
 }

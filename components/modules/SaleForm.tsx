@@ -12,7 +12,7 @@ import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { DEFAULT_SALE_TYPE, entryChannel, type SaleType } from "@/lib/sale-constants";
 import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
-import { useGlobalColumnWidths } from "@/components/ui/useGlobalColumnWidths";
+import { useTableColumnLayout } from "@/components/ui/useGlobalColumnWidths";
 import type { ColumnDef, Row } from "@/lib/table";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
@@ -21,7 +21,6 @@ import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
 import { multiplierToBase, priceBetweenUnits, unitIdsForProduct, type UnitConversionOption } from "@/lib/unit-conversion";
 
-const saleColumnMinimum = (column: ColumnDef) => Number(column.width ?? 100);
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -221,10 +220,11 @@ export function SaleFormPage({
     { key: "__sno", label: "#", width: 100 }, { key: "item", label: "Item", width: 340 },
     { key: "unit", label: "Unit", width: 128 }, { key: "quantity", label: "Qty", width: 96 },
     { key: "unitPrice", label: "Unit Price", width: 112 }, { key: "rateList", label: "Rate List", width: 112 },
-    { key: "total", label: "Total", width: 130 }, { key: "marketPurchase", label: "Market Buy", width: 110 }, { key: "actions", label: "", width: 48 },
+    { key: "total", label: "Total", width: 130 }, { key: "marketPurchase", label: "Market Buy", width: 110 }, { key: "remove", label: "", width: 48 },
   ], []);
   const sizingRows = useMemo<Row[]>(() => lines.map((line, index) => ({ __sno: index + 1, item: line.itemText, unit: line.unitText, quantity: line.quantity, unitPrice: line.unitPrice, rateList: line.listPrice, total: line.quantity && line.unitPrice ? money(Number(line.quantity) * Number(line.unitPrice)) : "" })), [lines]);
-  const gridWidth = useGlobalColumnWidths(saleColumns, sizingRows, saleColumnMinimum);
+  const saleGridContainer = useRef<HTMLDivElement>(null);
+  const { getWidth: gridWidth, minimumWidth: saleMinimumWidth, tableWidth: saleTableWidth } = useTableColumnLayout(saleColumns, sizingRows, saleGridContainer);
   const [companyId, setCompanyId] = useState(
     () => defaults?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
@@ -616,20 +616,20 @@ export function SaleFormPage({
             it isn't shown here; the server stamps it on save. --- */}
         <div className="flex flex-col gap-2">
           <span className={sectionTitleClass}>Items</span>
-          <div className="overflow-x-auto rounded border border-sand">
-            <table className="sale-items-grid md:table-fixed border-collapse text-sm" style={{ width: saleColumns.reduce((sum, column) => sum + gridWidth(column), 0) }}>
+          <div ref={saleGridContainer} className="overflow-x-auto rounded border border-sand">
+            <table data-column-layout="managed" className="sale-items-grid md:table-fixed border-collapse text-sm" style={{ width: saleTableWidth, minWidth: saleMinimumWidth }}>
               <colgroup>{saleColumns.map((column) => <col key={column.key} style={{ width: gridWidth(column) }} />)}</colgroup>
               <thead>
                 <tr>
-                  <th className={`${thClass} w-10 text-right`}>#</th>
-                  <th className={thClass}>Item</th>
-                  <th className={`${thClass} w-32`}>Unit</th>
-                  <th className={`${thClass} w-24`}>Qty</th>
-                  <th className={`${thClass} w-28`}>Unit Price</th>
-                  <th className={`${thClass} w-28`} title="Cost per unit from the rate list">Rate List</th>
-                  <th className={`${thClass} w-28 text-right`}>Total</th>
-                  <th className={`${thClass} w-24 text-center`} title="Buy specifically from the market to fulfil this sale">Market Buy</th>
-                  <th className="w-8 border border-sand" />
+                  <th data-column-key="__sno" className={`${thClass} w-10 text-right`}>#</th>
+                  <th data-column-key="item" className={thClass}>Item</th>
+                  <th data-column-key="unit" className={`${thClass} w-32`}>Unit</th>
+                  <th data-column-key="quantity" className={`${thClass} w-24`}>Qty</th>
+                  <th data-column-key="unitPrice" className={`${thClass} w-28`}>Unit Price</th>
+                  <th data-column-key="rateList" className={`${thClass} w-28`} title="Cost per unit from the rate list">Rate List</th>
+                  <th data-column-key="total" className={`${thClass} w-28 text-right`}>Total</th>
+                  <th data-column-key="marketPurchase" className={`${thClass} w-24 text-center`} title="Buy specifically from the market to fulfil this sale">Market Buy</th>
+                  <th data-column-key="remove" className="w-8 border border-sand" />
                 </tr>
               </thead>
               <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>

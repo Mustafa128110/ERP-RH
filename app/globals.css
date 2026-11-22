@@ -482,7 +482,7 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
   table[data-responsive] {
     display: table !important;
     min-width: 0;
-    width: var(--table-min-width, max-content) !important;
+    width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
   }
@@ -537,6 +537,10 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
     min-height: 0;
     display: table-cell !important;
   }
+  table[data-responsive] th.hidden,
+  table[data-responsive] td.hidden {
+    display: none !important;
+  }
 }
 
 /* Compact fact containers used outside DataTable must carry the same containment
@@ -574,6 +578,10 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
  * two-level card: item owns the full first row; its commercial facts sit below.
  * The source order remains logical for screen readers and keyboard grid keys. */
 @media (max-width: 767px) {
+  .sale-items-grid colgroup,
+  .document-lines-grid colgroup {
+    display: none;
+  }
   .sale-items-grid,
   .sale-items-grid tbody,
   .sale-items-grid tr {
@@ -589,6 +597,10 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
   }
   .sale-items-grid tbody {
     padding: 0.5rem;
+  }
+  .sale-items-grid {
+    min-width: 0 !important;
+    width: 100% !important;
   }
   .sale-items-grid tr {
     display: grid;
@@ -751,6 +763,7 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
   }
   .document-lines-grid {
     min-width: 0 !important;
+    width: 100% !important;
   }
   .document-lines-grid thead {
     position: absolute;
@@ -961,4 +974,28 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
 }
 .scroll-thin::-webkit-scrollbar-thumb:hover {
   background-color: var(--color-steel);
+}
+
+/* A 12px inset on each side leaves a fixed 24px reading gap between
+ * neighbouring columns, including when content minima require scrolling. */
+table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid) > thead > tr > th,
+table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid) > tbody > tr:not([data-virtual-spacer]) > td,
+table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid) > tfoot > tr > td {
+  padding-inline: 12px !important;
+}
+table[data-column-layout][data-responsive] > tbody > tr:not([data-virtual-spacer]) > td.p-0 {
+  padding-inline: 0 !important;
+}
+table[data-column-layout][data-responsive] > tbody > tr:not([data-virtual-spacer]) > td.p-0 > :is(a, span).block {
+  padding-inline: 12px !important;
+}
+table[data-column-layout] > tbody > tr > td > input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+table[data-column-layout] > tbody > tr > td > select {
+  width: 100% !important;
+}
+@media (min-width: 768px) {
+  table[data-column-layout]:is(.sale-items-grid, .document-lines-grid) > thead > tr > th,
+  table[data-column-layout]:is(.sale-items-grid, .document-lines-grid) > tbody > tr > td {
+    padding-inline: 12px !important;
+  }
 }

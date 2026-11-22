@@ -33,8 +33,12 @@ window.showConversion=()=>root.render(wrap(<StockConversionManager rows={[]} opt
 const profitRow={period:'2024-01',revenue:'1000',cost:'500',grossProfit:'500',expenses:'100',adjustments:'0',netProfit:'400',documents:2};
 window.showProfit=month=>root.render(<ProfitCalendar data={{month,canExport:true,months:[profitRow],days:[{...profitRow,period:'2024-01-01'}]}}/>);
 window.showSort=()=>root.render(<DataTable columns={[{key:'date',label:'Date'},{key:'name',label:'Name'},{key:'total',label:'Total'}]} rows={[{id:'one',date:'02-01-2024',name:'B',total:'10'},{id:'two',date:'01-01-2024',name:'A',total:'20'}]} idKey='id'/>);
+function EmptyWidthFixture(){const [filled,setFilled]=React.useState(false);return <><button type='button' onClick={()=>setFilled(true)}>Add fixture row</button><DataTable columns={[{key:'name',label:'Name'},{key:'total',label:'Total'}]} rows={filled?[{id:'created',name:'Created fixture product',total:'100.00'}]:[]} idKey='id'/></>;}
+window.showEmptyTable=()=>root.render(<><ColumnSizing/><section id='empty-transition'><EmptyWidthFixture/></section></>);
+window.showControlGroup=()=>root.render(<><ColumnSizing/><section style={{width:560}}><div id='control-group' style={{overflow:'auto'}}><table><thead><tr><th>#</th><th>Name</th><th>Quantity</th></tr></thead><tbody><tr><td>1</td><td><div style={{display:'flex',gap:8}}><select aria-label='Product kind' style={{minWidth:110}} defaultValue='new'><option value='new'>New product</option><option value='existing'>Existing product</option></select><input aria-label='Grouped product name' readOnly value='A long new product name that must remain fully readable beside its product selector' style={{width:'100%',minWidth:144,padding:'4px 8px'}}/></div></td><td><input type='number' aria-label='Grouped quantity' readOnly value='123456.78' style={{width:72}}/></td></tr></tbody></table></div></section></>);
 const columns=[{key:'sku',label:'SKU'},{key:'total',label:'Total',align:'right'}];
 window.showTables=()=>root.render(<><ColumnSizing/><section id='first'><DataTable columns={columns} rows={[{id:'a',sku:'FIXTURE-'+ 'LONG-'.repeat(24),total:'123,456,789.99'}]} idKey='id'/></section><section id='second'><DataTable columns={columns} rows={[{id:'b',sku:'Short',total:'1.00'}]} idKey='id'/></section></>);
+window.showFluidTables=()=>root.render(<><ColumnSizing/>{['fluid-a','fluid-b'].map((id,index)=><section id={id} key={id}><DataTable columns={[{key:'name',label:'Name'},{key:'total',label:'Total',align:'right'},{key:'date',label:'Date'},{key:'code',label:'Extra code',hideOnMobile:true},{key:'actions',label:'Actions',render:()=> <button type='button'>Edit</button>}]} rows={[{id:'fluid',name:index?'Short':'A product name with enough detail to identify the exact item',total:'123,456,789.99',date:'23-11-2026',code:'REF-001'}]} idKey='id' onRowClick={()=>{}}/></section>)}<section id='native-fluid'><div style={{overflow:'auto'}}><table style={{whiteSpace:'nowrap'}}><colgroup><col style={{width:'40%'}}/><col style={{width:'20%'}}/><col style={{width:'40%'}}/></colgroup><thead><tr><th>#</th><th data-column-key='name'>Product Name</th><th>Total</th></tr></thead><tbody><tr><td>1</td><td><input aria-label='Native product name' readOnly value='A product name with enough detail to identify the exact item' style={{width:'120px',minWidth:0,padding:'4px 8px'}}/></td><td>123,456,789.99</td></tr></tbody><tfoot><tr><td colSpan={3}>Footer spanning the full table</td></tr></tfoot></table></div></section></>);
 window.makeLedger=async()=>{
  const node=document.createElement('div');node.className='force-light';node.style.width='900px';node.style.padding='40px';
  node.innerHTML='<header><h1>Fixture ledger export</h1><p>Pagination regression check</p></header><div style="margin-top:24px">Opening 0.00 · Closing 2,250.00</div><table style="width:100%;border-collapse:collapse;margin-top:24px"><thead><tr><th style="width:112px">Date</th><th style="width:224px">Description</th><th style="width:128px">Ref</th><th style="width:144px">Debit</th><th style="width:144px">Credit</th><th style="width:160px">Balance</th></tr></thead><tbody>'+Array.from({length:225},(_,i)=>'<tr data-record="'+i+'"><td style="padding:7px">21-11-2026</td><td>Fixture transaction '+i+' '+(i===34?'LONG'.repeat(60):'')+'</td><td>REF-'+i+'</td><td>10.00</td><td>0.00</td><td>'+((i+1)*10).toFixed(2)+'</td></tr>').join('')+'</tbody></table>';
@@ -63,7 +67,7 @@ const bundle=await build({stdin:{contents:entry,loader:'tsx',resolveDir:process.
 }}]});
 const cssFolders=[existsSync('.next/static') ? '.next/static' : '.next/dev/static'];
 const css=cssFolders.flatMap(folder=>readdirSync(folder,{recursive:true}).filter(file=>String(file).endsWith('.css')).map(file=>readFileSync(join(folder,file),'utf8'))).join('\n');
-const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'text/javascript':req.url==='/app.css'?'text/css':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].text:req.url==='/app.css'?css:'<!doctype html><html><head><link rel="stylesheet" href="/app.css"><style>body{font-family:Arial,sans-serif}table{border-collapse:collapse}th,td{padding:8px}section{margin:20px;overflow:auto}.hidden{display:none}input,select{max-width:100%}</style></head><body><div id="root"></div><script src="/app.js"></script></body></html>')});
+const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'text/javascript':req.url==='/app.css'?'text/css':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].text:req.url==='/app.css'?css:'<!doctype html><html><head><link rel="stylesheet" href="/app.css"><style>body{font-family:Arial,sans-serif}table{border-collapse:collapse}th,td{padding:8px}section{margin:20px;overflow:auto}input,select{max-width:100%}</style></head><body><div id="root"></div><script src="/app.js"></script></body></html>')});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({headless:true,...(process.env.ERP_BROWSER_EXECUTABLE?{executablePath:process.env.ERP_BROWSER_EXECUTABLE}:{})});
 const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -79,13 +83,57 @@ try{
  const paid=await page.locator('label').filter({has:page.locator('select[name=isPaid]')}).boundingBox();
  const account=await page.getByText('Payment account',{exact:true}).locator('..').boundingBox();
  assert.ok(Math.abs(paid.y-account.y)<3,'Paid and payment account must share a desktop row');
+ await page.setViewportSize({width:390,height:900});
+ await page.waitForFunction(()=>{const table=document.querySelector('.sale-items-grid');return table.getBoundingClientRect().width<=table.parentElement.clientWidth+1;});
+ assert.ok(await page.locator('.sale-items-grid tbody tr').first().evaluate(row=>row.getBoundingClientRect().width<=row.closest('table').parentElement.clientWidth+1),'mobile sale cards stay within their container');
+ await page.setViewportSize({width:1440,height:1000});
  await page.screenshot({path:join(out,'sale.png'),fullPage:true});
  await page.evaluate(()=>window.showRole());await page.getByRole('combobox',{name:'sales access'}).selectOption('work');
  const keys=JSON.parse(await page.locator('input[name=permissionKeys]').inputValue());
  assert.ok(keys.includes('sales.view')&&keys.includes('sales.create')&&!keys.includes('sales.delete'));
  await page.evaluate(()=>window.showTables());await page.waitForFunction(()=>document.querySelector('#first th:nth-child(2)')?.getBoundingClientRect().width>500);
  const widths=await page.evaluate(()=>['first','second'].map(id=>Array.from(document.querySelectorAll('#'+id+' thead th')).map(cell=>Math.round(cell.getBoundingClientRect().width))));
- assert.deepEqual(widths[0],widths[1],'semantic column widths must match across tables');assert.equal(widths[0][0],100);
+ assert.deepEqual(widths[0],widths[1],'semantic column widths must match across equally sized tables');assert.equal(widths[0][0],64);
+ await page.evaluate(()=>window.showFluidTables());
+ const fluid=()=>page.evaluate(()=>['fluid-a','fluid-b','native-fluid'].map(id=>{const table=document.querySelector('#'+id+' table');return {id,width:table.getBoundingClientRect().width,available:table.parentElement.clientWidth,columns:Array.from(table.querySelectorAll('thead th')).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>({width:cell.getBoundingClientRect().width,left:getComputedStyle(cell).paddingLeft,right:getComputedStyle(cell).paddingRight})),minimum:parseFloat(table.style.minWidth)};}));
+ await page.waitForFunction(()=>document.querySelector('#native-fluid table')?.dataset.columnLayout==='auto');
+ await page.setViewportSize({width:1600,height:1100});
+ await page.waitForFunction(()=>Math.abs(document.querySelector('#fluid-a table').getBoundingClientRect().width-document.querySelector('#fluid-a [data-list]').clientWidth)<2);
+ const medium=await fluid();
+ await page.setViewportSize({width:2400,height:1100});
+ await page.waitForFunction(()=>document.querySelector('#fluid-a table').getBoundingClientRect().width>2300);
+ const wide=await fluid();
+ for(const table of wide){assert.ok(Math.abs(table.width-table.available)<2,'every table fills its large container: '+JSON.stringify(table));assert.equal(Math.round(table.columns[0].width),64);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
+ assert.deepEqual(wide[0].columns,wide[1].columns,'global semantic minima and growth ratios stay uniform across lists');
+ const nameGrowth=wide[0].columns[1].width-medium[0].columns[1].width,totalGrowth=wide[0].columns[2].width-medium[0].columns[2].width;
+ assert.ok(Math.abs(nameGrowth/totalGrowth-5)<0.1,'name columns receive a useful share of spare width: '+JSON.stringify({medium,wide,nameGrowth,totalGrowth}));
+ assert.ok(wide[0].columns[1].width>wide[0].columns[0].width*4);
+ const gutters=()=>page.evaluate(()=>Array.from(document.querySelectorAll('#fluid-a tbody tr:first-child td,#native-fluid tbody tr:first-child td')).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>{const style=getComputedStyle(cell),child=cell.firstElementChild,inner=child?.matches('a.block,span.block')?getComputedStyle(child):null;return [parseFloat(style.paddingLeft)+(inner?parseFloat(inner.paddingLeft):0),parseFloat(style.paddingRight)+(inner?parseFloat(inner.paddingRight):0)];}));
+ assert.ok((await gutters()).every(pair=>pair[0]===12&&pair[1]===12),'clickable and ordinary body cells share the same fixed gutter: '+JSON.stringify(await gutters()));
+ assert.ok(await page.getByLabel('Native product name').evaluate(input=>input.scrollWidth<=input.clientWidth+1),'editable values fit without cropping');
+ const storedMinima=await page.evaluate(()=>localStorage.getItem('erp:global-column-widths:v2'));
+ await page.screenshot({path:join(out,'fluid-wide.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:900});
+ await page.waitForFunction(()=>document.querySelector('#fluid-a th[data-column-key=code]')&&getComputedStyle(document.querySelector('#fluid-a th[data-column-key=code]')).display==='none');
+ const narrow=await fluid();
+ for(const table of narrow){assert.ok(table.width>=table.minimum-2);assert.ok(table.width>table.available,'narrow screens scroll instead of compressing content');assert.equal(Math.round(table.columns[0].width),64);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
+ assert.ok((await gutters()).every(pair=>pair[0]===12&&pair[1]===12),'scrolling layouts retain the same body gutters');
+ await page.locator('#fluid-a [data-list]').evaluate(element=>element.scrollLeft=element.scrollWidth);
+ assert.ok(await page.locator('#fluid-a [data-list]').evaluate(element=>element.scrollLeft>0));
+ await page.screenshot({path:join(out,'fluid-narrow.png'),fullPage:true});
+ await page.setViewportSize({width:1600,height:1100});
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('#fluid-a th[data-column-key=code]')).display!=='none');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('erp:global-column-widths:v2')),storedMinima,'resizing never saves stretched widths as content minima');
+ await page.locator('#fluid-a').evaluate(element=>element.style.width='1300px');
+ await page.waitForFunction(()=>Math.abs(document.querySelector('#fluid-a table').getBoundingClientRect().width-document.querySelector('#fluid-a [data-list]').clientWidth)<2);
+ assert.equal(Math.round((await fluid())[0].columns[0].width),64,'container-only resize keeps the serial column compact');
+ await page.setViewportSize({width:1440,height:1000});
+ await page.evaluate(()=>window.showEmptyTable());await page.getByRole('button',{name:'Add fixture row',exact:true}).click();
+ await page.waitForFunction(()=>{const table=document.querySelector('#empty-transition table');return table&&Math.abs(table.getBoundingClientRect().width-table.parentElement.clientWidth)<2;});
+ await page.evaluate(()=>window.showControlGroup());
+ await page.waitForFunction(()=>document.querySelector('#control-group table')?.dataset.columnLayout==='auto');
+ assert.ok(await page.getByLabel('Grouped product name').evaluate(input=>input.scrollWidth<=input.clientWidth+1),'side-by-side controls receive their combined content minimum');
+ assert.ok(await page.locator('#control-group').evaluate(element=>element.scrollWidth>element.clientWidth),'combined controls retain their minimum and scroll within a narrow container');
  await page.evaluate(()=>window.showSort());
  await page.getByRole('columnheader',{name:'Date',exact:true}).click();
  await page.getByRole('columnheader',{name:'Name',exact:true}).click();
@@ -149,5 +197,5 @@ try{
  const pdf=await page.evaluate(()=>window.exportLedger('pdf'));assert.equal(pdf.type,'application/pdf');assert.ok(pdf.size>1000);
  await downloads.at(-1).saveAs(join(out,'ledger.pdf'));
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({sale_flow:'passed',channel_selection:'passed',role_levels:'passed',global_widths:'passed',sort_priorities:'passed',return_modes:'passed',stock_conversion:'passed',historical_profit:'passed',channel_ledgers:'passed',ledger_rows:225,A4_pages:ledger.pages,png_pages:png.pages,pdf:'passed',artifacts:out}));
+ console.log(JSON.stringify({sale_flow:'passed',channel_selection:'passed',role_levels:'passed',global_widths:'passed',responsive_ratios:'passed',fixed_gutters:'passed',narrow_scrolling:'passed',empty_table_transition:'passed',sort_priorities:'passed',return_modes:'passed',stock_conversion:'passed',historical_profit:'passed',channel_ledgers:'passed',ledger_rows:225,A4_pages:ledger.pages,png_pages:png.pages,pdf:'passed',artifacts:out}));
 }catch(error){console.error(JSON.stringify({browserErrors:errors,state:await page.evaluate(()=>({actions:window.actionLog,invalid:Array.from(document.querySelectorAll(':invalid')).map(node=>({tag:node.tagName,name:node.name,message:node.validationMessage})),alerts:Array.from(document.querySelectorAll('[role=alert]')).map(node=>node.textContent)}))}));await page.screenshot({path:join(out,'failure.png'),fullPage:true});throw error;}finally{await browser.close();server.close()}

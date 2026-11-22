@@ -21,6 +21,9 @@ the same warehouse, preserving recorded FIFO cost. Outputs can be new SKUs with
 their own base units and selling rates. Reports → Profit opens historical months
 and their daily results, including returns, expenses and closing adjustments.
 Table sorts accumulate priorities (newest first); sales invoices start by number.
+Columns share measured content minimums and fill wider screens in proportion to
+their purpose. Names and descriptions receive more space; serial and action
+columns stay compact. A fixed 24px reading gap remains when tables scroll.
 
 ## Company consolidation and recovery
 
