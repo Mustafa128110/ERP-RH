@@ -47,9 +47,20 @@ Git history and local build/dependency caches from deployment uploads.
 
 ## Publishing status
 
-The owner requested publishing through the existing Git integration: push the
-reviewed changes to `main` in `Mustafa128110/ERP-RH`, then observe Vercel's
-automatic deployment. The local release build is complete. Record the pushed
-commit and its deployment status, then verify the production sign-in and public
-assets after deployment. Local backup archives and credentials remain excluded
-from Git and hosting uploads.
+The owner requested publishing through the existing Git integration. Commit
+`71347ea` was pushed to `main` in `Mustafa128110/ERP-RH`. Vercel reported a
+successful Production deployment at
+`https://erp-33wxbc2cg-rh-2e75.vercel.app`.
+
+Read-only browser checks at `https://erp.royalhardware.co` passed: sign-in renders,
+the manifest and build assets load, protected pages redirect when signed out, and
+there are no page errors or failed build assets. GitHub's application source
+checks passed; its dependency audit identified packages requiring a compatible
+security update. The follow-up updates Next.js to 16.4.6 and the affected
+transitive dependencies. It reports zero vulnerabilities, and the complete source
+checks, production build and browser/export suite pass with the patched packages.
+
+Git now preserves the exact bytes of the applied 0076 migration and its mirror,
+so cloning on another platform retains the recorded database checksum. The SQL
+and database records are unchanged by this checksum preservation. Local backup
+archives and credentials remain excluded from Git and hosting uploads.

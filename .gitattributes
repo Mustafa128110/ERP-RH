@@ -1,0 +1,3 @@
+# These applied migrations must retain their exact bytes and recorded checksums.
+drizzle/0076_channel_ledgers_stock_conversion.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+supabase/migrations/20261122000076_channel_ledgers_stock_conversion.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
