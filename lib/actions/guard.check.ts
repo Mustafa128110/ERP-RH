@@ -1,3 +1,4 @@
+import {OperationError} from "../operation-errors";
 import assert from "node:assert/strict";
 import { describeDbError, guard } from "./guard";
 import { PermissionError } from "../auth/permissions";
@@ -15,6 +16,8 @@ const FALLBACK = "Couldn't save the products.";
 
 // --- Unrecognised failures fall back to the caller's own sentence ------------
 assert.equal(describeDbError(new Error("boom"), FALLBACK), FALLBACK);
+assert.equal(describeDbError(new OperationError("Not enough stock to convert."), FALLBACK), "Not enough stock to convert.");
+assert.match(describeDbError({cause:{code:"P0076"}},FALLBACK),/closed ledger.*new balance adjustment/);
 assert.equal(describeDbError(null, FALLBACK), FALLBACK);
 assert.equal(describeDbError({ code: "XX999" }, FALLBACK), FALLBACK, "an unmapped SQLSTATE is still a bug, not a guess");
 

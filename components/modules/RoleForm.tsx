@@ -1,4 +1,5 @@
 "use client";
+import { includeViewPermissions, modulePermissionKeys, presetPermissionKeys, type AccessLevel } from "@/lib/role-permissions";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo } from "react";
@@ -6,8 +7,8 @@ import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 import { createRole, updateRole, deleteRole, type PermissionCatalog } from "@/lib/client-actions/roles";
 import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 
-// The role editor: a name plus the permission grid — one row per module, one
-// column per action, a checkbox where the module supports that action. This IS
+// The role editor: a name plus the permission grid — one row per area, one
+// column per action, a checkbox where the area supports that action. This IS
 // the data model (role_permissions), not a preview; ticking a box and saving
 // writes it. Column and row "all" toggles keep granting a full role from being
 // dozens of clicks.
@@ -21,19 +22,28 @@ function PermissionGrid({
   catalog: PermissionCatalog;
   granted: Set<string>;
   onToggle: (key: string) => void;
-  onToggleModule: (module: string, on: boolean) => void;
+  onToggleModule: (area: string, on: boolean) => void;
   onToggleAction: (action: string, on: boolean) => void;
 }) {
-  const supports = (module: string, action: string) =>
-    catalog.modules.find((m) => m.module === module)?.actions.includes(action) ?? false;
+  const supports = (area: string, action: string) =>
+    catalog.modules.find((m) => m.module === area)?.actions.includes(action) ?? false;
 
-  const moduleAllOn = (module: string, actions: string[]) => actions.every((a) => granted.has(`${module}.${a}`));
+  const moduleAllOn = (area: string, actions: string[]) => actions.every((a) => granted.has(`${area}.${a}`));
   const actionAllOn = (action: string) =>
     catalog.modules.filter((m) => m.actions.includes(action)).every((m) => granted.has(`${m.module}.${action}`));
 
   const label = (s: string) => s.replace(/_/g, " ");
 
   return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-steel">Choose an access level for each area. Work allows viewing, adding and editing. Full access also includes deletion and approval where supported.</p>
+      <div className="flex flex-wrap gap-2">{(["sales", "warehouse"] as const).map((preset) => <button type="button" key={preset} onClick={() => { const desired = new Set(presetPermissionKeys(catalog.modules, preset)); for (const area of catalog.modules) for (const action of area.actions) { const key = `${area.module}.${action}`; if (granted.has(key) !== desired.has(key)) onToggle(key); } }} className="rounded border border-navy-800 px-3 py-2 text-xs font-medium text-navy-800">{preset === "sales" ? "Sales entry preset" : "Warehouse preset"}</button>)}{(["none", "view", "work"] as const).map((level) => <button key={level} type="button" onClick={() => { for (const area of catalog.modules) { const desired = new Set(modulePermissionKeys(area, level)); for (const action of area.actions) { const key = `${area.module}.${action}`; if (granted.has(key) !== desired.has(key)) onToggle(key); } } }} className="rounded border border-sand px-3 py-2 text-xs">{level === "none" ? "Clear all" : level === "view" ? "View all" : "Work in all areas"}</button>)}</div>
+      <div className="grid gap-2 sm:grid-cols-2">{catalog.modules.filter((area) => area.module !== "companies").map((area) => {
+        const keys = area.actions.map((action) => `${area.module}.${action}`);
+        const level = (["none", "view", "work", "full"] as const).find((candidate) => { const desired = new Set(modulePermissionKeys(area, candidate)); return keys.every((key) => granted.has(key) === desired.has(key)); }) ?? "custom";
+        return <label key={area.module} className="flex items-center justify-between gap-3 rounded border border-sand p-3 text-sm"><span className="capitalize">{area.module.replace(/_/g, " ")}</span><select aria-label={`${area.module} access`} value={level} onChange={(event) => { const desired = new Set(modulePermissionKeys(area, event.target.value as AccessLevel)); for (const key of keys) if (granted.has(key) !== desired.has(key)) onToggle(key); }} className="rounded border border-sand px-2 py-1"><option value="none">No access</option><option value="view">View</option><option value="work">Work</option><option value="full">Full access</option>{level === "custom" && <option value="custom">Custom</option>}</select></label>;
+      })}</div>
+      <details><summary className="cursor-pointer text-sm font-medium text-navy-800">Advanced permissions</summary>
     <div className="matrix-scroll scroll-thin overflow-auto rounded border border-sand">
       <table className="w-full min-w-max table-fixed border-collapse text-sm">
         <thead>
@@ -43,7 +53,7 @@ function PermissionGrid({
               <th key={a} className="w-24 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-steel">
                 <div className="flex flex-col items-center gap-1">
                   <span>{label(a)}</span>
-                  {/* Column toggle: grant this action across every module that has it. */}
+                  {/* Column toggle: grant this action across every area that has it. */}
                   <input
                     type="checkbox"
                     checked={actionAllOn(a)}
@@ -57,26 +67,26 @@ function PermissionGrid({
           </tr>
         </thead>
         <tbody>
-          {catalog.modules.map(({ module, actions }) => (
-            <tr key={module} className="border-b border-sand/60 last:border-0">
+          {catalog.modules.map(({ module: area, actions }) => (
+            <tr key={area} className="border-b border-sand/60 last:border-0">
               <td className="whitespace-nowrap px-3 py-2 capitalize text-ink">
                 <label className="flex items-center gap-2">
-                  {/* Row toggle: grant every action this module supports. */}
+                  {/* Row toggle: grant every action this area supports. */}
                   <input
                     type="checkbox"
-                    checked={moduleAllOn(module, actions)}
-                    onChange={(e) => onToggleModule(module, e.target.checked)}
+                    checked={moduleAllOn(area, actions)}
+                    onChange={(e) => onToggleModule(area, e.target.checked)}
                     className="h-4 w-4 rounded border-sand"
-                    title={`Toggle all for ${label(module)}`}
+                    title={`Toggle all for ${label(area)}`}
                   />
-                  {label(module)}
+                  {label(area)}
                 </label>
               </td>
               {catalog.actions.map((a) => {
-                const key = `${module}.${a}`;
+                const key = `${area}.${a}`;
                 return (
                   <td key={a} className="px-3 py-2 text-center">
-                    {supports(module, a) ? (
+                    {supports(area, a) ? (
                       <input
                         type="checkbox"
                         checked={granted.has(key)}
@@ -96,6 +106,8 @@ function PermissionGrid({
           ))}
         </tbody>
       </table>
+    </div>
+      </details>
     </div>
   );
 }
@@ -118,11 +130,11 @@ function useGranted(initial: string[], catalog: PermissionCatalog) {
       return next;
     });
 
-  const toggleModule = (module: string, on: boolean) =>
+  const toggleModule = (area: string, on: boolean) =>
     setGranted((prev) => {
       const next = new Set(prev);
-      for (const a of catalog.modules.find((m) => m.module === module)?.actions ?? []) {
-        const key = `${module}.${a}`;
+      for (const a of catalog.modules.find((m) => m.module === area)?.actions ?? []) {
+        const key = `${area}.${a}`;
         if (on) next.add(key);
         else next.delete(key);
       }
@@ -141,7 +153,7 @@ function useGranted(initial: string[], catalog: PermissionCatalog) {
       return next;
     });
 
-  const keys = useMemo(() => [...granted].filter((k) => validKeys.has(k)), [granted, validKeys]);
+  const keys = useMemo(() => includeViewPermissions([...granted].filter((k) => validKeys.has(k)), catalog.modules), [granted, validKeys, catalog.modules]);
 
   return { granted, toggle, toggleModule, toggleAction, keys };
 }

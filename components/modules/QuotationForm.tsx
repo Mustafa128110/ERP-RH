@@ -1,4 +1,6 @@
 "use client";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
+import { entryChannel } from "@/lib/sale-constants";
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -56,6 +58,7 @@ const BLANK_ROWS = 8;
 const emptyLine = (): Line => ({ itemId: "", itemText: "", unitId: "", unitText: "", quantity: "", unitPrice: "", convertedQuantity: "0" });
 
 export type QuotationDefaults = {
+  saleType?: string | null;
   _revision: string;
   companyId: string;
   contactId: string;
@@ -101,6 +104,8 @@ export function QuotationForm({
   const userId = useClientUserId();
   const quotationDraftKey = isEdit ? `edit:${userId}:documents:${quotationId}` : userId ? `${QUOTATION_DRAFT_KEY}:${userId}` : QUOTATION_DRAFT_KEY;
 
+  const { channels, selected: selectedChannel } = useChannels();
+  const [saleType, setSaleType] = useState(defaults?.saleType ?? entryChannel(channels, selectedChannel));
   const [companyId, setCompanyId] = useState(defaults?.companyId ?? companyOptions[0]?.id ?? "");
   const [contactId, setContactId] = useState(defaults?.contactId ?? "");
   const [contactText, setContactText] = useState(
@@ -138,7 +143,7 @@ export function QuotationForm({
   // restoring a stale copy over one is how someone else's changes disappear.
   // The hook (components/ui/useDraft.tsx) owns the store read, the
   // offer/restore/discard logic and the save-on-change effect.
-  const draftState = { _revision: defaults?._revision, companyId, contactId, contactText, documentDate, validUntil, discount, taxId, shipping, lines };
+  const draftState = { saleType, _revision: defaults?._revision, companyId, contactId, contactText, documentDate, validUntil, discount, taxId, shipping, lines };
   type QuotationDraft = typeof draftState;
 
   const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<QuotationDraft>(quotationDraftKey, {
@@ -148,7 +153,8 @@ export function QuotationForm({
     canRestore: d => Array.isArray(d.lines) && (!isEdit || d._revision === defaults?._revision),
     hasContent: (d) => isEdit || d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
     apply: (d) => {
-      setCompanyId(d.companyId);
+      setCompanyId(companyOptions[0]?.id ?? d.companyId);
+      setSaleType(d.saleType ?? entryChannel(channels, selectedChannel));
       setContactId(d.contactId);
       setContactText(d.contactText);
       setDocumentDate(d.documentDate);
@@ -296,26 +302,7 @@ export function QuotationForm({
 
       <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         {companyOptions.length > 1 && (
-          <label className={labelClass}>
-            <span className={labelTextClass}>Company</span>
-            <select
-              value={companyId}
-              onChange={(e) => {
-                setCompanyId(e.target.value);
-                setContactId("");
-                setContactText("");
-                if (!isEdit) setTaxId(taxSettings[e.target.value]?.default_sales_tax_id ?? "");
-              }}
-              disabled={locked}
-              className={fieldClass}
-            >
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ChannelField value={saleType} onChange={setSaleType} />
         )}
 
         <label className={labelClass}>

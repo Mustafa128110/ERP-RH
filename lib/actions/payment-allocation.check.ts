@@ -4,6 +4,15 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
 async function main() {
+  const [history] = await db.execute<{ relation: string | null }>(sql`SELECT to_regclass('public.consolidation_history')::text AS relation`);
+  // Historical allocations were posted into separate, valid company queues.
+  // Consolidation preserves those settlements. New allocations must obey the
+  // combined queue; an old cross-company pair must not demand a history rewrite.
+  const historicalQueue = (older: string, later: string) => history.relation ? sql`
+    (pa.created_at >= (SELECT min(created_at) FROM consolidation_history WHERE kind='company')
+     OR coalesce((SELECT original->>'company_id' FROM consolidation_history WHERE kind='document ownership' AND source_id=${sql.raw(older)}.id::text LIMIT 1),${sql.raw(older)}.company_id::text)
+      = coalesce((SELECT original->>'company_id' FROM consolidation_history WHERE kind='document ownership' AND source_id=${sql.raw(later)}.id::text LIMIT 1),${sql.raw(later)}.company_id::text))
+  ` : sql`true`;
   const [integrity] = await db.execute<{
     broken_links: number;
     overpaid_payments: number;
@@ -81,7 +90,7 @@ async function main() {
     SELECT count(*)::int AS violations
     FROM documents older
     JOIN document_types older_type ON older_type.id = older.document_type_id
-    WHERE older.status = 'posted'
+    WHERE older.status = 'posted' AND older.ledger_closed_at IS NULL
       AND older_type.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')
       AND older.grand_total > older.paid_amount
       AND EXISTS (
@@ -90,7 +99,9 @@ async function main() {
         JOIN document_types later_type ON later_type.id = later.document_type_id
         JOIN payment_allocations pa ON pa.invoice_document_id = later.id
         WHERE later.company_id = older.company_id
+          AND ${historicalQueue("older", "later")}
           AND later.contact_id = older.contact_id
+          AND coalesce(later.sale_type,'counter') = coalesce(older.sale_type,'counter')
           AND later_type.code = older_type.code
           AND (later.document_date, later.created_at, later.id) > (older.document_date, older.created_at, older.id)
       )
@@ -107,7 +118,7 @@ async function main() {
     FROM documents ob
     JOIN document_types obt ON obt.id = ob.document_type_id
     JOIN ledger_entries obl ON obl.document_id = ob.id
-    WHERE ob.status = 'posted'
+    WHERE ob.status = 'posted' AND ob.ledger_closed_at IS NULL
       AND obt.code = 'OPENING_BALANCE'
       AND ob.grand_total > ob.paid_amount
       AND EXISTS (
@@ -116,7 +127,9 @@ async function main() {
         JOIN document_types lt ON lt.id = later.document_type_id
         JOIN payment_allocations pa ON pa.invoice_document_id = later.id
         WHERE later.company_id = ob.company_id
+          AND ${historicalQueue("ob", "later")}
           AND later.contact_id = ob.contact_id
+          AND coalesce(later.sale_type,'counter') = coalesce(ob.sale_type,'counter')
           AND lt.code = (CASE WHEN coalesce(obl.debit, 0) > 0 THEN 'SALES_INVOICE' ELSE 'PURCHASE_INVOICE' END)::document_type_code
       )
   `);
@@ -127,7 +140,7 @@ async function main() {
   // remains, and the same rule holds for receivables.
   const [sharedFifo] = await db.execute<{ violations: number }>(sql`
     WITH items AS (
-      SELECT d.id, d.company_id, d.contact_id, d.document_date, d.created_at,
+      SELECT d.id, d.company_id, d.contact_id, d.sale_type,d.document_date, d.created_at,
              (dt.code = 'OPENING_BALANCE') AS is_opening,
              CASE
                WHEN dt.code = 'SALES_INVOICE' THEN 'receivable'
@@ -141,7 +154,7 @@ async function main() {
       LEFT JOIN ledger_entries le
         ON le.document_id = d.id
        AND dt.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
-      WHERE d.status = 'posted'
+      WHERE d.status = 'posted' AND d.ledger_closed_at IS NULL
         AND d.contact_id IS NOT NULL
         AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'JOURNAL_ENTRY')
     )
@@ -153,7 +166,9 @@ async function main() {
         FROM items later
         JOIN payment_allocations pa ON pa.invoice_document_id = later.id
         WHERE later.company_id = older.company_id
+          AND ${historicalQueue("older", "later")}
           AND later.contact_id = older.contact_id
+          AND coalesce(later.sale_type,'counter') = coalesce(older.sale_type,'counter')
           AND later.side = older.side
           AND (
             (older.is_opening AND NOT later.is_opening)

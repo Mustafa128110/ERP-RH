@@ -1,4 +1,6 @@
 "use client";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
+import { entryChannel } from "@/lib/sale-constants";
 import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useMemo, useRef, useState } from "react";
@@ -38,6 +40,7 @@ type TransferActionState = { error?: string; success?: boolean; id?: string } | 
 // Server lines carry ids; the combobox text is derived from the option lists on
 // load. One entry per item — the inbound half of each pair says nothing new.
 export type TransferDefaults = {
+  saleType?: string | null;
   _revision: string;
   companyId: string;
   documentDate: string;
@@ -91,6 +94,8 @@ export function StockTransferFormPage({
         ]
       : [emptyLine(), emptyLine(), emptyLine(), emptyLine()],
   );
+  const { channels, selected } = useChannels();
+  const [saleType, setSaleType] = useState(defaults?.saleType ?? entryChannel(channels, selected));
   const [companyId, setCompanyId] = useState(
     () => defaults?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
@@ -110,7 +115,7 @@ export function StockTransferFormPage({
   // crash, a closed tab or an offline blip before then costs nothing. Edits are
   // excluded: restoring a stale copy over a saved document would overwrite
   // someone else's changes.
-  const draftState = { _revision: defaults?._revision, lines, companyId, fromLocationId, toLocationId, documentDate };
+  const draftState = { saleType, _revision: defaults?._revision, lines, companyId, fromLocationId, toLocationId, documentDate };
   type TransferDraft = typeof draftState;
 
   const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<TransferDraft>(transferDraftKey, {
@@ -121,7 +126,8 @@ export function StockTransferFormPage({
     hasContent: (d) => isEdit || d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
     apply: (d) => {
       setLines(d.lines);
-      setCompanyId(d.companyId);
+      setCompanyId(companyOptions[0]?.id ?? d.companyId);
+      setSaleType(d.saleType ?? entryChannel(channels, selected));
       setFromLocationId(d.fromLocationId);
       setToLocationId(d.toLocationId);
       setDocumentDate(d.documentDate);
@@ -181,10 +187,7 @@ export function StockTransferFormPage({
   const visibleItems = useMemo(() => itemOptions.filter((it) => it.companyId === companyId), [itemOptions, companyId]);
 
   // A line item from the old company can't be submitted against the new one.
-  function changeCompany(next: string) {
-    setCompanyId(next);
-    setLines((prev) => prev.map((l) => (l.itemId && !itemOptions.some((it) => it.id === l.itemId && it.companyId === next) ? { ...l, itemId: "" } : l)));
-  }
+
 
   return (
     <form data-command-table={isEdit ? "documents" : undefined} data-command-revision={defaults?._revision} data-recovery-key={isEdit ? transferDraftKey : undefined} data-command-record={transferId} data-draft-key={isEdit ? undefined : transferDraftKey} ref={formRef} action={action} className="document-form flex flex-col gap-5">
@@ -204,19 +207,8 @@ export function StockTransferFormPage({
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Transfer</span>
         <div className="flex flex-wrap gap-3">
-          <label className={`${labelClass} w-56`}>
-            <span className={labelTextClass}>Company</span>
-            <select name="companyId" required value={companyId} onChange={(e) => changeCompany(e.target.value)} className={fieldClass}>
-              <option value="" disabled>
-                {companyOptions.length === 0 ? "No companies yet" : "Select a company"}
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <input type="hidden" name="companyId" value={companyId} />
+          <ChannelField value={saleType} onChange={setSaleType} />
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Date</span>
             <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
@@ -357,7 +349,7 @@ export function StockTransferFormPage({
         {!onDone && (
           <button
             type="button"
-            onClick={() => router.push("/inventory/stock-transfers")}
+            onClick={() => router.push("/inventory/stock?view=transfers")}
             className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
           >
             Back to Transfers

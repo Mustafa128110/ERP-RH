@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { matchesStockSetup } from "@/lib/stock-filters";
+import { useMemo, useState, useTransition } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ProductBatchAddDialog, ProductsBatchEditDialog } from "@/components/modules/ProductForm";
 import { MergeProductsDialog } from "@/components/modules/MergeProductsDialog";
@@ -9,7 +10,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { CsvActions } from "@/components/ui/CsvActions";
-import { exportProductsCsv, importProductsCsv } from "@/lib/client-actions/products";
+import { exportProductsCsv, importProductsCsv, deleteProducts } from "@/lib/client-actions/products";
 import { PRODUCT_CSV_COLUMNS } from "@/lib/csv-columns";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
@@ -63,6 +64,9 @@ const columns: ColumnDef[] = [
       </div>
     ),
   },
+  { key: "onHand", label: "On Hand", align: "right", render: (row) => <DetailHover trigger={String(row.onHand)} heading="Stock by location and unit" rows={JSON.parse(String(row._stockBreakdown ?? "[]"))} /> },
+  { key: "valuation", label: "Valuation", align: "right" },
+  { key: "location", label: "Location" },
   { key: "salesRate", label: "Sales Rate", align: "right" },
   { key: "rate1", label: "Purchase Rate 1", align: "right" },
   { key: "rate2", label: "Purchase Rate 2", align: "right" },
@@ -115,6 +119,12 @@ export function ProductsManager({
   unitOptions: Option[];
   ruleOptions: Option[];
 }) {
+  const [deleting, startDelete] = useTransition();
+  const [deleteError, setDeleteError] = useState("");
+  const [setupFilter, setSetupFilter] = useState("");
+  const [baseFilter, setBaseFilter] = useState("");
+  const [ruleFilter, setRuleFilter] = useState("");
+  const [quantityFilter, setQuantityFilter] = useState("");
   const [batchOpen, setBatchOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -194,7 +204,7 @@ export function ProductsManager({
   return (
     <div className="flex h-full flex-col gap-2">
       <PageHeader
-        title="Products"
+        title="Stock & Products"
         subtitle={selected.length > 0 ? `${selected.length} of ${shown.length} item(s) selected` : `${shown.length} item(s)`}
       >
         <button
@@ -238,11 +248,19 @@ export function ProductsManager({
         </button>
       </PageHeader>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <select aria-label="Filter product setup" value={setupFilter} onChange={(event) => setSetupFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All setup</option><option value="complete">Complete setup</option><option value="incomplete">Incomplete setup</option><option value="category">Missing category</option></select>
+        <select aria-label="Filter base quantity unit" value={baseFilter} onChange={(event) => setBaseFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All base quantities</option><option value="missing">No base unit</option>{unitOptions.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
+        <select aria-label="Filter unit rules" value={ruleFilter} onChange={(event) => setRuleFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All unit rules</option><option value="missing">No unit rules</option>{ruleOptions.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}</select>
+        <select aria-label="Filter base stock quantity" value={quantityFilter} onChange={(event) => setQuantityFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All stock quantities</option><option value="zero">Zero quantity</option><option value="positive">In stock</option><option value="negative">Negative quantity</option></select>
+        <button type="button" disabled={!selected.length || deleting} onClick={() => { if (!confirm(`Delete ${selected.length} product(s)? Only products with zero references can be deleted.`)) return; startDelete(async () => { const result = await deleteProducts(selected); setDeleteError(result.error ?? ""); if (!result.error) { setSelected([]); } }); }} className="ml-auto rounded border border-error/30 px-3 py-2 text-sm text-error disabled:opacity-40">{deleting ? "Deleting…" : "Delete selected"}</button>
+      </div>
+      {deleteError && <p role="alert" className="text-sm text-error">{deleteError}</p>}
       {/* Ctrl+Enter on a ticked set is the same button as Edit Selected — the
           keyboard route through the list ends where the mouse route does. */}
       <DataTable
         columns={tableColumns}
-        rows={shown}
+        rows={shown.filter((row) => matchesStockSetup(row, setupFilter, baseFilter, ruleFilter, quantityFilter))}
         idKey="id"
         selected={selected}
         onSelectedChange={setSelected}

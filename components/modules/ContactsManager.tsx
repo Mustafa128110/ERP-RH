@@ -5,7 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ContactEditForm, ContactBatchAddDialog, ContactsBatchEditDialog } from "@/components/modules/ContactForm";
 import { MergeContactsDialog } from "@/components/modules/MergeContactsDialog";
-import { getContact } from "@/lib/client-actions/contacts";
+import { getContact, deleteContacts } from "@/lib/client-actions/contacts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -109,6 +109,8 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
     setDetail(await getContact(id));
   }
 
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, startDelete] = useTransition();
   const router = useRouter();
   const [, startTransition] = useTransition();
   useNewEntry(() => setModal({ kind: "batch" }));
@@ -119,6 +121,7 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
         title="Contacts"
         subtitle={selected.length > 0 ? `${selected.length} of ${rows.length} contact(s) selected` : `${rows.length} contact(s)`}
       >
+        <button type="button" disabled={!selected.length || deleting} onClick={() => { if (!confirm(`Delete ${selected.length} unused contact(s)? Referenced contacts will be kept.`)) return; startDelete(async () => { const result = await deleteContacts(selected); setDeleteError(result.error ?? ""); if (!result.error) { setSelected([]); router.refresh(); } }); }} className="rounded border border-error/30 px-3 py-2 text-sm text-error disabled:opacity-40">{deleting ? "Deleting…" : "Delete selected"}</button>
         <button
           type="button"
           onClick={() => setModal({ kind: "batchEdit" })}
@@ -152,6 +155,7 @@ export function ContactsManager({ rows, companyOptions }: { rows: Row[]; company
         </button>
       </PageHeader>
 
+      {deleteError && <p role="alert" className="text-sm text-error">{deleteError}</p>}
       {/* Ticking is the batch route, a plain click still opens the one row —
           a modified click selects instead of opening (DataTable handles that). */}
       <DataTable

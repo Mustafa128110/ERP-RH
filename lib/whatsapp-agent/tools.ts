@@ -1,3 +1,5 @@
+import { getChannels } from "@/lib/queries/channels";
+import { entryChannel } from "@/lib/sale-constants";
 import "server-only";
 import { getSession } from "@/lib/auth/session";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
@@ -41,14 +43,19 @@ const form = (fields: Record<string, string>) => {
 class Ask extends Error {}
 function ask(message: string): never { throw new Ask(message); }
 
-async function resolveCompany(name: string) {
+async function resolveCompany() {
   const rows = await getCompanies();
-  if (rows.length === 0) ask("You do not have access to any company.");
-  if (!name && rows.length === 1) return rows[0];
-  const hits = bestMatches(name, rows, (row) => row.name);
+  if (rows.length === 1) return rows[0];
+  ask("Royal Hardware is not available as the single company for this account. Ask an administrator to check access.");
+}
+
+async function resolveSalesChannel(name: string) {
+  const rows = (await getChannels()).filter((channel) => channel.isActive);
+  const id = entryChannel(rows, "all");
+  const hits = name ? bestMatches(name, rows, (channel) => channel.name) : rows.filter((channel) => channel.id === id);
   if (hits.length === 1) return hits[0];
-  if (hits.length > 1) ask(chooseFrom("company", hits.map((row) => row.name)));
-  ask(name ? `No company matches "${name}".` : chooseFrom("company", rows.map((row) => row.name)));
+  if (hits.length > 1) ask(chooseFrom("channel", hits.map((channel) => channel.name)));
+  ask(name ? `No available channel matches "${name}".` : "No channel is available for new entries. Ask an administrator to check Settings.");
 }
 
 async function resolveContact(companyId: string, name: string) {
@@ -169,13 +176,14 @@ async function invoiceSummary(number: string): Promise<ToolResult> {
 }
 
 async function draftSale(args: ToolArgs): Promise<ToolResult> {
-  const company = await resolveCompany(text(args, "company"));
+  const company = await resolveCompany();
+  const channel = await resolveSalesChannel(text(args, "channel"));
   const contact = await resolveContact(company.id, text(args, "customer"));
   const lines = await resolveLines(company.id, readLines(args));
   const settlement = await resolveSettlement(company.id, text(args, "payment"), false);
   const tax = await resolveDocumentTax(company.id, null, lines.map((line) => ({ itemId: line.itemId, lineTotal: line.quantity * line.unitPrice })), 0, 0);
   const fields: Record<string, string> = {
-    companyId: company.id,
+    saleType: channel.id, companyId: company.id,
     documentDate: dateOf(text(args, "date")),
     contactId: contact.id,
     linesJson: JSON.stringify(lines.map((line) => ({ itemId: line.itemId, itemName: line.itemName, locationId: "", unitId: "", unitName: "", quantity: String(line.quantity), unitPrice: String(line.unitPrice), unitCost: "" }))),
@@ -183,21 +191,23 @@ async function draftSale(args: ToolArgs): Promise<ToolResult> {
     settlementType: settlement?.type ?? "",
     ...(settlement ? { [settlement.field]: settlement.id } : {}),
   };
-  return { draft: { tool: "create_sale", fields, confirmation: ["*New sale*", `Customer: ${contact.displayName}`, ...lines.map((line) => `• ${qty(line.quantity)} × ${line.itemName} @ ${money(line.unitPrice)}`), `Total: ${money(tax.grandTotal)}${tax.taxRate ? ` (includes tax ${money(tax.taxTotal)})` : ""}`, settlement ? `Paid: ${settlement.label}` : "On credit", `Company: ${company.name}`, "", "Reply *yes* to post it."].join("\n") } };
+  return { draft: { tool: "create_sale", fields, confirmation: ["*New sale*", `Customer: ${contact.displayName}`, ...lines.map((line) => `• ${qty(line.quantity)} × ${line.itemName} @ ${money(line.unitPrice)}`), `Total: ${money(tax.grandTotal)}${tax.taxRate ? ` (includes tax ${money(tax.taxTotal)})` : ""}`, settlement ? `Paid: ${settlement.label}` : "On credit", `Channel: ${channel.name}`, "", "Reply *yes* to post it."].join("\n") } };
 }
 
 async function draftPayment(direction: "received" | "made", args: ToolArgs): Promise<ToolResult> {
-  const company = await resolveCompany(text(args, "company"));
+  const company = await resolveCompany();
+  const channel = await resolveSalesChannel(text(args, "channel"));
   const contact = await resolveContact(company.id, text(args, "contact"));
   const amount = Number(text(args, "amount").replace(/[^0-9.]/g, ""));
   if (!Number.isFinite(amount) || amount <= 0) ask("How much?");
   const settlement = await resolveSettlement(company.id, text(args, "payment") || "cash", true);
-  const fields: Record<string, string> = { companyId: company.id, contactId: contact.id, amount: String(amount), paymentDate: dateOf(text(args, "date")), paymentType: settlement!.type, [settlement!.field]: settlement!.id };
-  return { draft: { tool: direction === "received" ? "record_payment_received" : "record_payment_made", fields, confirmation: [`*Payment ${direction}*`, `${direction === "received" ? "From" : "To"}: ${contact.displayName}`, `Amount: ${money(amount)}`, `${direction === "received" ? "Into" : "From"}: ${settlement!.label}`, `Company: ${company.name}`, "", "Reply *yes* to post it."].join("\n") } };
+  const fields: Record<string, string> = { saleType: channel.id, companyId: company.id, contactId: contact.id, amount: String(amount), paymentDate: dateOf(text(args, "date")), paymentType: settlement!.type, [settlement!.field]: settlement!.id };
+  return { draft: { tool: direction === "received" ? "record_payment_received" : "record_payment_made", fields, confirmation: [`*Payment ${direction}*`, `${direction === "received" ? "From" : "To"}: ${contact.displayName}`, `Amount: ${money(amount)}`, `${direction === "received" ? "Into" : "From"}: ${settlement!.label}`, `Channel: ${channel.name}`, "", "Reply *yes* to post it."].join("\n") } };
 }
 
 async function draftExpense(args: ToolArgs): Promise<ToolResult> {
-  const company = await resolveCompany(text(args, "company"));
+  const company = await resolveCompany();
+  const channel = await resolveSalesChannel(text(args,"channel"));
   const categoryName = text(args, "category");
   if (!categoryName) ask("Which expense category?");
   const categories = (await getExpenseCategories()).filter((row) => row.companyId === company.id);
@@ -208,12 +218,13 @@ async function draftExpense(args: ToolArgs): Promise<ToolResult> {
   if (!Number.isFinite(amount) || amount <= 0) ask("How much?");
   const settlement = await resolveSettlement(company.id, text(args, "payment") || "cash", true);
   const category = hits[0]!;
-  const fields: Record<string, string> = { companyId: company.id, expenseCategoryId: category.id, amount: String(amount), expenseDate: dateOf(text(args, "date")), settlementType: settlement!.type, [settlement!.field]: settlement!.id, notes: text(args, "notes") };
-  return { draft: { tool: "record_expense", fields, confirmation: ["*New expense*", `${category.name} — ${money(amount)}`, `Paid from: ${settlement!.label}`, `Company: ${company.name}`, "", "Reply *yes* to post it."].join("\n") } };
+  const fields: Record<string, string> = { saleType:channel.id, companyId: company.id, expenseCategoryId: category.id, amount: String(amount), expenseDate: dateOf(text(args, "date")), settlementType: settlement!.type, [settlement!.field]: settlement!.id, notes: text(args, "notes") };
+  return { draft: { tool: "record_expense", fields, confirmation: ["*New expense*", `${category.name} — ${money(amount)}`, `Paid from: ${settlement!.label}`, `Channel: ${channel.name}`, "", "Reply *yes* to post it."].join("\n") } };
 }
 
 async function draftPurchase(args: ToolArgs): Promise<ToolResult> {
-  const company = await resolveCompany(text(args, "company"));
+  const company = await resolveCompany();
+  const channel = await resolveSalesChannel(text(args, "channel"));
   const supplier = await resolveContact(company.id, text(args, "supplier"));
   const lines = await resolveLines(company.id, readLines(args));
   const session = await getSession();
@@ -225,8 +236,8 @@ async function draftPurchase(args: ToolArgs): Promise<ToolResult> {
   if (!type) ask("Set up a purchase invoice document type in the ERP first.");
   const settlement = await resolveSettlement(company.id, text(args, "payment"), false);
   const tax = await resolveDocumentTax(company.id, null, lines.map((line) => ({ itemId: line.itemId, lineTotal: line.quantity * line.unitPrice })), 0, 0);
-  const fields: Record<string, string> = { companyId: company.id, documentDate: dateOf(text(args, "date")), contactId: supplier.id, locationId: locationHits[0].id, documentTypeMode: "existing", documentTypeId: String(type.id), linesJson: JSON.stringify(lines.map((line) => ({ itemId: line.itemId, itemName: line.itemName, unitId: "", unitName: "", quantity: String(line.quantity), unitPrice: String(line.unitPrice), unitCost: String(line.unitPrice) }))), isPaid: settlement ? "yes" : "no", settlementType: settlement?.type ?? "", ...(settlement ? { [settlement.field]: settlement.id } : {}) };
-  return { draft: { tool: "create_stock_purchase", fields, confirmation: ["*New stock purchase*", `Supplier: ${supplier.displayName}`, `Location: ${locationHits[0].name}`, ...lines.map((line) => `• ${qty(line.quantity)} × ${line.itemName} @ ${money(line.unitPrice)}`), `Total: ${money(tax.grandTotal)}`, settlement ? `Paid: ${settlement.label}` : "On credit", `Company: ${company.name}`, "", "Reply *yes* to post it."].join("\n") } };
+  const fields: Record<string, string> = { saleType: channel.id, companyId: company.id, documentDate: dateOf(text(args, "date")), contactId: supplier.id, locationId: locationHits[0].id, documentTypeMode: "existing", documentTypeId: String(type.id), linesJson: JSON.stringify(lines.map((line) => ({ itemId: line.itemId, itemName: line.itemName, unitId: "", unitName: "", quantity: String(line.quantity), unitPrice: String(line.unitPrice), unitCost: String(line.unitPrice) }))), isPaid: settlement ? "yes" : "no", settlementType: settlement?.type ?? "", ...(settlement ? { [settlement.field]: settlement.id } : {}) };
+  return { draft: { tool: "create_stock_purchase", fields, confirmation: ["*New stock purchase*", `Supplier: ${supplier.displayName}`, `Location: ${locationHits[0].name}`, ...lines.map((line) => `• ${qty(line.quantity)} × ${line.itemName} @ ${money(line.unitPrice)}`), `Total: ${money(tax.grandTotal)}`, settlement ? `Paid: ${settlement.label}` : "On credit", `Channel: ${channel.name}`, "", "Reply *yes* to post it."].join("\n") } };
 }
 
 const tools: Tool[] = [
@@ -238,11 +249,11 @@ const tools: Tool[] = [
   { name: "sales_summary", description: "Sales total for a date range.", parameters: { type: "object", properties: { from: str("Start YYYY-MM-DD"), to: str("End YYYY-MM-DD") }, required: ["from", "to"] }, run: (args) => { const from = dateOf(text(args, "from")); const to = dateOf(text(args, "to") || from); return salesSummary(from, to, from === to ? `on ${from}` : `${from} to ${to}`); } },
   { name: "invoice_summary", description: "Summary of an invoice by number.", parameters: { type: "object", properties: { number: str("Invoice number") }, required: ["number"] }, run: (args) => invoiceSummary(text(args, "number")) },
   { name: "run_report", description: `One ERP report: ${REPORT_TYPES.map((row) => row.slug).join(", ")}.`, parameters: { type: "object", properties: { report: str("Report slug"), from: str("Start YYYY-MM-DD"), to: str("End YYYY-MM-DD") }, required: ["report"] }, run: async (args) => { const report = text(args, "report"); if (!isReportSlug(report)) return { reply: "Which report? " + REPORT_TYPES.map((row) => row.slug).join(", ") }; const result = await runReport(report as ReportSlug, { from: text(args, "from") || undefined, to: text(args, "to") || undefined }); return { reply: result.rows.length ? [`*${result.title}*`, ...result.rows.slice(0, 6).map((row) => result.columns.slice(0, 3).map((column) => String(row[column.key] ?? "—")).join(" · "))].join("\n") : "Nothing in that report." }; } },
-  { name: "create_sale", description: "Start or continue a sale draft. Call with known details even when incomplete; the tool asks the next question. Never posts until exact yes.", parameters: { type: "object", properties: { customer: str("Existing customer, if known"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item"] } }, payment: str("cash, bank name or credit"), company: str("Company if specified"), date: str("YYYY-MM-DD") } }, run: draftSale },
-  { name: "record_payment_received", description: "Start or continue a customer payment-received draft. Call even when incomplete.", parameters: { type: "object", properties: { contact: str("Existing contact, if known"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD") } }, run: (args) => draftPayment("received", args) },
-  { name: "record_payment_made", description: "Start or continue a supplier payment-made draft. Call even when incomplete.", parameters: { type: "object", properties: { contact: str("Existing contact, if known"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD") } }, run: (args) => draftPayment("made", args) },
-  { name: "record_expense", description: "Start or continue an expense draft. Call even when incomplete.", parameters: { type: "object", properties: { category: str("Existing expense category, if known"), amount: str("Amount"), payment: str("cash or bank"), company: str("Company"), date: str("YYYY-MM-DD"), notes: str("Optional note") } }, run: draftExpense },
-  { name: "create_stock_purchase", description: "Start or continue a stock purchase draft. Call with known details even when incomplete; the tool asks the next question. Never posts until exact yes.", parameters: { type: "object", properties: { supplier: str("Existing supplier, if known"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item"] } }, location: str("Receiving location"), payment: str("cash, bank name or credit"), company: str("Company"), date: str("YYYY-MM-DD") } }, run: draftPurchase },
+  { name: "create_sale", description: "Start or continue a sale draft. Call with known details even when incomplete; the tool asks the next question. Never posts until exact yes.", parameters: { type: "object", properties: { customer: str("Existing customer, if known"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item"] } }, payment: str("cash, bank name or credit"), channel: str("Existing sales channel, if specified"), date: str("YYYY-MM-DD") } }, run: draftSale },
+  { name: "record_payment_received", description: "Start or continue a customer payment-received draft. Call even when incomplete.", parameters: { type: "object", properties: { contact: str("Existing contact, if known"), amount: str("Amount"), payment: str("cash or bank"), channel: str("Existing sales channel, if specified"), date: str("YYYY-MM-DD") } }, run: (args) => draftPayment("received", args) },
+  { name: "record_payment_made", description: "Start or continue a supplier payment-made draft. Call even when incomplete.", parameters: { type: "object", properties: { contact: str("Existing contact, if known"), amount: str("Amount"), payment: str("cash or bank"), channel: str("Existing sales channel, if specified"), date: str("YYYY-MM-DD") } }, run: (args) => draftPayment("made", args) },
+  { name: "record_expense", description: "Start or continue an expense draft. Call even when incomplete.", parameters: { type: "object", properties: { category: str("Existing expense category, if known"), channel: str("Existing sales channel, if specified"), amount: str("Amount"), payment: str("cash or bank"), date: str("YYYY-MM-DD"), notes: str("Optional note") } }, run: draftExpense },
+  { name: "create_stock_purchase", description: "Start or continue a stock purchase draft. Call with known details even when incomplete; the tool asks the next question. Never posts until exact yes.", parameters: { type: "object", properties: { supplier: str("Existing supplier, if known"), lines: { type: "array", items: { type: "object", properties: { item: str("Existing item"), quantity: { type: "number" }, unitPrice: { type: "number" } }, required: ["item"] } }, location: str("Receiving location"), payment: str("cash, bank name or credit"), channel: str("Existing sales channel, if specified"), date: str("YYYY-MM-DD") } }, run: draftPurchase },
   { name: "unsupported_request", description: "Use when the request is outside the available ERP assistant functions.", parameters: { type: "object", properties: {} }, run: async () => ({ reply: "I can help with rates, stock, balances, dues, sales, invoices, and drafting sales, payments, expenses or stock purchases." }) },
 ];
 

@@ -67,7 +67,6 @@ export function UserRoleAssignments({
   userId,
   assignments,
   roleOptions,
-  companyOptions,
   onChanged,
 }: {
   userId: string;
@@ -98,7 +97,7 @@ export function UserRoleAssignments({
           {assignments.map((a) => (
             <li key={a.id} className="flex items-center justify-between rounded border border-sand bg-white px-3 py-2 text-sm">
               <span className="text-ink">
-                {a.roleName} — {a.companyName ?? "Global (all companies)"}
+                {a.roleName}
               </span>
               <form
                 action={async (formData) => {
@@ -130,17 +129,7 @@ export function UserRoleAssignments({
             ))}
           </select>
         </label>
-        <label className={labelClass}>
-          <span className={labelTextClass}>Company</span>
-          <select name="companyId" className={`${inputClass} h-11`}>
-            <option value="global">Global (all companies)</option>
-            {companyOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <input type="hidden" name="companyId" value="global" />
         <button
           type="submit"
           disabled={pending}

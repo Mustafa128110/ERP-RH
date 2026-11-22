@@ -21,7 +21,6 @@ requires("lib/actions/quotations.ts", [
 ]);
 requires("lib/actions/stock-transfers.ts", ["resolveItemIds", "resolveUnitIds", "averageCosts"]);
 requires("lib/actions/stock-adjustments.ts", ["resolveItemIds", "resolveUnitIds", "averageCosts"]);
-requires("lib/actions/inter-company.ts", ["mirrorItemsToBuyer", "resolveItemIds", "resolveUnitIds"]);
 requires("lib/actions/products.ts", [
   "groupBy(documentLines.itemId, items.baseUnitId)",
   "Promise.all([...groups.values()]",

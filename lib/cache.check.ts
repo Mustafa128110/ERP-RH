@@ -113,6 +113,8 @@ async function checkPrimitive() {
 // documents and expenses are here because linking a cheque to either is what
 // makes it stop being "available".
 const TABLE_TO_KEY: Record<string, string> = {
+  contactLedgers: "contactLedgers",
+  salesChannels: "salesChannels",
   companies: "companies",
   categories: "categories",
   brands: "brands",

@@ -1,4 +1,5 @@
 "use client";
+import {ChannelField} from "@/components/layout/ChannelProvider";
 import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
@@ -15,7 +16,8 @@ import type { ColumnDef, Row } from "@/lib/table";
 import { money, todayISO } from "@/lib/format";
 import { downloadNodeAsPdf, downloadNodeAsPng } from "@/lib/node-download";
 import { ContactStatementDocument, SheetRenderer, type Letterhead } from "@/components/modules/LedgerSheet";
-import { PartyLedgerDialog, PartyLedgerPrintDocument } from "@/components/modules/PartyLedgerDialog";
+import {ContactLedgerPicker} from "@/components/modules/ContactLedgerPicker";
+import { PartyLedgerPrintDocument } from "@/components/modules/PartyLedgerDialog";
 import { useExportShare } from "@/components/ui/ExportShareSheet";
 import { inCompany } from "@/lib/contact-scope";
 import type { PartyLedgerEntry, PartyLedgerResult } from "@/lib/client-actions/ledger";
@@ -107,7 +109,7 @@ export function LedgerManager({
     if (!snap || !fmt) return;
     partyCapturing.current = true;
     setPartyExportError(null);
-    const who = snap.data.displayName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    const who = `${snap.data.displayName}${snap.data.channelName?`-${snap.data.channelName}`:""}`.replace(/[^a-zA-Z0-9._-]+/g, "-");
     const fileName = `${who}-ledger-${todayISO()}.${fmt}`;
     try {
       if (fmt === "pdf") presentExport(await downloadNodeAsPdf(node, fileName));
@@ -201,7 +203,7 @@ export function LedgerManager({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <PageHeader title="Ledger" subtitle={`${balances.length} contact(s) with ledger activity`}>
+      <PageHeader title="Ledger" subtitle={`${balances.length} contact(s) · choose a channel ledger`}>
         {filter}
         <button
           type="button"
@@ -249,7 +251,7 @@ export function LedgerManager({
       )}
 
       {partyLedger && (
-        <PartyLedgerDialog
+        <ContactLedgerPicker
           contactId={partyLedger.contactId}
           companyId={partyLedger.companyId}
           contactName={partyLedger.contactName}
@@ -307,7 +309,7 @@ function LedgerEntryFormBody({
     },
     undefined,
   );
-  const [companyId, setCompanyId] = useRecoveryState("companyId",
+  const [companyId] = useRecoveryState("companyId",
     () => balance?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
   const [contactText, setContactText] = useRecoveryState("contactText", () => balance?.displayName ?? "");
@@ -325,34 +327,9 @@ function LedgerEntryFormBody({
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="operationId" value={operationId} />
+      <ChannelField />
       <div className="flex flex-wrap gap-3">
-        <div className={`${labelClass} w-52`}>
-          <span className={labelTextClass}>Company</span>
-          {isEdit ? (
-            <p className={readOnlyClass}>{balance.company}</p>
-          ) : (
-            <select
-              name="companyId"
-              required
-              value={companyId}
-              onChange={(e) => {
-                setCompanyId(e.target.value);
-                setContactId("");
-                setContactText("");
-              }}
-              className={fieldClass}
-            >
-              <option value="" disabled>
-                Select a company
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+        <input type="hidden" name="companyId" value={companyId} />
         <div className={`${labelClass} w-56`}>
           <span className={labelTextClass}>Contact</span>
           {isEdit ? (

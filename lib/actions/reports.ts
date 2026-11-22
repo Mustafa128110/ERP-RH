@@ -1,5 +1,7 @@
 "use server";
+import {queryProfitCalendar} from "@/lib/queries/profit-calendar";
 
+import { getSelectedChannel } from "@/lib/queries/channels";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
@@ -36,7 +38,8 @@ async function runScopedReport(session: AuthSession, slug: ReportSlug, filters: 
   const ids = (await getScopeCompanyIds()).filter(
     (companyId) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key),
   );
-  const scope = reportScope(ids, filters);
+  const channel = await getSelectedChannel();
+  const scope = reportScope(ids, { ...filters, channel: channel === "all" ? undefined : channel });
   if (!scope) {
     return {
       title: meta.label,
@@ -53,7 +56,7 @@ async function runScopedReport(session: AuthSession, slug: ReportSlug, filters: 
   // entry. The permission check above runs on every request; only the query is
   // cached, and await invalidateLookups() clears every reports:… key on any write.
   return cached(
-    `reports:${slug}:${ids.length ? [...ids].sort().join(",") : "none"}:${scope.from}:${scope.to}:${scope.company ?? ""}:${scope.location ?? ""}`,
+    `reports:${slug}:${ids.length ? [...ids].sort().join(",") : "none"}:${scope.from}:${scope.to}:${scope.company ?? ""}:${scope.location ?? ""}:${scope.channel ?? "all"}`,
     AGGREGATE_TTL,
     () => queryReport(slug, scope),
   );
@@ -76,4 +79,15 @@ export async function exportReportCsv(slug: ReportSlug, filters: ReportFilters):
     }
     return out;
   });
+}
+
+export async function getProfitCalendar(month?: string) {
+  const session = await getSession();
+  requirePermission(session, "reports", "view");
+  if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Choose a valid month.");
+  const scope = reportScope((await getScopeCompanyIds()).filter(id => session.globalPermissions.has("reports.view") || session.permissionsByCompany.get(id)?.has("reports.view")), {});
+  const selected = await getSelectedChannel();
+  const result = scope ? await queryProfitCalendar(scope.companies, selected === "all" ? undefined : selected, month) : {months:[],days:[],month:month??null};
+  const canExport = session.globalPermissions.has("reports.export") || [...session.permissionsByCompany.values()].some(permissions => permissions.has("reports.export"));
+  return {...result,canExport};
 }

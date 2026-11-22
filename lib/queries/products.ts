@@ -111,8 +111,8 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
       FROM document_lines dl
       JOIN documents d ON d.id = dl.document_id
       JOIN document_types dt ON dt.id = d.document_type_id
-      WHERE dl.item_id = rl.id AND dt.code = 'SALES_INVOICE'
-      ORDER BY d.document_date DESC, dl.line_no DESC
+      WHERE dl.item_id = rl.id AND (dt.code='SALES_INVOICE' OR (dt.code::text='STOCK_CONVERSION' AND dl.stock_movement=1 AND d.status='posted'))
+      ORDER BY d.document_date DESC, d.created_at DESC, dl.line_no DESC
       LIMIT 1
     ) s ON true
     LEFT JOIN LATERAL (
@@ -120,8 +120,8 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
       FROM document_lines dl
       JOIN documents d ON d.id = dl.document_id
       JOIN document_types dt ON dt.id = d.document_type_id
-      WHERE dl.item_id = rl.id AND dt.code = 'SALES_INVOICE' AND dl.unit_cost IS NOT NULL
-      ORDER BY d.document_date DESC, dl.line_no DESC
+      WHERE dl.item_id = rl.id AND (dt.code='SALES_INVOICE' OR (dt.code::text='STOCK_CONVERSION' AND dl.stock_movement=1 AND d.status='posted')) AND dl.unit_cost IS NOT NULL
+      ORDER BY d.document_date DESC, d.created_at DESC, dl.line_no DESC
       LIMIT 1
     ) c ON true
     WHERE i.company_id IN (${companyList})

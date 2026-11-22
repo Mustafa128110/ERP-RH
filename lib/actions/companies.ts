@@ -3,7 +3,7 @@
 import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { companies, userCompanyAccess } from "@/lib/db/schema";
+import { companies } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requireGlobalPermission, requirePermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
@@ -69,34 +69,12 @@ export interface CompanyBatchRow {
   address: string | null;
 }
 
-export async function createCompaniesBatch(rows: CompanyBatchRow[]): Promise<ActionResult> {
-  return guard("Couldn't save the companies.", async () => {
+export async function createCompaniesBatch(_rows: CompanyBatchRow[]): Promise<ActionResult> {
+  void _rows;
+  return guard("Couldn't add a company.", async () => {
     const session = await getLiveSession();
     requireGlobalPermission(session, "companies", "create");
-
-    const valid = rows.filter((r) => r.name.trim());
-    if (valid.length === 0) return { error: "Add at least one company with a name." };
-
-    // One transaction, because this is two writes that have to agree: a company
-    // row, and the creating admin's access to it. Split across two statements
-    // (which is how this was written), a failure on the second left a company
-    // nobody could see or select — invisible in every dropdown, and undeletable
-    // through the UI that couldn't list it.
-    await db.transaction(async (tx) => {
-      const created = await tx.insert(companies).values(valid).returning({ id: companies.id });
-      await tx
-        .insert(userCompanyAccess)
-        .values(created.map((c) => ({ userId: session.userId, companyId: c.id })))
-        .onConflictDoNothing();
-    });
-
-    await invalidateLookups(CACHE.companies);
-    await invalidateReads(...READS);
-    // The new company changes what the Topbar scope selector offers, and that
-    // lives in the dashboard layout rather than on this page.
-    revalidatePath("/", "layout");
-    await recordAudit({ action: "create", entity: "company", summary: valid.map((r) => r.name).join(", ") });
-    return { success: true };
+    return { error: "Royal Hardware is the only company. Add a sales channel in Settings instead." };
   });
 }
 
@@ -117,17 +95,11 @@ export async function updateCompany(companyId: string, _prevState: ActionResult 
   });
 }
 
-export async function deleteCompany(_prevState: ActionResult | undefined, formData: FormData): Promise<ActionResult> {
-  return guard("Can't delete — other records (contacts, items, documents, …) still reference this company.", async () => {
+export async function deleteCompany(_prevState: ActionResult | undefined, _formData: FormData): Promise<ActionResult> {
+  void _prevState; void _formData;
+  return guard("Couldn't delete the company.", async () => {
     const session = await getLiveSession();
-    const companyId = String(formData.get("companyId") ?? "");
-    requirePermission(session, "companies", "delete", { companyId });
-    await db.delete(companies).where(and(eq(companies.id, companyId), await companyInPermissionScope(companies.id, session, "companies", "delete")));
-
-    await invalidateLookups(CACHE.companies);
-    await invalidateReads(...READS);
-    revalidatePath("/", "layout");
-    await recordAudit({ action: "delete", entity: "company", entityId: companyId, summary: companyId });
-    return { success: true };
+    requireGlobalPermission(session, "companies", "delete");
+    return { error: "Royal Hardware is the only company and cannot be deleted." };
   });
 }

@@ -1,4 +1,7 @@
 "use server";
+import {readChannelOpening,canonicalOpeningAmount} from "@/lib/queries/channel-opening";
+import {OperationError} from "@/lib/operation-errors";
+import {resolveChannel} from "@/lib/queries/channels";
 import {withReadSnapshot} from "@/lib/db/read-snapshot";
 import {ledgerHistoryWindow} from "@/lib/queries/ledger-history";
 import {orderHistoryRecords} from "@/lib/queries/list-history";
@@ -8,7 +11,7 @@ import type {HistoryInfo} from "@/lib/history-window";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister, contactOpeningBalances, paymentAllocations, auditLogs } from "@/lib/db/schema";
+import { ledgerEntries, documents, documentTypes, documentNumberLedger, contacts, documentLines, items, units, bankAccounts, cashAccounts, chequeRegister, contactOpeningBalances, paymentAllocations, auditLogs, contactLedgers } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission, PermissionError } from "@/lib/auth/permissions";
 import { companyInPermissionScope, getScopeCompanyIds } from "@/lib/auth/scope";
@@ -273,6 +276,7 @@ function readEntryForm(formData: FormData) {
 async function writeOpeningBalanceEntry(
   input: {
     companyId: string;
+    saleType?: string;
     documentDate: string;
     contactId: string | null;
     contactName: string | null;
@@ -282,6 +286,7 @@ async function writeOpeningBalanceEntry(
   },
   operationId: string,
 ) {
+  const saleType = await resolveChannel(input.saleType);
   const documentType = await ensureDocumentType({
     companyId: input.companyId,
     code: "JOURNAL_ENTRY",
@@ -301,6 +306,7 @@ async function writeOpeningBalanceEntry(
       .insert(documents)
       .values({
         companyId: input.companyId,
+        saleType,
         documentTypeId: documentType.id,
         number,
         status: "posted",
@@ -346,6 +352,7 @@ export async function createOpeningBalanceEntry(_prevState: ActionResult | undef
       await writeOpeningBalanceEntry(
         {
           companyId,
+          saleType: String(formData.get("saleType") || ""),
           documentDate,
           contactId: contactId || null,
           contactName: contactName || null,
@@ -357,7 +364,7 @@ export async function createOpeningBalanceEntry(_prevState: ActionResult | undef
       );
 
       // A typed-in contact is a new contact.
-      await invalidateLookups(CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
+      await invalidateLookups(CACHE.contactLedgers, CACHE.documentTypes, CACHE.contacts, CACHE.cheques);
       await invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({ action: "create", entity: "opening balance", summary: contactName || contactId, companyId, detail: `${direction} ${amount}${note ? ` — ${note}` : ""}` });
@@ -404,7 +411,7 @@ export async function setContactBalance(
         })
         .from(ledgerEntries)
         .innerJoin(documents, eq(documents.id, ledgerEntries.documentId))
-        .where(and(eq(ledgerEntries.companyId, companyId), eq(documents.contactId, contactId)));
+        .where(and(eq(ledgerEntries.companyId, companyId), eq(documents.contactId, contactId),eq(documents.saleType,String(formData.get("saleType") || "counter"))));
 
       const current = Number(totals?.debit ?? 0) - Number(totals?.credit ?? 0);
       const desired = direction === "owes_us" ? amount : -amount;
@@ -416,6 +423,7 @@ export async function setContactBalance(
       await writeOpeningBalanceEntry(
         {
           companyId,
+          saleType: String(formData.get("saleType") || ""),
           documentDate,
           contactId,
           contactName: null,
@@ -426,7 +434,7 @@ export async function setContactBalance(
         readOperationId(formData),
       );
 
-      await invalidateLookups(CACHE.documentTypes, CACHE.cheques);
+      await invalidateLookups(CACHE.contactLedgers, CACHE.documentTypes, CACHE.cheques);
       await invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({
@@ -465,6 +473,7 @@ export type PartyLedgerEntry = {
   type: LedgerEntryType;
   code: string | null; // document type code (e.g. SALES_INVOICE) for routing
   documentStatus: string;
+  isLedgerClosed?: boolean;
   reference: string | null;
   debit: number;
   credit: number;
@@ -496,6 +505,7 @@ export type PartyLedgerSettlementLink = {
 };
 
 export type PartyLedgerResult = {
+  channelName?: string;
   history?:HistoryInfo;
   summary?:LedgerHistorySummary;
   contactId: string;
@@ -558,6 +568,7 @@ async function readPartyLedger(
       documentId: documents.id,
       date: documents.documentDate,
       createdAt: documents.createdAt,
+      ledgerClosedAt: documents.ledgerClosedAt,
       code: documentTypes.code,
       documentStatus: documents.status,
       number: documents.number,
@@ -576,6 +587,7 @@ async function readPartyLedger(
     .leftJoin(cashAccounts, eq(cashAccounts.id, documents.cashAccountId))
     .where(and(eq(documents.contactId, contactId), companyId ? eq(ledgerEntries.companyId, companyId) : undefined, docScope,
       ids?(ids.length?inArray(ledgerEntries.id,ids):sql`false`):undefined,
+      request?.channelId?eq(documents.saleType,request.channelId):undefined,
       sql`(${documentTypes.code} NOT IN ('PAYMENT_MADE','PAYMENT_RECEIVED') OR
         (${documents.bankAccountId} IS NOT NULL AND (${bankAccounts.companyId} IS NULL OR ${bankAccounts.companyId}=${ledgerEntries.companyId})) OR
         (${documents.bankAccountId} IS NULL AND ${documents.cashAccountId} IS NOT NULL AND ${cashAccounts.companyId}=${ledgerEntries.companyId}) OR
@@ -701,8 +713,10 @@ async function readPartyLedger(
     if (type === "opening_balance") {
       // Debit means the party owes us, which is the direction the statement
       // reads as positive. Summed across companies for a multi-company view.
-      openingBalance += debit - credit;
-      openingDocumentIds.push(r.documentId);
+      if (!r.ledgerClosedAt) {
+        openingBalance += debit - credit;
+        openingDocumentIds.push(r.documentId);
+      }
       // Render as the first chronological line of the statement rather than
       // only as a summary card: it is a real posting on the account, and hiding
       // it makes the running balance jump without a visible cause.
@@ -715,6 +729,7 @@ async function readPartyLedger(
         type,
         code: r.code,
         documentStatus: r.documentStatus,
+        isLedgerClosed: !!r.ledgerClosedAt,
         reference: r.number,
         debit,
         credit,
@@ -735,6 +750,7 @@ async function readPartyLedger(
       type,
       code: r.code,
       documentStatus: r.documentStatus,
+      isLedgerClosed: !!r.ledgerClosedAt,
       reference: r.number,
       debit,
       credit,
@@ -775,7 +791,7 @@ async function readPartyLedger(
   let advancePaid = 0;
   if (companyId && (await getScopeCompanyIds()).includes(companyId)) {
     requirePermission(session,"accounts","view",{companyId});
-    const settlement = await readPartySettlement(db, companyId, contactId,request?docIds:undefined);
+    const settlement = await readPartySettlement(db, companyId, contactId,request?docIds:undefined,request?.channelId);
     const docById = new Map(settlement.documents.map((d) => [d.id, d]));
     const linksByDocument = new Map<string, PartyLedgerSettlementLink[]>();
     const push = (from: string, toId: string, amount: number) => {
@@ -864,6 +880,7 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
           id: documents.id,
           number: documents.number,
           status: documents.status,
+          ledgerClosedAt: documents.ledgerClosedAt,
           companyId: documents.companyId,
           contactId: documents.contactId,
           code: documentTypes.code,
@@ -879,6 +896,7 @@ export async function deleteLedgerRow(documentId: string, confirmed = false): Pr
         .limit(1);
 
       if (!doc) return { error: "Entry not found." };
+      if (doc.ledgerClosedAt) return { error: "This entry belongs to a closed ledger. Add a new balance adjustment instead of deleting retained history." };
       if (doc.status === "cancelled") return { error: "Already cancelled." };
 
       // Build a FormData the way the module-specific delete functions expect it.
@@ -1002,6 +1020,8 @@ export type PartyOpeningBalance = {
   // Positive means the party owes us — the statement's own convention (debit less
   // credit), which is the opposite sign to `writeJournalEntry`.
   signedAmount: number;
+  editableSignedAmount: number;
+  additionalSignedAmount: number;
   date: string | null;
   note: string | null;
 };
@@ -1012,41 +1032,10 @@ const OPENING_BALANCE_TYPE = {
   series: "OB",
 } as const;
 
-export async function getPartyOpeningBalance(companyId: string, contactId: string): Promise<PartyOpeningBalance> {
+export async function getPartyOpeningBalance(companyId: string, contactId: string, channelId = "counter"): Promise<PartyOpeningBalance> {
   const session = await getSession();
-  requirePermission(session, "accounts", "view");
-  const empty: PartyOpeningBalance = { documentId: null, signedAmount: 0, date: null, note: null };
-  if (!companyId || !contactId) return empty;
-
-  const [row] = await db
-    .select({
-      documentId: documents.id,
-      date: documents.documentDate,
-      note: documents.reason,
-      debit: ledgerEntries.debit,
-      credit: ledgerEntries.credit,
-    })
-    .from(contactOpeningBalances)
-    .innerJoin(documents, eq(documents.id, contactOpeningBalances.documentId))
-    // Left, not inner: a balance set back to zero has no ledger row, and the row
-    // it does have is the one holding the sign.
-    .leftJoin(ledgerEntries, eq(ledgerEntries.documentId, documents.id))
-    .where(
-      and(
-        eq(contactOpeningBalances.companyId, companyId),
-        eq(contactOpeningBalances.contactId, contactId),
-        await companyInPermissionScope(documents.companyId, session, "accounts"),
-      ),
-    )
-    .limit(1);
-
-  if (!row) return empty;
-  return {
-    documentId: row.documentId,
-    signedAmount: Number(row.debit ?? 0) - Number(row.credit ?? 0),
-    date: row.date,
-    note: row.note,
-  };
+  requirePermission(session, "accounts", "view", {companyId});
+  return readChannelOpening(db,companyId,contactId,channelId);
 }
 
 // Reads the opening-balance form. Zero is valid here, unlike readEntryForm:
@@ -1096,7 +1085,9 @@ export async function setPartyOpeningBalance(
       const { documentDate, note, signedAmount, error } = readOpeningForm(formData);
       if (error) return { error };
 
-      const existing = await getPartyOpeningBalance(companyId, contactId);
+      const channelId = String(formData.get("saleType") || "counter");
+      const existing = await getPartyOpeningBalance(companyId, contactId, channelId);
+      await resolveChannel(channelId, existing.documentId ?? undefined);
       if (existing.signedAmount === signedAmount && existing.date === documentDate && (existing.note ?? "") === note) {
         return { success: true };
       }
@@ -1113,7 +1104,8 @@ export async function setPartyOpeningBalance(
       const allocatedAmount = Number(allocated?.amount ?? 0);
       // Room left for those allocations after the change: none at all if the sign
       // flipped, since the figure leaves that queue entirely.
-      const roomAfter = Math.sign(signedAmount) === Math.sign(existing.signedAmount) ? Math.abs(signedAmount) : 0;
+      const editableSigned = canonicalOpeningAmount(signedAmount,existing.additionalSignedAmount);
+      const roomAfter = Math.sign(editableSigned) === Math.sign(existing.editableSignedAmount) ? Math.abs(editableSigned) : 0;
       const releasedByEdit = Number((allocatedAmount - roomAfter).toFixed(2));
       if (releasedByEdit > 0 && String(formData.get("confirmAllocations") ?? "") !== "1") {
         return {
@@ -1128,9 +1120,12 @@ export async function setPartyOpeningBalance(
         affectsAccounting: true,
         active: true,
       });
-      const magnitude = Math.abs(signedAmount).toFixed(2);
+      const magnitude = Math.abs(editableSigned).toFixed(2);
 
       await db.transaction(async (tx) => {
+        await tx.insert(contactLedgers).values({companyId,contactId,channelId}).onConflictDoUpdate({target:[contactLedgers.companyId,contactLedgers.contactId,contactLedgers.channelId],set:{isActive:true}});
+        const current = await readChannelOpening(tx,companyId,contactId,channelId);
+        if (JSON.stringify(current)!==JSON.stringify(existing)) throw new OperationError("The opening balance changed. Your input is preserved; refresh and review it before saving.");
         let documentId = existing.documentId;
         if (documentId) {
           // Hand back what was settled against the old figure before the new one
@@ -1147,7 +1142,7 @@ export async function setPartyOpeningBalance(
               // allocations: an opening balance has no counter payment of its
               // own, so everything settled against it came through FIFO.
               paidAmount: "0",
-              isPaid: signedAmount === 0,
+              isPaid: editableSigned === 0,
               reason: note || null,
               updatedAt: new Date(),
             })
@@ -1158,6 +1153,7 @@ export async function setPartyOpeningBalance(
             .insert(documents)
             .values({
               companyId,
+              saleType: channelId,
               documentTypeId: documentType.id,
               number,
               status: "posted",
@@ -1166,7 +1162,7 @@ export async function setPartyOpeningBalance(
               subtotal: magnitude,
               grandTotal: magnitude,
               paidAmount: "0",
-              isPaid: signedAmount === 0,
+              isPaid: editableSigned === 0,
               reason: note || null,
               createdBy: session.userId,
             })
@@ -1175,7 +1171,9 @@ export async function setPartyOpeningBalance(
           await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId });
           // The pointer that makes "one opening balance per party" an invariant
           // the database holds rather than a rule this function remembers.
-          await tx.insert(contactOpeningBalances).values({ companyId, contactId, documentId });
+          await tx.execute(sql`INSERT INTO consolidation_history(kind,source_id,target_id,original)
+            SELECT 'closed opening index',b.document_id::text,${documentId},to_jsonb(b) FROM contact_opening_balances b WHERE b.company_id=${companyId}::uuid AND b.contact_id=${contactId}::uuid AND b.channel_id=${channelId}`);
+          await tx.insert(contactOpeningBalances).values({ companyId, contactId, channelId, documentId }).onConflictDoUpdate({target:[contactOpeningBalances.companyId,contactOpeningBalances.contactId,contactOpeningBalances.channelId],set:{documentId,updatedAt:new Date()}});
         }
 
         if (!documentId) throw new Error("Opening-balance document could not be created.");
@@ -1185,7 +1183,7 @@ export async function setPartyOpeningBalance(
         // requires one side to be greater than zero. `signedAmount` is statement
         // signed (debit minus credit), so a positive receivable is a debit.
         await tx.delete(ledgerEntries).where(eq(ledgerEntries.documentId, documentId));
-        const side = openingLedgerSide(signedAmount);
+        const side = openingLedgerSide(editableSigned);
         if (side) {
           await tx.insert(ledgerEntries).values(
             side === "debit"
@@ -1196,7 +1194,7 @@ export async function setPartyOpeningBalance(
         await recomputeParty(tx, companyId, contactId);
       });
 
-      await invalidateLookups(CACHE.documentTypes, CACHE.contacts);
+      await invalidateLookups(CACHE.contactLedgers, CACHE.documentTypes, CACHE.contacts);
       await invalidateReads(...READS);
       revalidatePath("/ledger");
       await recordAudit({
@@ -1313,12 +1311,13 @@ export async function previewPartyOpeningBalance(
   companyId: string,
   contactId: string,
   signedAmount: number,
+  channelId = "counter",
 ): Promise<LedgerImpactPreview | { error: string }> {
   const session = await getSession();
   requirePermission(session, "accounts", "view");
   if (!companyId || !contactId) return { error: "Company and contact are required." };
-  const existing = await getPartyOpeningBalance(companyId, contactId);
-  return previewImpact(companyId, contactId, { kind: "opening", documentId: existing.documentId, signedAmount });
+  const existing = await getPartyOpeningBalance(companyId, contactId, channelId);
+  return previewImpact(companyId, contactId, { kind: "opening", documentId: existing.documentId, signedAmount:canonicalOpeningAmount(signedAmount,existing.additionalSignedAmount), channel: channelId });
 }
 
 // ---------------------------------------------------------------------------

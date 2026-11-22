@@ -3,6 +3,7 @@
 import * as server from "@/lib/actions/contacts";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/contacts";
+export const deleteContacts: typeof server.deleteContacts = backgroundAction("contacts.deleteContacts", server.deleteContacts);
 export const listContacts: typeof server.listContacts = backgroundRead("contacts.listContacts", server.listContacts);
 export const getContact: typeof server.getContact = backgroundRead("contacts.getContact", server.getContact);
 export const createContactsBatch: typeof server.createContactsBatch = backgroundAction("contacts.createContactsBatch", server.createContactsBatch);

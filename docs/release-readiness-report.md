@@ -1,5 +1,7 @@
 # ERP integrity remediation — release-readiness report
 
+Historical report. Current release status: [22 November 2026](2026-11-22-release-readiness.md).
+
 Date: 2026-08-26
 
 ## Outcome

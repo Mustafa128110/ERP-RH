@@ -31,8 +31,6 @@ const REQUIRED = [
   ["stock-transfers.ts", "export async function deleteStockTransfer", 'eq(documents.status, "posted")'],
   ["stock-adjustments.ts", "export async function deleteStockAdjustment", '.for("update")'],
   ["stock-adjustments.ts", "export async function deleteStockAdjustment", 'inArray(documents.status, ["pending", "posted"])'],
-  ["inter-company.ts", "export async function updateInterCompanySale", 'eq(documents.status, "posted")'],
-  ["inter-company.ts", "export async function deleteInterCompanySale", 'eq(documents.status, "posted")'],
 ] as const;
 
 function main() {

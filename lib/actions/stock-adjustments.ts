@@ -1,4 +1,6 @@
 "use server";
+import { resolveChannel, channelInScope } from "@/lib/queries/channels";
+import { writeStockRows } from "@/lib/queries/stock-writes";
 import {stockDocumentHistory} from "@/lib/queries/stock-document-history";
 import {orderHistoryRecords} from "@/lib/queries/list-history";
 import type {HistoryRequest} from "@/lib/history-window";
@@ -16,7 +18,6 @@ import {
   items,
   units,
   locations,
-  inventoryTransactions,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -87,7 +88,7 @@ export async function getRecentStockAdjustmentRates(itemId: string): Promise<str
 async function readStockAdjustments(companyId: string|undefined, ids?:string[]) {
   const session = await getSession();
   requirePermission(session, "stock_adjustments", "view");
-  const scope = and(await companyInPermissionScope(documents.companyId, session, "stock_adjustments"), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(await channelInScope(documents.saleType), await companyInPermissionScope(documents.companyId, session, "stock_adjustments"), companyId ? eq(documents.companyId, companyId) : undefined);
 
   const [docs, lineRows] = await Promise.all([
     db
@@ -240,6 +241,7 @@ export async function createStockAdjustment(
 
   const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
+  const saleType = await resolveChannel(formData.get("saleType"));
   const documentDate = String(formData.get("documentDate") ?? "");
   const locationRaw = String(formData.get("locationId") ?? "");
   const reason = String(formData.get("reason") ?? "");
@@ -296,6 +298,7 @@ export async function createStockAdjustment(
           number,
           status: pendingApproval ? "pending" : "posted",
           documentDate,
+          saleType,
           reason,
           createdBy: session.userId,
         })
@@ -326,27 +329,7 @@ export async function createStockAdjustment(
         };
       });
 
-      const insertedLines = await tx
-        .insert(documentLines)
-        .values(rows.map((r) => r.line))
-        .returning({ id: documentLines.id });
-
-      if (!pendingApproval) {
-        await tx.insert(inventoryTransactions).values(
-          rows
-            .map((r, i) => ({ ...r, lineId: insertedLines[i].id }))
-            .filter((r) => r.line.itemId)
-            .map((r) => ({
-              companyId,
-              documentLineId: r.lineId,
-              movement: r.movement,
-              quantity: r.line.quantity!,
-              baseQuantity: r.line.baseQuantity!,
-              unitCost: String(r.unitCost),
-              totalCost: String(r.unitCost * Number(r.line.baseQuantity)),
-            })),
-        );
-      }
+      await writeStockRows(tx, rows, !pendingApproval);
 
       await tx.insert(documentNumberLedger).values({ companyId, documentTypeId: documentType.id, number, documentId: doc.id });
 

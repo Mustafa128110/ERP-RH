@@ -6,7 +6,7 @@ import type { ComboOption } from "@/components/ui/ComboBox";
 
 export function WhatsAppHandoff({ recipients, companies, messages }: { recipients: WhatsAppRecipient[]; companies: ComboOption[]; messages: WhatsAppMessageRow[] }) {
   const [state, action, pending] = useActionState(createWhatsAppHandoff, {});
-  const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
+  const [companyId] = useState(companies[0]?.id ?? "");
   const [contactId, setContactId] = useState("");
   const availableContacts = useMemo(() => recipients.filter((contact) => !contact.companyId || contact.companyId === companyId), [companyId, recipients]);
 
@@ -23,12 +23,7 @@ export function WhatsAppHandoff({ recipients, companies, messages }: { recipient
         <h2 className="text-sm font-semibold text-navy-800">Open a WhatsApp message</h2>
         <p className="mt-1 text-sm text-steel">The message opens in your own WhatsApp. It is logged as a handoff, not a confirmed send.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="text-sm text-ink">Company
-            <select name="companyId" value={companyId} onChange={(event) => { setCompanyId(event.target.value); setContactId(""); }} className="mt-1 h-12 w-full rounded border border-sand bg-white px-3 text-base sm:text-sm">
-              <option value="">Choose company</option>
-              {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-            </select>
-          </label>
+          <input type="hidden" name="companyId" value={companyId} />
           <label className="text-sm text-ink">Contact
             <select name="contactId" value={contactId} onChange={(event) => setContactId(event.target.value)} className="mt-1 h-12 w-full rounded border border-sand bg-white px-3 text-base sm:text-sm">
               <option value="">Choose contact</option>

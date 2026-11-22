@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import {conversionCostShares,validateConversion} from "./stock-conversion";
+assert.deepEqual(conversionCostShares(100,[100]),[100]);
+assert.deepEqual(conversionCostShares(0.01,[50,50]),[0.01,0]);
+assert.deepEqual(conversionCostShares(100,[33.333,33.333,33.334]),[33.33,33.33,33.34]);
+assert.throws(()=>conversionCostShares(100,[40,40]),/100%/);
+assert.throws(()=>conversionCostShares(-1,[100]),/invalid/);
+const input={itemId:"sack",unitId:"sack-unit",quantity:1},output={itemId:"packet",unitId:"packet-unit",quantity:50,salesRate:5,costShare:100};
+validateConversion([input],[output]);
+assert.equal(conversionCostShares(100,[100])[0]/output.quantity,2,"one 100-cost sack yields 50 packets at cost 2 each, independently of the selling rate");
+assert.throws(()=>validateConversion([input,input],[output]),/duplicate input/);
+assert.throws(()=>validateConversion([input],[{...output,itemId:"sack"}]),/different output/);
+assert.throws(()=>validateConversion([input],[{...output,quantity:0}]),/positive quantity/);
+console.log("stock conversion validation and conserved cost allocation checks passed");

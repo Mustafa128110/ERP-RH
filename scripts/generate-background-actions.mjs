@@ -3,7 +3,7 @@ import ts from "typescript";
 
 // Reviewed database-only modules. Auth provisioning, sending messages, backups,
 // file imports, and quick-add helpers which need real IDs stay server-confirmed.
-const modules = ["accounts", "brands", "categories", "companies", "contacts", "expenses", "inter-company", "ledger", "locations", "market-purchases", "payments", "products", "purchases", "quotations", "returns", "roles", "sales", "settings", "stock-adjustments", "stock-transfers", "taxes", "transfers", "unit-conversions", "units"];
+const modules = ["accounts", "brands", "categories", "companies", "contacts", "expenses", "ledger", "ledger-channels", "locations", "market-purchases", "payments", "products", "purchases", "quotations", "returns", "roles", "sales", "settings", "stock-adjustments", "stock-conversions", "stock-transfers", "taxes", "transfers", "unit-conversions", "units"];
 const registry = [];
 const reads = [];
 fs.mkdirSync("lib/client-actions", { recursive: true });
@@ -11,7 +11,7 @@ for (const domain of modules) {
   const source = fs.readFileSync(`lib/actions/${domain}.ts`, "utf8");
   const ast = ts.createSourceFile(domain, source, ts.ScriptTarget.Latest, true);
   const names = ast.statements.filter(n => ts.isFunctionDeclaration(n) && n.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)).map(n => n.name.text);
-  const writes = names.filter(name => /^(create|update|delete|save|merge|assign|approve|confirm|cancel|convert|set)[A-Z]/.test(name));
+  const writes = names.filter(name => /^(create|update|delete|save|merge|assign|approve|confirm|cancel|convert|set|close)[A-Z]/.test(name));
   const getters = names.filter(name => /^(get|list)[A-Z]/.test(name));
   const alias = domain.replaceAll("-", "_");
   registry.push(`import * as ${alias} from "@/lib/actions/${domain}";`);

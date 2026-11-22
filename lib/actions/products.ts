@@ -1,5 +1,6 @@
 "use server";
 import { withReadSnapshot } from "@/lib/db/read-snapshot";
+import { recordReferences } from "@/lib/queries/record-references";
 
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -19,7 +20,7 @@ import {
   units,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermission, requireAnyPermission } from "@/lib/auth/permissions";
 import { companyInPermissionScope, companyInScope, getScopeCompanyIds } from "@/lib/auth/scope";
 import { CACHE, getBrands, getCategories, getCompanies, getContactOptions, getLocations, getUnits, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { csvBool, csvErrorText } from "@/lib/csv";
@@ -49,11 +50,35 @@ const READS = [READ_DOMAIN.products, READ_DOMAIN.sales, READ_DOMAIN.purchases, R
 // is reachable from a test.
 export async function listProductsWithRates(): Promise<ProductRateRow[]> {
   const session = await getSession();
-  requirePermission(session, "products", "view");
+  requireAnyPermission(session, ["products", "stock"], "view");
   const companyIds = (await getScopeCompanyIds()).filter(
-    (companyId) => session.globalPermissions.has("products.view") || session.permissionsByCompany.get(companyId)?.has("products.view"),
+    (companyId) => ["products.view", "stock.view"].some((key) => session.globalPermissions.has(key) || session.permissionsByCompany.get(companyId)?.has(key)),
   );
   return cachedPageRead(READ_DOMAIN.products, `${session.userId}:products:${[...companyIds].sort().join(",")}`, () => queryProductRates(companyIds));
+}
+
+export async function deleteProducts(itemIds: string[]): Promise<ActionResult> {
+  return guard("Couldn't delete the products.", async () => {
+    const session = await getLiveSession();
+    requirePermission(session, "products", "delete");
+    const ids = [...new Set(itemIds)];
+    if (!ids.length) return { error: "Select a product to delete." };
+    const scope = await companyInPermissionScope(items.companyId, session, "products", "delete");
+    const result = await db.transaction(async (tx) => {
+      const selected = await tx.select({ id: items.id, name: items.name }).from(items).where(and(inArray(items.id, ids), scope)).for("update");
+      if (selected.length !== ids.length) return { error: "Some products no longer exist or are outside your access." };
+      const references = await recordReferences(tx, "items", ids);
+      if (references.length) return { error: `Cannot delete referenced products: ${references.map((reference) => `${reference.table.replace("public.", "")} (${reference.count})`).join(", ")}. Remove unused setup links first; transaction history must be preserved.` };
+      await tx.delete(items).where(inArray(items.id, ids));
+      return { success: true, names: selected.map((item) => item.name) };
+    });
+    if (result.error) return { error: result.error };
+    await invalidateLookups(CACHE.items);
+    await invalidateReads(...READS);
+    revalidatePath("/inventory/stock");
+    await recordAudit({ action: "delete", entity: "product", summary: result.names?.slice(0, 5).join(", ") ?? `${ids.length} products deleted` });
+    return { success: true };
+  });
 }
 
 // The SKU the batch dialog shows as each row's placeholder before you save. A
@@ -88,8 +113,8 @@ export interface ProductBatchRow {
 // second page permission merely to render its toolbar.
 export async function getProductAssignmentOptions() {
   const session = await getSession();
-  requirePermission(session, "products", "view");
-  const ruleScope = await companyInPermissionScope(unitConversions.companyId, session, "products");
+  requireAnyPermission(session, ["products", "stock"], "view");
+  const ruleScope = or(await companyInPermissionScope(unitConversions.companyId, session, "products"), await companyInPermissionScope(unitConversions.companyId, session, "stock"));
   const [unitRows, ruleRows] = await Promise.all([
     getUnits(),
     db
@@ -605,6 +630,7 @@ export interface ProductEditInput {
 // every row in practice — a stock count is one count, a delivery is one
 // delivery — so they sit above the grid instead of repeating per row.
 export interface ProductBatchEditShared {
+  saleType?: string;
   // "none" edits the catalogue details only and writes no document.
   mode: "none" | "purchase" | "adjust";
   locationId: string;
@@ -938,6 +964,7 @@ async function recordPurchases(shared: ProductBatchEditShared, saved: SavedProdu
     const purchaseForm = new FormData();
     purchaseForm.set("companyId", companyId);
     purchaseForm.set("documentDate", shared.documentDate);
+    purchaseForm.set("saleType", shared.saleType ?? "counter");
     purchaseForm.set("documentTypeMode", "existing");
     purchaseForm.set("documentTypeId", String(documentType.id));
     // Every row in the group named the same supplier — that's what grouped them —
@@ -1031,6 +1058,7 @@ async function recordAdjustments(shared: ProductBatchEditShared, saved: SavedPro
     const adjustForm = new FormData();
     adjustForm.set("companyId", companyId);
     adjustForm.set("documentDate", shared.documentDate);
+    adjustForm.set("saleType", shared.saleType ?? "counter");
     adjustForm.set("locationId", shared.locationId);
     adjustForm.set("reason", shared.reason);
     adjustForm.set("linesJson", JSON.stringify(group.lines));

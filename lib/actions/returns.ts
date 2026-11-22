@@ -14,7 +14,7 @@ import { guard, describeDbError, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 import { round1 } from "@/lib/format";
-import { salesReturnHeaderTotals } from "@/lib/return-constants";
+import { saleReturnQuantity, salesReturnHeaderTotals } from "@/lib/return-constants";
 
 type RequestedLine = { sourceLineId: string; quantity: number };
 function salesReturnType(companyId: string) {
@@ -115,10 +115,11 @@ export async function createSalesReturn(_prevState: (ActionResult & { id?: strin
     const session = await getLiveSession();
     const sourceDocumentId = String(formData.get("sourceDocumentId") ?? "").trim();
     const documentDate = String(formData.get("documentDate") ?? "").trim();
-    const requested = readRequestedLines(formData);
+    const fullReturn = formData.get("returnMode") === "all";
+    const requested = readRequestedLines(formData) ?? [];
     if (!sourceDocumentId) return { error: "Choose the original sale." };
     if (!documentDate) return { error: "Return date is required." };
-    if (!requested || requested.length === 0) return { error: "Choose at least one item and quantity to return." };
+    if (!fullReturn && requested.length === 0) return { error: "Choose at least one item and quantity to return." };
 
     const [source] = await db
       .select({ companyId: documents.companyId })
@@ -139,6 +140,7 @@ export async function createSalesReturn(_prevState: (ActionResult & { id?: strin
         const [lockedSource] = await tx
           .select({
             id: documents.id,
+            saleType: documents.saleType,
             companyId: documents.companyId,
             contactId: documents.contactId,
             subtotal: documents.subtotal,
@@ -161,9 +163,9 @@ export async function createSalesReturn(_prevState: (ActionResult & { id?: strin
         const sourceLines = await tx
           .select({ id: documentLines.id, lineNo: documentLines.lineNo, itemId: documentLines.itemId, locationId: documentLines.locationId, unitId: documentLines.unitId, quantity: documentLines.quantity, baseQuantity: documentLines.baseQuantity, unitPrice: documentLines.unitPrice, unitCost: documentLines.unitCost, lineTotal: documentLines.lineTotal, taxable: documentLines.taxable, taxAmount: documentLines.taxAmount })
           .from(documentLines)
-          .where(and(eq(documentLines.documentId, sourceDocumentId), inArray(documentLines.id, requested.map((line) => line.sourceLineId))))
+          .where(and(eq(documentLines.documentId, sourceDocumentId), fullReturn ? undefined : inArray(documentLines.id, requested.map((line) => line.sourceLineId))))
           .orderBy(asc(documentLines.lineNo));
-        if (sourceLines.length !== requested.length) throw new Error("One of the selected sale lines no longer exists.");
+        if (!fullReturn && sourceLines.length !== requested.length) throw new Error("One of the selected sale lines no longer exists.");
         const requestedById = new Map(requested.map((line) => [line.sourceLineId, line.quantity]));
         const priorReturns = await tx.execute<{ line_no: number; quantity: string }>(sql`
           SELECT dl.line_no, coalesce(sum(dl.quantity), 0) AS quantity
@@ -176,12 +178,13 @@ export async function createSalesReturn(_prevState: (ActionResult & { id?: strin
           GROUP BY dl.line_no`);
         const priorByLine = new Map(priorReturns.map((line) => [line.line_no, Number(line.quantity)]));
         const selected = sourceLines.map((line) => {
-          const quantity = requestedById.get(line.id) ?? 0;
+          const quantity = saleReturnQuantity(fullReturn ? "all" : "partial", Number(line.quantity), priorByLine.get(line.lineNo) ?? 0, requestedById.get(line.id) ?? 0);
           const available = Number(line.quantity) - (priorByLine.get(line.lineNo) ?? 0);
           if (quantity > available + 1e-9) throw new Error(`Line ${line.lineNo}: only ${available} can still be returned.`);
           const fraction = quantity / Number(line.quantity);
           return { ...line, quantity, baseQuantity: Number(line.baseQuantity) * fraction, lineTotal: Number(line.lineTotal) * fraction, taxAmount: Number(line.taxAmount) * fraction };
-        });
+        }).filter((line) => line.quantity > 0);
+        if (!selected.length) throw new Error("This sale has already been fully returned.");
 
         const costRows = await tx
           .select({ documentLineId: inventoryTransactions.documentLineId, totalCost: inventoryTransactions.totalCost })
@@ -205,7 +208,7 @@ export async function createSalesReturn(_prevState: (ActionResult & { id?: strin
         createdNumber = number;
         const [returnDoc] = await tx
           .insert(documents)
-          .values({ companyId: lockedSource.companyId, documentTypeId: returnType.id, number, status: "posted", documentDate, contactId: lockedSource.contactId, sourceDocumentId, subtotal: String(selectedSubtotal), discountTotal: String(discount), taxTotal: String(tax), taxId: lockedSource.taxId, taxRate: lockedSource.taxRate, taxInclusive: lockedSource.taxInclusive, shippingTotal: String(shipping), grandTotal: String(grandTotal), createdBy: session.userId })
+          .values({ companyId: lockedSource.companyId, saleType: lockedSource.saleType, documentTypeId: returnType.id, number, status: "posted", documentDate, contactId: lockedSource.contactId, sourceDocumentId, subtotal: String(selectedSubtotal), discountTotal: String(discount), taxTotal: String(tax), taxId: lockedSource.taxId, taxRate: lockedSource.taxRate, taxInclusive: lockedSource.taxInclusive, shippingTotal: String(shipping), grandTotal: String(grandTotal), createdBy: session.userId })
           .returning({ id: documents.id });
         const inserted = await tx
           .insert(documentLines)

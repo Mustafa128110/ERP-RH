@@ -52,6 +52,8 @@ export type PartySettlement = SettlementSnapshot & {
 };
 
 type Row = {
+  channel: string;
+  primary_opening: boolean;
   id: string;
   code: string;
   number: string;
@@ -72,11 +74,13 @@ export async function readPartySettlement(
   companyId: string,
   contactId: string,
   documentIds?:string[],
+  channelId?:string,
 ): Promise<PartySettlement> {
   // Two statements, not one per document: this runs inside the same transaction
   // as the write that follows it, where every round trip is ~170ms.
   const source=sql`
-    SELECT d.id::text AS id,
+    SELECT d.id::text AS id,coalesce(d.sale_type,'counter') AS channel,
+           EXISTS(SELECT 1 FROM contact_opening_balances cob WHERE cob.document_id=d.id) AS primary_opening,
            dt.code::text AS code,
            d.number,
            d.document_date::text AS date,
@@ -104,7 +108,8 @@ export async function readPartySettlement(
     ) a ON true
     WHERE d.company_id = ${companyId}::uuid
       AND d.contact_id = ${contactId}::uuid
-      AND d.status = 'posted'
+      AND ${channelId?sql`coalesce(d.sale_type,'counter')=${channelId}`:sql`true`}
+      AND d.status = 'posted' AND d.ledger_closed_at IS NULL
       AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'JOURNAL_ENTRY', 'PAYMENT_RECEIVED', 'PAYMENT_MADE')
       AND (
         dt.code NOT IN ('PAYMENT_RECEIVED', 'PAYMENT_MADE')
@@ -131,8 +136,9 @@ export async function readPartySettlement(
            pa.amount::float8 AS amount
     FROM payment_allocations pa
     JOIN documents pd ON pd.id = pa.payment_document_id
-    WHERE pd.company_id = ${companyId}::uuid
+    WHERE pd.ledger_closed_at IS NULL AND pd.company_id = ${companyId}::uuid
       AND pd.contact_id = ${contactId}::uuid
+      AND ${channelId?sql`coalesce(pd.sale_type,'counter')=${channelId}`:sql`true`}
       AND ${documentIds?sql`(pa.payment_document_id ${selected} OR pa.invoice_document_id ${selected})`:sql`true`}
   `);
 
@@ -153,21 +159,23 @@ export async function readPartySettlement(
 
     const paymentSide = PAYMENT_SIDE[row.code as keyof typeof PAYMENT_SIDE];
     if (paymentSide) {
-      payments.push({ id: row.id, side: paymentSide, amount: grandTotal, date: row.date, createdAt: row.created_at });
+      payments.push({ channel: row.channel, id: row.id, side: paymentSide, amount: grandTotal, date: row.date, createdAt: row.created_at });
       continue;
     }
 
     if (row.code === "OPENING_BALANCE") {
       // The sign lives on the ledger row, not on the document, so the figure and
       // its direction cannot drift apart.
-      openingDocumentId = row.id;
-      openingSigned = Number(row.entry_debit ?? 0) - Number(row.entry_credit ?? 0);
-      const side = openingQueueSide(openingSigned);
+      if (row.primary_opening || !openingDocumentId) openingDocumentId = row.id;
+      const signed = Number(row.entry_debit ?? 0) - Number(row.entry_credit ?? 0);
+      openingSigned += signed;
+      const side = openingQueueSide(signed);
       if (side) {
         items.push({
+          channel: row.channel,
           id: row.id,
           side,
-          amount: Math.abs(openingSigned),
+          amount: Math.abs(signed),
           date: row.date,
           createdAt: row.created_at,
           isOpening: true,
@@ -181,6 +189,7 @@ export async function readPartySettlement(
       const side = openingQueueSide(signed);
       if (side) {
         items.push({
+          channel: row.channel,
           id: row.id,
           side,
           amount: Math.max(0, grandTotal - tillPaid),
@@ -194,6 +203,7 @@ export async function readPartySettlement(
     const itemSide = ITEM_SIDE[row.code as keyof typeof ITEM_SIDE];
     if (!itemSide) continue;
     items.push({
+      channel: row.channel,
       id: row.id,
       side: itemSide,
       amount: Math.max(0, grandTotal - tillPaid),

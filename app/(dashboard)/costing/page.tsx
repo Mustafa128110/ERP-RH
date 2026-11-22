@@ -1,5 +1,2 @@
-import { CostingCalculator } from "@/components/modules/CostingCalculator";
-
-export default function CostingPage() {
-  return <CostingCalculator />;
-}
+import { redirect } from "next/navigation";
+export default function Page() { redirect("/inventory/stock"); }

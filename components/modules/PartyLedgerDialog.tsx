@@ -1,4 +1,5 @@
 "use client";
+import { parseTableSorts, promoteTableSort, type TableSort } from "@/lib/table-sort";
 
 import Link from "next/link";
 import { useActionState, useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent } from "react";
@@ -321,7 +322,7 @@ function SettlementCell({ entry }: { entry: PartyLedgerEntry & { balance: number
   );
 }
 
-export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, onExport }: { contactId: string; companyId: string; contactName: string; onClose: () => void; onExport: (fmt: "pdf" | "png", data: PartyLedgerResult, entries: (PartyLedgerEntry & { balance: number })[], summary: { opening: number; totalDebit: number; totalCredit: number; closing: number }) => void }) {
+export function PartyLedgerDialog({ contactId, companyId, contactName, channelId, channelName, onClose, onExport }: { contactId: string; companyId: string; contactName: string; channelId?: string; channelName?: string; onClose: () => void; onExport: (fmt: "pdf" | "png", data: PartyLedgerResult, entries: (PartyLedgerEntry & { balance: number })[], summary: { opening: number; totalDebit: number; totalCredit: number; closing: number }) => void }) {
   const [data, setData] = useState<PartyLedgerResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -339,13 +340,20 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
   const all = true;
   const [exporting,setExporting]=useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
-  const [desc, setDesc] = useState<boolean>(() => {
+  const [desc] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("party-ledger-sort-desc");
       if (saved !== null) return saved === "true";
     }
     return true;
   });
+  const [sorts, setSorts] = useState<TableSort[]>(() => {
+    try { const saved = localStorage.getItem("party-ledger-sort-priorities"); if (saved) { const value = JSON.parse(saved) as TableSort[]; return parseTableSorts(value.map(sort=>sort.key).join(","),value.map(sort=>sort.direction).join(",")); } } catch { /* Use date order. */ }
+    return [{ key: "date", direction: desc ? "desc" : "asc" }];
+  });
+  function toggleLedgerSort(key: string) { setPage(1); setSorts(current=>promoteTableSort(current,key)); }
+  function sortMarker(key: string) { const priority=sorts.findIndex(sort=>sort.key===key); return priority<0?null:<span className="ml-1">{sorts[priority].direction==="desc"?"↓":"↑"}<sup className="ml-0.5 text-[9px]">{priority+1}</sup></span>; }
+  useEffect(()=>{try { localStorage.setItem("party-ledger-sort-priorities", JSON.stringify(sorts)); } catch { /* Optional preference. */ }},[sorts]);
   // The party's stored opening balance, and the panel that edits it. This is a
   // real document on the account — the oldest item in its FIFO queue — not a
   // number typed into the statement, so it arrives with the ledger and is saved
@@ -471,7 +479,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     return onSelectionChange((stats) => setSelectionStats(stats));
   }, []);
 
-  const request=useMemo(()=>({page,all,from:fromDate,to:toDate,query:search,showCancelled,direction:desc?"desc":"asc"}),[page,all,fromDate,toDate,search,showCancelled,desc]);
+  const request=useMemo(()=>({channelId,page,all,from:fromDate,to:toDate,query:search,showCancelled,sort:sorts.map(sort=>sort.key).join(","),direction:sorts.map(sort=>sort.direction).join(",")}),[channelId,page,all,fromDate,toDate,search,showCancelled,sorts]);
   const requestRef=useRef(request);
   useLayoutEffect(()=>{requestRef.current=request;},[request]);
   const reload=useCallback(async()=>{
@@ -570,14 +578,14 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
     setExporting(true);setError(null);
     try{
       const full=await getPartyLedgerPage(contactId,companyId,{...request,all:true});
-      if(full?.summary)onExport(fmt,full,full.entries.map(entry=>({...entry,balance:entry.balance!})),full.summary);
+      if(full?.summary)onExport(fmt,{...full,channelName},full.entries.map(entry=>({...entry,balance:entry.balance!})),full.summary);
     }catch{setError("Could not load the complete statement for export. Please retry.");}
     finally{setExporting(false);}
   }
 
   return (
     <>
-    <Dialog title={`Statement of Account — ${contactName}`} onClose={onClose} size="full">
+    <Dialog title={`Statement of Account — ${contactName}${channelName?` · ${channelName}`:""}`} onClose={onClose} size="full">
       {loading && <p className="py-8 text-center text-sm text-steel">Loading…</p>}
       {error && <p className="py-8 text-center text-sm text-error">{error}</p>}
 
@@ -590,6 +598,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
               <p className="text-sm text-steel">
                 {data.displayName}
                 {data.companyName ? ` (${data.companyName})` : ""}
+            {data.channelName ? ` · ${data.channelName}` : ""}
               </p>
               <p className="text-xs text-steel">
                 {[data.city, data.phone, data.email].filter(Boolean).join(" · ")}
@@ -772,14 +781,14 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">
-                    <th className="cursor-pointer select-none py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => {setPage(1);setDesc((d) => !d);}}>
-                      Date {desc ? "↓" : "↑"}
+                    <th className="cursor-pointer select-none py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => toggleLedgerSort("date")}>
+                      Date {sortMarker("date")}
                     </th>
-                    <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description</th>
-                    <th className="py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Ref</th>
-                    <th className="py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Debit</th>
-                    <th className="py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Credit</th>
-                    <th className="py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Balance</th>
+                    <th onClick={() => toggleLedgerSort("description")} className="cursor-pointer select-none py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description {sortMarker("description")}</th>
+                    <th onClick={() => toggleLedgerSort("reference")} className="cursor-pointer select-none py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Ref {sortMarker("reference")}</th>
+                    <th onClick={() => toggleLedgerSort("debit")} className="cursor-pointer select-none py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Debit {sortMarker("debit")}</th>
+                    <th onClick={() => toggleLedgerSort("credit")} className="cursor-pointer select-none py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Credit {sortMarker("credit")}</th>
+                    <th onClick={() => toggleLedgerSort("balance")} className="cursor-pointer select-none py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Balance {sortMarker("balance")}</th>
                     <th className="py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Status</th>
                     <th className="py-2.5 px-1"></th>
                   </tr>
@@ -809,6 +818,8 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                       <td className="py-2 px-3 text-center">
                         {e.documentStatus === "cancelled" ? (
                           <span className="rounded border border-steel/30 bg-ivory px-1.5 py-0.5 text-[10px] font-medium text-steel">Cancelled</span>
+                        ) : e.isLedgerClosed ? (
+                          <span className="text-xs text-steel">Closed</span>
                         ) : (
                           <SettlementCell entry={e} />
                         )}
@@ -816,8 +827,8 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
                       <td className="py-2 px-1 text-center">
                         <button
                           type="button"
-                          title="Delete this entry"
-                          disabled={deletingId === e.documentId}
+                          title={e.isLedgerClosed ? "Closed history is retained; add a new balance adjustment to correct it" : "Delete this entry"}
+                          disabled={e.isLedgerClosed || deletingId === e.documentId}
                           onClick={() => void askDelete(e)}
                           className="rounded px-1.5 py-0.5 text-xs text-steel hover:bg-error/10 hover:text-error disabled:opacity-40"
                         >
@@ -1015,6 +1026,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
           companyId={companyId}
           contactId={contactId}
           contactName={contactName}
+          channelId={channelId}
           current={data.openingBalance}
           onClose={() => setEditOpening(false)}
           onSaved={async () => {
@@ -1042,6 +1054,7 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, onClose, 
 function OpeningBalanceDialog({
   companyId,
   contactId,
+  channelId,
   contactName,
   current,
   onClose,
@@ -1049,6 +1062,7 @@ function OpeningBalanceDialog({
 }: {
   companyId: string;
   contactId: string;
+  channelId?: string;
   contactName: string;
   // The stored figure and every ledger surface use one sign: positive means the
   // party owes us (debit - credit), negative means we owe the party.
@@ -1068,8 +1082,10 @@ function OpeningBalanceDialog({
     let cancelled = false;
     (async () => {
       try {
-        const stored = await getPartyOpeningBalance(companyId, contactId);
+        const stored = await getPartyOpeningBalance(companyId, contactId, channelId);
         if (cancelled) return;
+        setAmount(stored.signedAmount===0?"":Math.abs(stored.signedAmount).toFixed(2));
+        setDirection(stored.signedAmount<0?"we_owe":"owes_us");
         setDocumentDate(stored.date ?? todayISO());
         setNote(stored.note ?? "");
       } catch {
@@ -1079,7 +1095,7 @@ function OpeningBalanceDialog({
       }
     })();
     return () => { cancelled = true; };
-  }, [companyId, contactId]);
+  }, [companyId, contactId, channelId]);
 
   const signedAmount = useMemo(() => {
     const magnitude = Number(amount);
@@ -1105,14 +1121,14 @@ function OpeningBalanceDialog({
     let cancelled = false;
     (async () => {
       try {
-        const preview = await previewPartyOpeningBalance(companyId, contactId, signedAmount);
+        const preview = await previewPartyOpeningBalance(companyId, contactId, signedAmount, channelId);
         if (!cancelled) setFetched("error" in preview ? null : preview);
       } catch {
         if (!cancelled) setFetched(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [loaded, signedAmount, current, companyId, contactId]);
+  }, [loaded, signedAmount, current, companyId, contactId, channelId]);
 
   // The server decides whether a release needs confirming — it holds the
   // allocations and the rule. Its refusal is the prompt: the sentence it returns
@@ -1121,6 +1137,7 @@ function OpeningBalanceDialog({
   const [state, action, pending] = useActionState(
     async (prev: { error?: string; success?: boolean; needsConfirmation?: boolean } | undefined, formData: FormData) => {
       try {
+        formData.set("saleType",channelId ?? "counter");
         return await setPartyOpeningBalance(companyId, contactId, prev, formData);
       } catch {
         return { error: TRANSPORT_ERROR_MESSAGE };
@@ -1237,6 +1254,7 @@ export function PartyLedgerPrintDocument({
           <p className="mt-1 text-sm text-steel">
             {data.displayName}
             {data.companyName ? ` (${data.companyName})` : ""}
+            {data.channelName ? ` · ${data.channelName}` : ""}
           </p>
           {data.address && <p className="whitespace-pre-line text-sm text-steel">{data.address}</p>}
           <p className="text-sm text-steel">

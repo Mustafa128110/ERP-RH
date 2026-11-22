@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { matchesStockSetup } from "./stock-filters";
+const complete = { _missingCategory: false, _hasBaseUnit: true, _hasUnitRule: true, _baseUnitId: "piece", _ruleIds: "dozen,carton" };
+assert.equal(matchesStockSetup(complete, "complete", "piece", "carton"), true);
+assert.equal(matchesStockSetup(complete, "incomplete", "", ""), false);
+assert.equal(matchesStockSetup(complete, "", "missing", ""), false);
+assert.equal(matchesStockSetup(complete, "", "", "doz"), false, "rule ids must match exactly");
+assert.equal(matchesStockSetup({ _missingCategory: true, _hasBaseUnit: false, _hasUnitRule: false }, "category", "missing", "missing"), true);
+assert.equal(matchesStockSetup({ _stockQuantity: 0 }, "", "", "", "zero"), true);
+assert.equal(matchesStockSetup({ _stockQuantity: -2 }, "", "", "", "negative"), true);
+assert.equal(matchesStockSetup({ _stockQuantity: -2 }, "", "", "", "positive"), false);
+console.log("stock setup filter checks passed");

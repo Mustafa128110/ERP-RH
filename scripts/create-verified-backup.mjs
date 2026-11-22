@@ -14,7 +14,11 @@ const zip = resolve('db-export/restore-tools/7zip/x64/7za.exe');
 const env = {...process.env,PGHOST:target.hostname,PGPORT:target.port||'5432',PGUSER:decodeURIComponent(target.username),PGPASSWORD:decodeURIComponent(target.password),PGDATABASE:target.pathname.slice(1),PGSSLMODE:'require'};
 function run(exe,args,options={}) {
  const result=spawnSync(exe,args,{env,encoding:'utf8',maxBuffer:20*1024*1024,windowsHide:true,...options});
- if(result.status!==0) throw new Error(`${exe.split(/[\\/]/).pop()} failed (exit ${result.status}); backup has not replaced latest`);
+ if(result.status!==0) {
+  const diagnostic=String(result.stderr||result.error?.message||'No diagnostic was returned').replaceAll(decodeURIComponent(target.password),'[redacted]');
+  writeFileSync(join(folder,'backup-error.log'),diagnostic);
+  throw new Error(`${exe.split(/[\\/]/).pop()} failed (exit ${result.status}); see the local backup-error.log; backup has not replaced latest`);
+ }
  return result.stdout;
 }
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');

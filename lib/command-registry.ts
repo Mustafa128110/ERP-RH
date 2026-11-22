@@ -6,8 +6,8 @@ import * as categories from "@/lib/actions/categories";
 import * as companies from "@/lib/actions/companies";
 import * as contacts from "@/lib/actions/contacts";
 import * as expenses from "@/lib/actions/expenses";
-import * as inter_company from "@/lib/actions/inter-company";
 import * as ledger from "@/lib/actions/ledger";
+import * as ledger_channels from "@/lib/actions/ledger-channels";
 import * as locations from "@/lib/actions/locations";
 import * as market_purchases from "@/lib/actions/market-purchases";
 import * as payments from "@/lib/actions/payments";
@@ -19,6 +19,7 @@ import * as roles from "@/lib/actions/roles";
 import * as sales from "@/lib/actions/sales";
 import * as settings from "@/lib/actions/settings";
 import * as stock_adjustments from "@/lib/actions/stock-adjustments";
+import * as stock_conversions from "@/lib/actions/stock-conversions";
 import * as stock_transfers from "@/lib/actions/stock-transfers";
 import * as taxes from "@/lib/actions/taxes";
 import * as transfers from "@/lib/actions/transfers";
@@ -46,6 +47,7 @@ export const commandActions = {
   "companies.createCompaniesBatch": companies.createCompaniesBatch,
   "companies.updateCompany": companies.updateCompany,
   "companies.deleteCompany": companies.deleteCompany,
+  "contacts.deleteContacts": contacts.deleteContacts,
   "contacts.createContactsBatch": contacts.createContactsBatch,
   "contacts.updateContactsBatch": contacts.updateContactsBatch,
   "contacts.updateContact": contacts.updateContact,
@@ -54,13 +56,13 @@ export const commandActions = {
   "expenses.createExpense": expenses.createExpense,
   "expenses.updateExpense": expenses.updateExpense,
   "expenses.deleteExpense": expenses.deleteExpense,
-  "inter-company.createInterCompanySale": inter_company.createInterCompanySale,
-  "inter-company.updateInterCompanySale": inter_company.updateInterCompanySale,
-  "inter-company.deleteInterCompanySale": inter_company.deleteInterCompanySale,
   "ledger.createOpeningBalanceEntry": ledger.createOpeningBalanceEntry,
   "ledger.setContactBalance": ledger.setContactBalance,
   "ledger.deleteLedgerRow": ledger.deleteLedgerRow,
   "ledger.setPartyOpeningBalance": ledger.setPartyOpeningBalance,
+  "ledger-channels.createContactLedger": ledger_channels.createContactLedger,
+  "ledger-channels.mergeContactLedgers": ledger_channels.mergeContactLedgers,
+  "ledger-channels.closeContactLedger": ledger_channels.closeContactLedger,
   "locations.createLocationsBatch": locations.createLocationsBatch,
   "locations.updateLocation": locations.updateLocation,
   "locations.deleteLocation": locations.deleteLocation,
@@ -70,6 +72,7 @@ export const commandActions = {
   "payments.createPaymentsBatch": payments.createPaymentsBatch,
   "payments.updatePayment": payments.updatePayment,
   "payments.deletePayment": payments.deletePayment,
+  "products.deleteProducts": products.deleteProducts,
   "products.assignBaseUnitToProducts": products.assignBaseUnitToProducts,
   "products.createProductsBatch": products.createProductsBatch,
   "products.updateProductsBatch": products.updateProductsBatch,
@@ -94,6 +97,7 @@ export const commandActions = {
   "stock-adjustments.createStockAdjustment": stock_adjustments.createStockAdjustment,
   "stock-adjustments.approveStockAdjustment": stock_adjustments.approveStockAdjustment,
   "stock-adjustments.deleteStockAdjustment": stock_adjustments.deleteStockAdjustment,
+  "stock-conversions.createStockConversion": stock_conversions.createStockConversion,
   "stock-transfers.createStockTransfer": stock_transfers.createStockTransfer,
   "stock-transfers.updateStockTransfer": stock_transfers.updateStockTransfer,
   "stock-transfers.deleteStockTransfer": stock_transfers.deleteStockTransfer,
@@ -129,9 +133,6 @@ export const commandReads = {
   "expenses.listExpenses": expenses.listExpenses,
   "expenses.listExpensesPage": expenses.listExpensesPage,
   "expenses.listChequesForExpenses": expenses.listChequesForExpenses,
-  "inter-company.listInterCompanySales": inter_company.listInterCompanySales,
-  "inter-company.listInterCompanySalesPage": inter_company.listInterCompanySalesPage,
-  "inter-company.getInterCompanySale": inter_company.getInterCompanySale,
   "ledger.listLedgerBalances": ledger.listLedgerBalances,
   "ledger.listPaymentLedgerBalances": ledger.listPaymentLedgerBalances,
   "ledger.getPartyLedger": ledger.getPartyLedger,
@@ -139,6 +140,7 @@ export const commandReads = {
   "ledger.getPartyOpeningBalance": ledger.getPartyOpeningBalance,
   "ledger.getPartyAuditTrail": ledger.getPartyAuditTrail,
   "ledger.getLedgerInlineOptions": ledger.getLedgerInlineOptions,
+  "ledger-channels.listContactLedgers": ledger_channels.listContactLedgers,
   "locations.listLocations": locations.listLocations,
   "market-purchases.listMarketPurchaseRequests": market_purchases.listMarketPurchaseRequests,
   "market-purchases.listMarketPurchaseRequestsPage": market_purchases.listMarketPurchaseRequestsPage,
@@ -175,6 +177,8 @@ export const commandReads = {
   "stock-adjustments.listStockAdjustments": stock_adjustments.listStockAdjustments,
   "stock-adjustments.listStockAdjustmentsPage": stock_adjustments.listStockAdjustmentsPage,
   "stock-adjustments.getStockAdjustment": stock_adjustments.getStockAdjustment,
+  "stock-conversions.listStockConversions": stock_conversions.listStockConversions,
+  "stock-conversions.getConversionOptions": stock_conversions.getConversionOptions,
   "stock-transfers.listStockTransfers": stock_transfers.listStockTransfers,
   "stock-transfers.listStockTransfersPage": stock_transfers.listStockTransfersPage,
   "stock-transfers.getStockTransfer": stock_transfers.getStockTransfer,

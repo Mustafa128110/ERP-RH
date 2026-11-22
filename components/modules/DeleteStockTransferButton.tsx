@@ -12,7 +12,7 @@ export function DeleteStockTransferButton({ transferId }: { transferId: string }
   // the action. A failure keeps you here with the error visible.
   const [state, action, pending] = useActionState(async (prev: { error?: string; success?: boolean } | undefined, formData: FormData) => {
     const result = await deleteStockTransfer(prev, formData);
-    if (result?.success) router.push("/inventory/stock-transfers");
+    if (result?.success) router.push("/inventory/stock?view=transfers");
     return result;
   }, undefined);
 

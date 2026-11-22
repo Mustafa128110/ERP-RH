@@ -1,6 +1,7 @@
 import { listSalesPage } from "@/lib/actions/sales";
 import { InvoiceManager } from "@/components/modules/InvoiceManager";
 import { formatDate, money } from "@/lib/format";
+import { getChannels } from "@/lib/queries/channels";
 import { saleTypeLabel } from "@/lib/sale-constants";
 import type { Row } from "@/lib/table";
 
@@ -31,8 +32,9 @@ export default async function Page({
   const { customer, status, saleType, from, to } = params;
   const result = await listSalesPage({ customer, status, saleType, from, to }, historyRequest(params));
   const sales = result.records;
+  const channels = await getChannels();
   const filtered = [customer,status,saleType,from,to,params.q].some(Boolean);
-  const invoices = sales.map(s => ({ ...s, balance: s.status === "cancelled" ? 0 : Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }));
+  const invoices = sales.map(s => ({ ...s, balance: s.status === "cancelled" || s.ledgerClosedAt ? 0 : Number(s.grandTotal) - Number(s.paidAmount), age: daysOld(s.documentDate) }));
   const outstanding = result.outstanding;
 
   // Items per invoice for the customer hover panel.
@@ -55,13 +57,13 @@ export default async function Page({
       number: s.number,
       customer: s.customer ?? "—",
       company: s.company ?? "—",
-      saleType: saleTypeLabel(s.saleType),
+      saleType: saleTypeLabel(s.saleType, channels),
       date: formatDate(s.documentDate),
       age: s.balance > 0 ? `${s.age}d` : "—",
       total: money(s.grandTotal),
       paid: money(s.paidAmount),
       balance: s.balance > 0 ? money(s.balance) : "—",
-      status: s.status === "cancelled" ? "Cancelled" : s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
+      status: s.status === "cancelled" ? "Cancelled" : s.ledgerClosedAt ? "Closed" : s.isPaid ? "Paid" : Number(s.paidAmount) > 0 ? "Partial" : "Unpaid",
       // Not rendered as a column, but DataTable's search haystack scans every
       // value on the row — so without this, an invoice whose customer/company
       // columns don't mention it would be missed by a search for an item name.

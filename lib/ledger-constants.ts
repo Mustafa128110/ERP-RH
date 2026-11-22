@@ -30,6 +30,9 @@ export const LEDGER_ENTRY_TYPES = [
   "payment_received",
   "payment_made",
   "journal_entry",
+  "ledger_closing",
+  "sales_return",
+  "purchase_return",
 ] as const;
 
 export type LedgerEntryType = (typeof LEDGER_ENTRY_TYPES)[number];
@@ -44,6 +47,9 @@ export const LEDGER_TYPE_LABELS: Record<LedgerEntryType, string> = {
   // transfers also use it), but a contact-linked row is an opening-balance
   // posting in the party ledger and is named accordingly.
   journal_entry: "Opening Balance",
+  ledger_closing: "Ledger Closing",
+  sales_return: "Sales Return",
+  purchase_return: "Purchase Return",
 };
 
 // document_type_code -> the entry kind the statement shows. MARKET_PURCHASE
@@ -54,6 +60,9 @@ export const LEDGER_TYPE_LABELS: Record<LedgerEntryType, string> = {
 // debit/credit row.
 export function codeToLedgerType(code: string): LedgerEntryType {
   switch (code) {
+    case "SALES_RETURN": return "sales_return";
+    case "PURCHASE_RETURN": return "purchase_return";
+    case "LEDGER_CLOSING": return "ledger_closing";
     case "OPENING_BALANCE": return "opening_balance";
     case "SALES_INVOICE": return "item_sold";
     case "PURCHASE_INVOICE":
@@ -113,6 +122,7 @@ export const fromPaisa = (paisa: number): number => Math.round(paisa) / 100;
 
 // One thing a payment can settle: an invoice, or the opening balance.
 export type SettleableItem = {
+  channel?: string;
   id: string;
   side: QueueSide;
   // Gross value of the item, positive. For an invoice this is the grand total,
@@ -128,6 +138,7 @@ export type SettleableItem = {
 };
 
 export type SettlingPayment = {
+  channel?: string;
   id: string;
   side: QueueSide;
   amount: number;
@@ -174,15 +185,16 @@ export function settleFifo(items: readonly SettleableItem[], payments: readonly 
   const appliedByPayment = new Map<string, number>();
   const advance: Record<QueueSide, number> = { receivable: 0, payable: 0 };
 
-  for (const side of ["receivable", "payable"] as const) {
+  const channels = new Set([...items, ...payments].map(row => row.channel ?? "counter"));
+  for (const channel of channels) for (const side of ["receivable", "payable"] as const) {
     const queue = items
-      .filter((i) => i.side === side && toPaisa(i.amount) > 0)
+      .filter((i) => i.side === side && (i.channel ?? "counter") === channel && toPaisa(i.amount) > 0)
       .slice()
       .sort(compareSettleable)
       .map((i) => ({ id: i.id, remaining: toPaisa(i.amount) }));
 
     const incoming = payments
-      .filter((p) => p.side === side && toPaisa(p.amount) > 0)
+      .filter((p) => p.side === side && (p.channel ?? "counter") === channel && toPaisa(p.amount) > 0)
       .slice()
       .sort(comparePayment);
 
@@ -331,7 +343,7 @@ export type LedgerChange =
   | { kind: "date"; documentId: string; date: string }
   // documentId is null the first time an opening balance is set, since there is
   // no document to name yet.
-  | { kind: "opening"; documentId: string | null; signedAmount: number };
+  | { kind: "opening"; documentId: string | null; signedAmount: number; channel?: string };
 
 const OPENING_PROJECTION_ID = "opening-balance";
 
@@ -355,6 +367,7 @@ export function projectChange(
     // The date is irrelevant — isOpening sorts it to the front either way — but a
     // real one keeps the comparators total.
     const projected: SettleableItem = {
+      channel: at !== -1 ? items[at].channel : change.channel,
       id,
       side,
       amount: Math.abs(change.signedAmount),

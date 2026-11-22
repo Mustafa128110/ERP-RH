@@ -10,7 +10,8 @@ import { StatusPill } from "./StatusPill";
 import { Icon } from "./Icon";
 import { iconButtonClass } from "./form-styles";
 import { matchesTableSearch, parseTableSearch } from "@/lib/search-query";
-import { compareTableValues, tableColumnSortKey } from "@/lib/table-sort";
+import { compareSortedRows, parseTableSorts, promoteTableSort, tableColumnSortKey, type TableSort } from "@/lib/table-sort";
+import { useGlobalColumnWidths } from "./useGlobalColumnWidths";
 import { useHistory } from "./HistoryProvider";
 
 // Every list gets a row number in front, so a row can be pointed at out loud
@@ -20,14 +21,14 @@ const SNO_KEY = "__sno";
 const snoColumn: ColumnDef = { key: SNO_KEY, label: "#", align: "right" };
 const SELECT_COL_WIDTH = 44;
 
-function getColWidth(col: ColumnDef): number {
+function defaultColWidth(col: ColumnDef): number {
   if (typeof col.width === "number") return col.width;
   if (typeof col.width === "string") {
     const parsed = parseInt(col.width, 10);
     if (!isNaN(parsed)) return parsed;
   }
   const key = col.key.toLowerCase();
-  if (key === SNO_KEY) return 56;
+  if (key === SNO_KEY) return 100;
   if (["pdf", "png", "download"].includes(key)) return 76;
   if (key === "return") return 90;
   if (["statement", "action", "actions"].includes(key)) return 120;
@@ -50,7 +51,6 @@ function getColWidth(col: ColumnDef): number {
   return 150;
 }
 
-const isActionCol = (key: string) => ["return", "pdf", "png", "download", "statement", "action", "actions"].includes(key.toLowerCase());
 
 function getColPadding(col: ColumnDef): React.CSSProperties {
   const style: React.CSSProperties = {};
@@ -150,6 +150,8 @@ export function DataTable({
 }) {
   "use no memo"; // The virtualizer owns mutable measurements and subscriptions.
   const router = useRouter();
+  const allColumns = useMemo(() => [snoColumn, ...columns.filter((column) => column.key !== "company")], [columns]);
+  const getColWidth = useGlobalColumnWidths(allColumns, rows, defaultColWidth);
   // Which row the highlight is on, and where a Shift-extended range started.
   // -1 until the list is actually used: an untouched page shouldn't already be
   // pointing at its first row.
@@ -169,52 +171,23 @@ export function DataTable({
   // typed into occasionally; "/" and the icon both bring it back.
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Load sort state from localStorage if storageKey is provided
-  const [sortKey, setSortKey] = useState<string | null>(() => {
-    if (remote) return remote.info.sort || null;
+  const readSorts = (): TableSort[] => {
+    if (remote) return remote.info.sorts ?? parseTableSorts(remote.info.sort, remote.info.direction);
     if (storageKey && typeof window !== "undefined") {
-      const saved = localStorage.getItem(`datatable-sort-${storageKey}`);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          return parsed.key ?? null;
-        } catch {
-          return null;
-        }
-      }
+      try {
+        const saved = JSON.parse(localStorage.getItem(`datatable-sort-${storageKey}`) ?? "null");
+        return Array.isArray(saved?.sorts) ? parseTableSorts(saved.sorts.map((sort: TableSort) => sort.key).join(","), saved.sorts.map((sort: TableSort) => sort.direction).join(",")) : parseTableSorts(saved?.key, saved?.dir);
+      } catch { return []; }
     }
-    return null;
-  });
-
-  const [sortDir, setSortDir] = useState<"asc" | "desc">(() => {
-    if (remote) return remote.info.direction;
-    if (storageKey && typeof window !== "undefined") {
-      const saved = localStorage.getItem(`datatable-sort-${storageKey}`);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          return parsed.dir ?? "desc";
-        } catch {
-          return "desc";
-        }
-      }
-    }
-    return "desc";
-  });
-
-  // Save sort state to localStorage when it changes
-  const remoteSort = remote ? `${remote.info.sort}:${remote.info.direction}` : "";
+    return [];
+  };
+  const [sorts, setSorts] = useState<TableSort[]>(readSorts);
+  const remoteSort = remote ? JSON.stringify(remote.info.sorts ?? parseTableSorts(remote.info.sort, remote.info.direction)) : "";
   const [seenSort, setSeenSort] = useState(remoteSort);
-  if (remote && seenSort !== remoteSort) {
-    setSeenSort(remoteSort);
-    setSortKey(remote.info.sort || null);
-    setSortDir(remote.info.direction);
-  }
+  if (remote && seenSort !== remoteSort) { setSeenSort(remoteSort); setSorts(JSON.parse(remoteSort)); }
   useEffect(() => {
-    if (storageKey && typeof window !== "undefined") {
-      localStorage.setItem(`datatable-sort-${storageKey}`, JSON.stringify({ key: sortKey, dir: sortDir }));
-    }
-  }, [storageKey, sortKey, sortDir]);
+    if (storageKey) { try { localStorage.setItem(`datatable-sort-${storageKey}`, JSON.stringify({ sorts })); } catch { /* Storage may be unavailable. */ } }
+  }, [storageKey, sorts]);
   const anchor = useRef(0);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -231,16 +204,10 @@ export function DataTable({
   const visible = useMemo(() => {
     if (remote) return rows;
     let result = terms.length === 0 ? rows : rows.filter((row, i) => matchesTableSearch(row, index[i], terms));
-    if (sortKey) {
-      result = [...result].sort((a, b) => {
-        const av = a[sortKey];
-        const bv = b[sortKey];
-        return compareTableValues(av, bv, sortDir);
-      });
-    }
+    if (sorts.length) result = [...result].sort((a, b) => compareSortedRows(a, b, sorts));
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, index, query, sortKey, sortDir, remote]);
+  }, [rows, index, query, sorts, remote]);
 
   const virtualized = visible.length > 150 && !showAllRows && !printing;
   // Search, selection and keyboard navigation still use the full filtered set.
@@ -270,25 +237,9 @@ export function DataTable({
   }, []);
 
   function toggleSort(key: string) {
-    if (remote) {
-      const nextKey = sortKey === key && sortDir === "asc" ? null : key;
-      const nextDirection = sortKey === key && sortDir === "desc" ? "asc" : "desc";
-      setSortKey(nextKey); setSortDir(nextDirection);
-      remote.change({sort:nextKey,order:nextDirection,page:1});
-      return;
-    }
-    if (sortKey === key) {
-      // Third click: clear sort
-      if (sortDir === "asc") {
-        setSortKey(null);
-        setSortDir("desc");
-      } else {
-        setSortDir("asc");
-      }
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
+    const next = promoteTableSort(sorts, key);
+    setSorts(next);
+    remote?.change({ sort: next.map((sort) => sort.key).join(",") || null, order: next.map((sort) => sort.direction).join(",") || null, page: 1 });
   }
 
   // A highlight left pointing at row 40 of a list that just narrowed to three
@@ -522,7 +473,6 @@ export function DataTable({
     );
   }
 
-  const allColumns = [snoColumn, ...columns];
   const totalTableWidth = (selectable ? SELECT_COL_WIDTH : 0) + allColumns.reduce((sum, col) => sum + getColWidth(col), 0);
 
   return (
@@ -548,8 +498,8 @@ export function DataTable({
           <table
             data-responsive
             aria-rowcount={visible.length + 1}
-            className="w-full table-fixed border-collapse text-sm md:min-w-max"
-            style={{ minWidth: `${totalTableWidth}px`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
+            className="table-fixed border-collapse text-sm md:min-w-max"
+            style={{ width: `${totalTableWidth}px`, minWidth: `${totalTableWidth}px`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
           >
             <colgroup>
               {selectable && <col style={{ width: `${SELECT_COL_WIDTH}px` }} className="w-11" />}
@@ -577,25 +527,27 @@ export function DataTable({
                 {allColumns.map((col) => {
                   const columnSortKey = tableColumnSortKey(col, SNO_KEY);
                   const sortable = columnSortKey !== null;
-                  const isActive = sortKey === columnSortKey;
+                  const priority = sorts.findIndex((sort) => sort.key === columnSortKey);
+                  const activeSort = sorts[priority];
                   return (
                     <th
+                      data-column-key={col.key}
                       style={{ width: `${getColWidth(col)}px`, ...getColPadding(col) }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
-                      className={`${isActionCol(col.key) ? "" : "truncate "}whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
+                      className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
                         col.align === "right" ? "text-right" : "text-left"
                       }${col.hideOnMobile ? " hidden md:table-cell" : ""}${
                         sortable ? " cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200" : ""
                       }`}
                     >
-                      <span className="inline-flex max-w-full items-center gap-1 truncate">
+                      <span className="inline-flex max-w-full items-center gap-1">
                         {col.label}
-                        {isActive && (
-                          <Icon
-                            name={sortDir === "desc" ? "arrowDown" : "arrowUp"}
+                        {activeSort && (
+                          <><Icon
+                            name={activeSort.direction === "desc" ? "arrowDown" : "arrowUp"}
                             className="h-3 w-3 shrink-0"
-                          />
+                          /><sup aria-label={`Sort priority ${priority + 1}`} className="text-[9px]">{priority + 1}</sup></>
                         )}
                       </span>
                     </th>
@@ -630,7 +582,7 @@ export function DataTable({
                   </>
                 );
                 const cellClass = (col: ColumnDef) =>
-                  `${isActionCol(col.key) ? "" : "truncate "}whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                  `whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
                     col.align === "right" ? "text-right tabular-nums" : "text-left"
                   }${col.hideOnMobile ? " hidden md:table-cell" : ""}`;
 

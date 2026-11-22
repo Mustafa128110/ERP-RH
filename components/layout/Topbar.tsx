@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { logout } from "@/lib/auth/actions";
-import { setScopeCompany } from "@/lib/actions/scope";
+import { setScopeChannel } from "@/lib/actions/channels";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { SyncStatus } from "@/components/layout/SyncStatus";
 import { useSync } from "@/components/layout/SyncProvider";
@@ -70,22 +69,22 @@ function LogoutButton({ className }: { className: string }) {
 
 export function Topbar({
   username,
-  companies,
+  channels,
   selected,
 }: {
   username: string;
-  companies: { id: string; name: string }[];
+  channels: { id: string; name: string }[];
   selected: string;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [scopeError, setScopeError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   function onScopeChange(value: string) {
     startTransition(async () => {
-      await setScopeCompany(value);
-      router.refresh();
+      try { const result = await setScopeChannel(value); setScopeError(result.error ?? ""); }
+      catch { setScopeError("Could not confirm the channel filter. Your current entry is preserved."); }
     });
   }
 
@@ -112,10 +111,10 @@ export function Topbar({
       disabled={pending}
       onChange={(e) => onScopeChange(e.target.value)}
       className={className}
-      aria-label="Company scope"
+      aria-label="Channel filter"
     >
-      <option value="all">All companies</option>
-      {companies.map((c) => (
+      <option value="all">All channels</option>
+      {channels.map((c) => (
         <option key={c.id} value={c.id}>
           {c.name}
         </option>
@@ -142,12 +141,13 @@ export function Topbar({
 
       {/* One company means no scope to choose — the selector only helps when
           there's more than one. Hidden on a phone; it moves into the menu. */}
-      {companies.length > 1 &&
+      {channels.length > 1 &&
         scopeSelect(
           "hidden shrink-0 rounded-md border border-sand bg-transparent px-2 py-1.5 text-sm text-ink disabled:opacity-60 sm:block",
         )}
 
       <GlobalSearch />
+      {scopeError && <span role="alert" className="text-xs text-error">{scopeError}</span>}
 
       {/* The sync/offline pill — invisible when everything is fine. */}
       <SyncStatus />
@@ -184,9 +184,9 @@ export function Topbar({
           <div className="absolute right-0 top-full z-50 mt-1 w-60 rounded-md border border-sand bg-white p-3 shadow-xl">
             <p className="truncate pb-2 text-sm font-medium text-navy-800">{username}</p>
 
-            {companies.length > 1 && (
+            {channels.length > 1 && (
               <label className="flex flex-col gap-1 pb-3 text-xs text-steel">
-                Company scope
+                Channel filter
                 {scopeSelect("h-11 w-full rounded-md border border-sand bg-transparent px-2 text-sm text-ink disabled:opacity-60")}
               </label>
             )}

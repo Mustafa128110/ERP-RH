@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import postgres from 'postgres';
 const folder=resolve(process.argv[2]);
@@ -36,11 +36,22 @@ try {
   const expected=JSON.parse(readFileSync(join(extract,'contents.json'),'utf8'));
   const query=expected.map(({name})=>`SELECT '${name}' AS name,count(*)::text AS rows,md5(coalesce(string_agg(to_jsonb(t)::text,E'\\n' ORDER BY to_jsonb(t)::text COLLATE "C"),'')) AS digest FROM public."${name.replaceAll('"','""')}" t`).join(' UNION ALL ');
   const actual=await local.unsafe(query);
-  assert.deepEqual([...actual],expected,'Every ERP table must match the exact backup snapshot');
+  // UNION ALL does not guarantee branch order; compare the same tables by name.
+  const byName=(a,b)=>a.name.localeCompare(b.name);
+  assert.deepEqual([...actual].sort(byName),[...expected].sort(byName),'Every ERP table must match the exact backup snapshot');
+  let scopeTables;
+  if (existsSync(join(extract,'scope-contents.json'))) {
+   const scope=JSON.parse(readFileSync(join(extract,'scope-contents.json'),'utf8'));
+   for (const table of scope) {assert.ok(['public','auth','drizzle','supabase_migrations'].includes(table.schema));assert.match(table.name,/^[a-zA-Z_][a-zA-Z0-9_]*$/);}
+   const scopedQuery=scope.map(({schema,name})=>`SELECT '${schema}' AS schema,'${name}' AS name,count(*)::int AS rows,md5(coalesce(string_agg(to_jsonb(t)::text,E'\\n' ORDER BY to_jsonb(t)::text COLLATE "C"),'')) AS digest FROM "${schema}"."${name}" t`).join(' UNION ALL ');
+   const key=(a,b)=>(a.schema+'.'+a.name).localeCompare(b.schema+'.'+b.name);
+   assert.deepEqual([...await local.unsafe(scopedQuery)].sort(key),scope.sort(key),'Every ERP, authentication and migration table must match the exact source snapshot');
+   scopeTables=scope.length;
+  }
   const [constraints]=await local`SELECT count(*)::int AS invalid FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='public' AND NOT convalidated`;
   assert.equal(constraints.invalid,0);
   const [auth]=await local`SELECT count(*)::int AS users FROM auth.users`;
-  const result={verified_at:new Date().toISOString(),backup_id:manifest.backup_id,database,archive_sha256:sha(archive),tables:expected.length,rows:expected.reduce((sum,t)=>sum+Number(t.rows),0),all_table_digests_match:true,all_constraints_valid:true,auth_users:auth.users,scope:'ERP public tables, auth, migration history; provider services require Supabase provisioning'};
+  const result={verified_at:new Date().toISOString(),backup_id:manifest.backup_id,database,archive_sha256:sha(archive),tables:expected.length,rows:expected.reduce((sum,t)=>sum+Number(t.rows),0),all_table_digests_match:true,all_constraints_valid:true,auth_users:auth.users,scope_tables:scopeTables,all_scope_digests_match:scopeTables?true:undefined,scope:'ERP public tables, auth, migration history; provider services require Supabase provisioning'};
   writeFileSync(join(folder,'restore-verification.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
  } finally {await local.end()}
 } finally {await admin.end()}

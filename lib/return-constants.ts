@@ -22,3 +22,8 @@ export function salesReturnHeaderTotals(input: {
   const grandTotal = exact ? input.sourceGrandTotal : input.round(input.selectedSubtotal - discount + tax + shipping);
   return { discount, shipping, tax, grandTotal, exact };
 }
+
+export function saleReturnQuantity(mode: "all" | "partial", sold: number, alreadyReturned: number, requested: number): number {
+  const available = Math.max(0, sold - alreadyReturned);
+  return mode === "all" ? available : requested;
+}

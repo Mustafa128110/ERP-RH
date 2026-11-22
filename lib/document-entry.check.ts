@@ -28,7 +28,6 @@ const REUSED_FORMS = [
   "components/modules/StockPurchaseForm.tsx",
   "components/modules/StockTransferForm.tsx",
   "components/modules/StockAdjustmentForm.tsx",
-  "components/modules/InterCompanyForm.tsx",
 ] as const;
 
 for (const file of REUSED_FORMS) {

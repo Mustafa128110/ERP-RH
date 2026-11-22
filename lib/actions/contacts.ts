@@ -13,6 +13,31 @@ import { guard, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/ac
 import { recordAudit } from "@/lib/actions/audit";
 import { toTitleCase } from "@/lib/format";
 import type { AuthSession } from "@/lib/auth/session";
+import { recordReferences } from "@/lib/queries/record-references";
+
+export async function deleteContacts(contactIds: string[]): Promise<ActionResult> {
+  return guard("Couldn't delete the contacts.", async () => {
+    const session = await getLiveSession();
+    requireContactPermission(session, "delete");
+    const ids = [...new Set(contactIds)];
+    if (!ids.length) return { error: "Select a contact to delete." };
+    const scope = or(await companyInPermissionScope(contacts.companyId, session, "customers", "delete"), await companyInPermissionScope(contacts.companyId, session, "suppliers", "delete"));
+    const result = await db.transaction(async (tx) => {
+      const selected = await tx.select({ id: contacts.id, name: contacts.displayName }).from(contacts).where(and(inArray(contacts.id, ids), scope)).for("update");
+      if (selected.length !== ids.length) return { error: "Some contacts no longer exist or are outside your access." };
+      const references = await recordReferences(tx, "contacts", ids);
+      if (references.length) return { error: `Cannot delete contacts used by ${references.map((reference) => `${reference.table.replace("public.", "")} (${reference.count})`).join(", ")}. Their history is preserved; you can mark them inactive instead.` };
+      await tx.delete(contacts).where(inArray(contacts.id, ids));
+      return { success: true, names: selected.map((contact) => contact.name) };
+    });
+    if (result.error) return { error: result.error };
+    await invalidateLookups(CACHE.contacts);
+    await invalidateReads(...READS);
+    revalidatePath("/contacts");
+    await recordAudit({ action: "delete", entity: "contact", summary: result.names?.slice(0, 5).join(", ") ?? `${ids.length} contacts deleted` });
+    return { success: true };
+  });
+}
 
 // A contact's name is printed on every document it is party to, so renaming one
 // changes six lists at once. Cancelling its documents (deleteContact) and

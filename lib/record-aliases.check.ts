@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { rewriteRecordAliases } from "./record-aliases";
+const aliases = new Map([["old-company", "royal"], ["old-product", "survivor"]]);
+const original = { companyId: "old-company", lines: [{ itemId: "old-product", note: "old-product" }], operationId: "old-company", revision: "old-product" };
+assert.deepEqual(rewriteRecordAliases(original, aliases), { companyId: "royal", lines: [{ itemId: "survivor", note: "old-product" }], operationId: "old-company", revision: "old-product" });
+assert.equal(original.companyId, "old-company", "never rewrite the durable original payload");
+const form = new FormData();
+form.set("companyId", "old-company");form.set("linesJson", JSON.stringify([{ itemId: "old-product", itemName: "old-product" }]));form.set("note", "old-company");
+const rewritten = rewriteRecordAliases(form, aliases) as FormData;
+assert.equal(rewritten.get("companyId"), "royal");assert.equal(rewritten.get("note"), "old-company");
+assert.deepEqual(JSON.parse(String(rewritten.get("linesJson"))), [{ itemId: "survivor", itemName: "old-product" }]);
+assert.deepEqual(rewriteRecordAliases({ documentTypeId: "old-type", expenseCategoryId: "old-category", notes: "old-category" }, new Map([["old-type", "royal-type"], ["old-category", "royal-category"]])), { documentTypeId: "royal-type", expenseCategoryId: "royal-category", notes: "old-category" }, "queued purchases and expenses retain their merged master references");
+console.log("preserved-draft and queued-create reference alias checks passed");

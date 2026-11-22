@@ -67,17 +67,7 @@ export interface BankAccountValues {
 function BankAccountFields({ defaults, companyOptions }: { defaults?: BankAccountValues; companyOptions: CompanyOption[] }) {
   return (
     <>
-      <label className={labelClass}>
-        <span className={labelTextClass}>Company</span>
-        <select name="companyId" defaultValue={defaults?.companyId ?? ""} className={inputClass}>
-          <option value="">Global (all companies)</option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <input type="hidden" name="companyId" value={defaults?.companyId ?? companyOptions[0]?.id ?? ""} />
       <label className={labelClass}>
         <span className={labelTextClass}>Bank name</span>
         <input name="bankName" type="text" required defaultValue={defaults?.bankName} className={inputClass} />
@@ -199,7 +189,6 @@ const emptyBankBatchRow = (): BankBatchRow => ({
 export type CreatedBankAccount = { id: string; name: string; companyId: string | null };
 
 export function BankAccountBatchAddDialog({
-  companyOptions,
   onClose,
   onDone,
   initialRows,
@@ -216,7 +205,7 @@ export function BankAccountBatchAddDialog({
       onDone={onDone}
       initialRows={initialRows}
       emptyRow={emptyBankBatchRow}
-      headers={["Company", "Bank Name", "Branch", "Account Title", "Account Number", "IBAN", "Opening Balance", "Default", "Active"]}
+      headers={["Bank Name", "Branch", "Account Title", "Account Number", "IBAN", "Opening Balance", "Default", "Active"]}
       onSubmit={async (rows) => {
         const values: BankAccountBatchRow[] = rows.map((r) => ({
           companyId: r.companyId || null,
@@ -233,16 +222,7 @@ export function BankAccountBatchAddDialog({
       }}
       renderRow={(row, _index, update) => (
         <>
-          <td className={batchCellClass}>
-            <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
-              <option value="">Global</option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+          <td className="hidden"><input type="hidden" value={row.companyId} /></td>
           <td className={batchCellClass}>
             <input value={row.bankName} onChange={(e) => update({ bankName: e.target.value })} className={batchInputClass} />
           </td>
@@ -287,19 +267,7 @@ export interface CashAccountValues {
 function CashAccountFields({ defaults, companyOptions }: { defaults?: CashAccountValues; companyOptions: CompanyOption[] }) {
   return (
     <>
-      <label className={labelClass}>
-        <span className={labelTextClass}>Company</span>
-        <select name="companyId" required defaultValue={defaults?.companyId} className={inputClass}>
-          <option value="" disabled>
-            {companyOptions.length === 0 ? "No companies yet — create one first" : "Select a company"}
-          </option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <input type="hidden" name="companyId" value={defaults?.companyId ?? companyOptions[0]?.id ?? ""} />
       <label className={labelClass}>
         <span className={labelTextClass}>Name</span>
         <input name="name" type="text" required placeholder="Cash in Hand" defaultValue={defaults?.name} className={inputClass} />
@@ -406,7 +374,7 @@ export function CashAccountBatchAddDialog({
       onDone={onDone}
       initialRows={initialRows}
       emptyRow={() => emptyCashBatchRow(defaultCompanyId)}
-      headers={["Company", "Name", "Opening Balance", "Default", "Active"]}
+      headers={["Name", "Opening Balance", "Default", "Active"]}
       onSubmit={async (rows) => {
         const values: CashAccountBatchRow[] = rows.map((r) => ({
           companyId: r.companyId,
@@ -419,18 +387,7 @@ export function CashAccountBatchAddDialog({
       }}
       renderRow={(row, _index, update) => (
         <>
-          <td className={batchCellClass}>
-            <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
-              <option value="" disabled>
-                Select
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+          <td className="hidden"><input type="hidden" value={row.companyId} /></td>
           <td className={batchCellClass}>
             <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Cash in Hand" />
           </td>
@@ -477,7 +434,7 @@ function ChequeFields({
   bankAccountOptions: { id: string; label: string; companyId: string | null }[];
   contactOptions: { id: string; displayName: string; companyId: string | null }[];
 }) {
-  const [companyId, setCompanyId] = useRecoveryState("companyId", defaults?.companyId ?? "");
+  const [companyId] = useRecoveryState("companyId", defaults?.companyId ?? companyOptions[0]?.id ?? "");
   const [contactId, setContactId] = useRecoveryState("contactId", defaults?.contactId ?? "");
   const [bankAccountId, setBankAccountId] = useRecoveryState("bankAccountId", defaults?.bankAccountId ?? "");
   // The chosen company's contacts and bank accounts, plus the global ones — a
@@ -486,32 +443,7 @@ function ChequeFields({
   const visibleBankAccounts = bankAccountOptions.filter(inCompany(companyId));
   return (
     <>
-      <label className={labelClass}>
-        <span className={labelTextClass}>Company</span>
-        <select
-          name="companyId"
-          required
-          value={companyId}
-          onChange={(e) => {
-            setCompanyId(e.target.value);
-            // Anything the new company can't see is dropped rather than left
-            // showing a blank row — a cheque filed under one company can't
-            // settle into another company's bank account.
-            if (contactId && !contactOptions.some((c) => c.id === contactId && inCompany(e.target.value)(c))) setContactId("");
-            if (bankAccountId && !bankAccountOptions.some((b) => b.id === bankAccountId && inCompany(e.target.value)(b))) setBankAccountId("");
-          }}
-          className={inputClass}
-        >
-          <option value="" disabled>
-            {companyOptions.length === 0 ? "No companies yet — create one first" : "Select a company"}
-          </option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <input type="hidden" name="companyId" value={companyId} />
       <label className={labelClass}>
         <span className={labelTextClass}>Bank account</span>
         <select name="bankAccountId" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} className={inputClass}>
@@ -667,7 +599,7 @@ export function ChequeBatchAddDialog({
       onDone={onDone}
       initialRows={initialRows}
       emptyRow={emptyRow}
-      headers={["Company", "Bank Account", "Contact", "Cheque #", "Date", "Amount", "Type", "Status", "By Company"]}
+      headers={["Bank Account", "Contact", "Cheque #", "Date", "Amount", "Type", "Status", "By Company"]}
       toolbar={
         <QuickAddButton<CreatedBankAccount>
           label="+ Add Bank Account"
@@ -694,33 +626,7 @@ export function ChequeBatchAddDialog({
       }}
       renderRow={(row, _index, update) => (
         <>
-          <td className={batchCellClass}>
-            <select
-              value={row.companyId}
-              onChange={(e) => {
-                // Switching companies drops a picked contact or bank account
-                // that the new company can't see; the typed contact text stays
-                // and re-resolves against the new company's list on save.
-                const contactStillValid = contactOpts.some((c) => c.id === row.contactId && inCompany(e.target.value)(c));
-                const bankStillValid = bankOpts.some((b) => b.id === row.bankAccountId && inCompany(e.target.value)(b));
-                update({
-                  companyId: e.target.value,
-                  ...(contactStillValid ? {} : { contactId: "" }),
-                  ...(bankStillValid ? {} : { bankAccountId: "" }),
-                });
-              }}
-              className={batchInputClass}
-            >
-              <option value="" disabled>
-                Select
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+          <td className="hidden"><input type="hidden" value={row.companyId} /></td>
           <td className={batchCellClass}>
             <select value={row.bankAccountId} onChange={(e) => update({ bankAccountId: e.target.value })} className={batchInputClass}>
               <option value="">None</option>

@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useChannels } from "@/components/layout/ChannelProvider";
+import { saleTypeLabel } from "@/lib/sale-constants";
 import { useRouter } from "next/navigation";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
@@ -55,6 +57,7 @@ interface PaymentRow {
   documentDate: string;
   grandTotal: string;
   companyId: string;
+  saleType?: string | null;
   company: string;
   contactId: string | null;
   contact: string | null;
@@ -110,7 +113,7 @@ const buildColumns = (): ColumnDef[] => [
       );
     },
   },
-  { key: "company", label: "Company", width: 150, paddingLeft: 24 },
+  { key: "channel", label: "Channel" },
 ];
 
 // What a payment row can honestly take from the form before the server has
@@ -183,6 +186,7 @@ export function PaymentManager({
   // single record to open until one is picked.
   const [choosing, setChoosing] = useState<DayGroup<PaymentRow> | null>(null);
   const router = useRouter();
+  const { channels } = useChannels();
 
   // The payments this list shows, which is the server's list plus whatever is in
   // flight. Applied to the payments themselves rather than to the grouped rows
@@ -250,7 +254,7 @@ export function PaymentManager({
   // with nothing tying the amounts together.
   const groups = groupSameDay(
     shown,
-    (p) => (p.contactId ? `${p.companyId}|${p.contactId}|${p.documentDate}|${p.code}` : null),
+    (p) => (p.contactId ? `${p.companyId}|${p.contactId}|${p.documentDate}|${p.code}|${p.saleType ?? "counter"}` : null),
     (p) => p.grandTotal,
   );
   const byRowId = new Map(groups.map((g) => [g.key, g]));
@@ -278,6 +282,7 @@ export function PaymentManager({
       method: methods.size === 1 ? [...methods][0] : "Mixed",
       amount: `${first.code === "PAYMENT_RECEIVED" ? "+" : "-"}${money(total)}`,
       company: first.company,
+      channel: saleTypeLabel(first.saleType ?? "counter", channels),
       // Per-payment methods for the "Mixed" hover panel — only meaningful when the
       // cell above collapsed to "Mixed", so it is omitted for single-method rows.
       _methods:

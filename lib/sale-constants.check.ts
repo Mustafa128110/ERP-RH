@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import { entryChannel, isSaleType, saleTypeLabel } from "./sale-constants";
+const channels = [{ id: "counter", name: "Retail", isActive: false }, { id: "custom-channel", name: "Wholesale", isActive: true }];
+assert.equal(entryChannel(channels, "counter"), "custom-channel", "removed channels must not become defaults for new postings");
+assert.equal(entryChannel(channels, "custom-channel"), "custom-channel");
+assert.equal(saleTypeLabel("custom-channel", channels), "Wholesale");
+assert.equal(saleTypeLabel("counter", channels), "Retail", "renamed historical channels use their current display name");
+assert.equal(isSaleType("channel-1234-abcd"), true);
+assert.equal(isSaleType("' OR true --"), false);
+console.log("editable channel identity, removal and default checks passed");

@@ -137,7 +137,6 @@ const emptyBatchRow = (): BatchRow => ({
 export type CreatedContact = { id: string; name: string; companyId: string | null };
 
 export function ContactBatchAddDialog({
-  companyOptions,
   onClose,
   onDone,
   initialRows,
@@ -177,16 +176,7 @@ export function ContactBatchAddDialog({
           <td className={batchCellClass}>
             <input value={row.displayName} onChange={(e) => update({ displayName: e.target.value })} className={batchInputClass} placeholder="Name" />
           </td>
-          <td className={batchCellClass}>
-            <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
-              <option value="">Global (all companies)</option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+          <td className="hidden"><input type="hidden" value={row.companyId} /></td>
           <td className={batchCellClass}>
             <input value={row.companyName} onChange={(e) => update({ companyName: e.target.value })} className={batchInputClass} />
           </td>
@@ -259,7 +249,6 @@ const missingCell = (value: string | null) => `${batchCellClass} ${(value ?? "")
 
 export function ContactsBatchEditDialog({
   contactIds,
-  companyOptions,
   onClose,
   onDone,
 }: {
@@ -386,16 +375,7 @@ export function ContactsBatchEditDialog({
                       placeholder="Name"
                     />
                   </td>
-                  <td className={batchCellClass}>
-                    <select value={row.companyId ?? ""} onChange={(e) => update(i, { companyId: e.target.value || null })} className={batchInputClass}>
-                      <option value="">Global (all companies)</option>
-                      {companyOptions.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
+                  <td className="hidden"><input type="hidden" value={row.companyId ?? ""} /></td>
                   <td className={missingCell(row.companyName)}>
                     <input value={row.companyName ?? ""} onChange={(e) => update(i, { companyName: e.target.value })} className={batchInputClass} />
                   </td>

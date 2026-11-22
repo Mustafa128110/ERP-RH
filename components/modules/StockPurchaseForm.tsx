@@ -1,5 +1,7 @@
 "use client";
 
+import { entryChannel } from "@/lib/sale-constants";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { createStockPurchase, updateStockPurchase, deleteStockPurchase } from "@/lib/client-actions/purchases";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
@@ -73,6 +75,7 @@ const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
 ];
 
 type PurchaseDefaults = {
+  saleType?: string | null;
   _revision: string;
   companyId: string;
   contactId: string | null;
@@ -191,6 +194,8 @@ export function StockPurchaseCreateForm({
     })) ?? []),
     emptyLine(),
   ]);
+  const { channels, selected: selectedChannel } = useChannels();
+  const [saleType, setSaleType] = useState(defaults?.saleType ?? entryChannel(channels, selectedChannel));
   const [companyId, setCompanyId] = useState(
     () => defaults?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
@@ -239,7 +244,7 @@ export function StockPurchaseCreateForm({
   // offer/restore/discard logic and the save-on-change effect.
   //
   // Recovery checks the original record version before applying edited input.
-  const draftState = { _revision: defaults?._revision, lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType, documentDate, settlementAccounts };
+  const draftState = { saleType, _revision: defaults?._revision, lines, companyId, contactId, supplierText, locationId, locationText, discountTotal, taxId, shippingTotal, isPaid, paidAmount, settlementType, documentDate, settlementAccounts };
   type PurchaseDraft = typeof draftState;
 
   const { offerDraft, canRestore, download, restore: restoreDraft, discard: discardDraft } = useDraft<PurchaseDraft>(purchaseDraftKey, {
@@ -250,7 +255,8 @@ export function StockPurchaseCreateForm({
     hasContent: (d) => isEdit || d.lines?.some((l) => l.itemText?.trim() || l.quantity?.trim()) || !!d.supplierText || !!d.paidAmount || Number(d.discountTotal) !== 0 || Number(d.shippingTotal) !== 0 || !!d.documentDate && d.documentDate !== todayISO() || Object.keys(d.settlementAccounts ?? {}).length > 0,
     apply: (d) => {
       setLines(d.lines);
-      setCompanyId(d.companyId);
+      setCompanyId(companyOptions.some((company) => company.id === d.companyId) ? d.companyId : companyOptions[0]?.id ?? "");
+      setSaleType(d.saleType ?? defaults?.saleType ?? "counter");
       setContactId(d.contactId);
       setSupplierText(d.supplierText);
       setLocationId(d.locationId);
@@ -367,15 +373,7 @@ export function StockPurchaseCreateForm({
   // Switching company drops any supplier/line item that belonged to the old one,
   // so a stale id can't be submitted against the new company. Done on change (not
   // in an effect) — the reset is a response to the user's action, not a sync.
-  function changeCompany(next: string) {
-    setCompanyId(next);
-    if (!isEdit) setTaxId(taxSettings[next]?.default_purchase_tax_id ?? "");
-    if (contactId && !supplierOpts.some((s) => s.id === contactId && inCompany(next)(s))) {
-      setContactId("");
-      setSupplierText("");
-    }
-    setLines((prev) => prev.map((l) => (l.itemId && !itemOpts.some((it) => it.id === l.itemId && it.companyId === next) ? { ...l, itemId: "" } : l)));
-  }
+
 
   // Excel-style arrows across the line grid, plus Delete to empty a cell. Ctrl+Enter
   // is not passed here on purpose: this is a real <form>, so the app-wide handler
@@ -515,25 +513,8 @@ export function StockPurchaseCreateForm({
           )}
         </div>
         <div className="flex flex-wrap gap-3">
-          <label className={`${labelClass} w-56`}>
-            <span className={labelTextClass}>Company</span>
-            <select
-              name="companyId"
-              required
-              value={companyId}
-              onChange={(e) => changeCompany(e.target.value)}
-              className={fieldClass}
-            >
-              <option value="" disabled>
-                {companyOptions.length === 0 ? "No companies yet" : "Select a company"}
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <input type="hidden" name="companyId" value={companyId} />
+          <ChannelField value={saleType} onChange={setSaleType} className="w-56" />
           <label className={`${labelClass} w-56`}>
             <span className={labelTextClass}>Supplier</span>
             <ComboBox

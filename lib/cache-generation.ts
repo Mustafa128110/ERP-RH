@@ -3,6 +3,8 @@ import { READ_DEPENDS_ON, type ReadDomain } from "./cache-keys";
 // Unknown cache families depend on every tracked table. Missing a dependency
 // must cost a cache hit, never make a stale entry look authoritative.
 const lookupTables: Record<string, string[]> = {
+  contact_ledgers: ["contact_ledgers"],
+  sales_channels: ["sales_channels"], consolidation_history: ["consolidation_history"],
   companies: ["companies"], categories: ["categories"], brands: ["brands"], locations: ["locations"],
   units: ["units"], taxes: ["taxes"], settings: ["settings"], document_types: ["document_types"],
   expense_categories: ["expense_categories"], roles: ["roles", "role_permissions", "permissions"],

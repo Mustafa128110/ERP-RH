@@ -2,6 +2,8 @@
 // invalidate a lookup without importing the authenticated lookup queries (and
 // their Next navigation dependencies) into offline checks.
 export const CACHE = {
+  contactLedgers: "contact_ledgers",
+  salesChannels: "sales_channels",
   companies: "companies",
   categories: "categories",
   brands: "brands",
@@ -67,17 +69,17 @@ export type ReadDomain = (typeof READ_DOMAIN)[keyof typeof READ_DOMAIN];
 export const READ_DEPENDS_ON: Record<ReadDomain, readonly string[]> = {
   // listSales (lib/actions/sales.ts): documents + their lines, with the customer
   // name and the company's short name joined in.
-  sales: ["documents", "documentLines", "companies", "contacts", "items", "units"],
+  sales: ["salesChannels", "documents", "documentLines", "companies", "contacts", "items", "units"],
   // listStockPurchases — the same shape on the buying side.
-  purchases: ["documents", "documentLines", "companies", "contacts", "items", "units"],
+  purchases: ["salesChannels", "documents", "documentLines", "companies", "contacts", "items", "units"],
   // listPayments, which also names the account or cheque that settled each one.
-  payments: ["documents", "companies", "contacts", "bankAccounts", "cashAccounts", "chequeRegister"],
+  payments: ["salesChannels", "documents", "companies", "contacts", "bankAccounts", "cashAccounts", "chequeRegister"],
   // listLedger: the entries, plus recent payments and invoices per contact. The
   // settlement accounts are joined to drop payments booked against another
   // company's account, so a bank or cash account change can change this list.
-  ledger: ["ledgerEntries", "documents", "companies", "contacts", "bankAccounts", "cashAccounts"],
+  ledger: ["contactLedgers", "ledgerEntries", "documents", "companies", "contacts", "bankAccounts", "cashAccounts"],
   // listExpenses, down to who entered each one.
-  expenses: ["expenses", "expenseCategories", "companies", "bankAccounts", "cashAccounts", "chequeRegister", "users"],
+  expenses: ["salesChannels", "expenses", "expenseCategories", "companies", "bankAccounts", "cashAccounts", "chequeRegister", "users"],
   // Stock on hand is the movement ledger grouped by item, unit and location —
   // and it reads each company's low_stock_qty to mark a row low, so a settings
   // change changes what this returns.
@@ -120,7 +122,7 @@ export const READ_DOCUMENT_TYPES: Record<ReadDomain, readonly string[]> = {
   ledger: ["SALES_INVOICE", "PURCHASE_INVOICE"],
   // Last sales price is a SALES_INVOICE lateral; the three purchase rates come
   // from the rate_list view over purchase lines.
-  products: ["SALES_INVOICE", "PURCHASE_INVOICE"],
+  products: ["SALES_INVOICE", "PURCHASE_INVOICE", "STOCK_CONVERSION"],
   // Contacts and companies list pages show no document rows directly — they
   // read the contact/company tables alone, so no document types reach them.
   companies: [],

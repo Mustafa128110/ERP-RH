@@ -11,10 +11,18 @@ export const SALE_TYPES = [
   { value: "shopify", label: "Shopify" },
 ] as const;
 
-export type SaleType = (typeof SALE_TYPES)[number]["value"];
+export type SaleType = string;
 
 export const DEFAULT_SALE_TYPE: SaleType = "counter";
 
-export const isSaleType = (value: string): value is SaleType => SALE_TYPES.some((t) => t.value === value);
+export const isSaleType = (value: string): value is SaleType => /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
 
-export const saleTypeLabel = (value: string | null): string => SALE_TYPES.find((t) => t.value === value)?.label ?? "—";
+export const saleTypeLabel = (value: string | null, channels: readonly { id: string; name: string }[] = []): string => channels.find((channel) => channel.id === value)?.name ?? SALE_TYPES.find((t) => t.value === value)?.label ?? value ?? "—";
+
+export const CHANNEL_COOKIE = "scope_channel";
+
+export function entryChannel(channels: readonly { id: string; isActive: boolean }[], selected: string): string {
+  return channels.some((channel) => channel.id === selected && channel.isActive) ? selected
+    : channels.find((channel) => channel.id === DEFAULT_SALE_TYPE && channel.isActive)?.id
+      ?? channels.find((channel) => channel.isActive)?.id ?? DEFAULT_SALE_TYPE;
+}

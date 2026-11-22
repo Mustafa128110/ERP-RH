@@ -33,8 +33,9 @@ export type SessionRow = {
 // request: a one-second DNS wobble otherwise 500s whatever the user was doing,
 // including the render that follows a save. It's a read, so retrying it can't
 // write anything twice.
-export function sessionQuery(authId: string) {
-  return sessionRows(sql`u.supabase_auth_id = ${authId}`);
+type SessionRunner = Pick<typeof db, "execute">;
+export function sessionQuery(authId: string, runner: SessionRunner = db) {
+  return sessionRows(sql`u.supabase_auth_id = ${authId}`, runner);
 }
 
 // The WhatsApp agent authenticates a message by matching the sender number to
@@ -45,9 +46,9 @@ export function sessionByWhatsAppNumber(phone: string) {
   return sessionRows(sql`u.whatsapp_number = ${phone}`);
 }
 
-function sessionRows(match: ReturnType<typeof sql>) {
+function sessionRows(match: ReturnType<typeof sql>, runner: SessionRunner = db) {
   return withConnectRetry(() =>
-    db.execute<SessionRow>(sql`
+    runner.execute<SessionRow>(sql`
     SELECT
       u.id,
       u.supabase_auth_id,
@@ -73,9 +74,14 @@ function sessionRows(match: ReturnType<typeof sql>) {
         WHERE ur.user_id = u.id
       ), '[]'::json) AS perms,
       coalesce((
-        SELECT json_agg(uca.company_id)
-        FROM user_company_access uca
-        WHERE uca.user_id = u.id
+        SELECT json_agg(access.company_id)
+        FROM (
+          SELECT uca.company_id FROM user_company_access uca WHERE uca.user_id = u.id
+          UNION
+          SELECT c.id FROM companies c
+          WHERE NOT EXISTS (SELECT 1 FROM companies other WHERE other.id <> c.id)
+            AND EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id)
+        ) access
       ), '[]'::json) AS company_ids,
       coalesce((
         SELECT json_agg(uwa.location_id)

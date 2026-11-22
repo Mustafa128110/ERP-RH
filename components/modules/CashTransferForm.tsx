@@ -1,4 +1,5 @@
 "use client";
+import {ChannelField} from "@/components/layout/ChannelProvider";
 
 import { useActionState, useEffect, useState } from "react";
 import { createCashTransfer, deleteCashTransfer } from "@/lib/client-actions/transfers";
@@ -64,19 +65,8 @@ function CashTransferDialogBody({
     <>
       <form action={action} className="flex flex-col gap-4">
         <input type="hidden" name="operationId" value={operationId} />
-        <label className={labelClass}>
-          <span className={labelTextClass}>Company</span>
-          <select name="companyId" required defaultValue={companyOptions[0]?.id ?? ""} className={inputClass}>
-            <option value="" disabled>
-              Select a company
-            </option>
-            {companyOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ChannelField />
+        <input type="hidden" name="companyId" value={companyOptions[0]?.id ?? ""} />
 
         <label className={labelClass}>
           <span className={labelTextClass}>From</span>

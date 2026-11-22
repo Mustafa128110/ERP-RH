@@ -51,6 +51,11 @@ export function requirePermission(
   }
 }
 
+export function requireAnyPermission(session: AuthSession | null, modules: string[], action: string): asserts session is AuthSession {
+  if (!session) throw new PermissionError("Not authenticated");
+  if (!modules.some((module) => hasPermission(session, `${module}.${action}`))) throw new PermissionError(`Missing permission to ${action} ${modules.join(" or ")}`);
+}
+
 // Account administration is system-wide: a company-scoped users.* grant must
 // never be enough to create, deactivate, delete, or globally promote a person.
 // Keep this separate from requirePermission()'s intentionally permissive

@@ -1,4 +1,6 @@
 "use client";
+import { entryChannel } from "@/lib/sale-constants";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
 import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
@@ -45,6 +47,7 @@ export type CashOption = Option & { isDefault: boolean; companyId: string | null
 export type BankOption = Option & { companyId: string | null };
 
 interface PaymentValues {
+  saleType?: string | null;
   companyId: string;
   contactId: string | null;
   amount: string;
@@ -67,6 +70,7 @@ const PAYMENT_TYPES: { value: PaymentType; label: string }[] = [
 // new contact for that company on save (resolve-refs.ts), so there's no separate
 // "add contact" step.
 type PaymentBatchRowLocal = {
+  saleType?: string;
   direction: PaymentDirection;
   companyId: string;
   contactId: string;
@@ -82,6 +86,7 @@ type PaymentBatchRowLocal = {
 function toServerRows(rows: PaymentBatchRowLocal[], batchDate: string): PaymentBatchRow[] {
   return rows.map((r) => ({
     direction: r.direction,
+    saleType: r.saleType ?? "counter",
     companyId: r.companyId,
     contactId: r.contactId || null,
     contactName: r.contactText.trim() || null,
@@ -118,6 +123,8 @@ export function PaymentBatchAddDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const { channels, selected: selectedChannel } = useChannels();
+  const defaultChannel = entryChannel(channels, selectedChannel);
   const defaultCompanyId = companyOptions[0]?.id ?? "";
 
   // Picking a contact (or flipping the direction) moves the row to the company
@@ -200,7 +207,7 @@ export function PaymentBatchAddDialog({
       draftKey={userId ? `payment-batch:${userId}` : "payment-batch"}
       draftMetadata={{ date: batchDate }}
       restoreDraftMetadata={value => { if (/^\d{4}-\d{2}-\d{2}$/.test(value.date)) setBatchDate(value.date); }}
-      headers={["Direction", "Contact", "Amount", "Balance", "Settle via", "Account", "Company"]}
+      headers={["Direction", "Contact", "Amount", "Balance", "Settle via", "Account", "Channel"]}
       toolbar={
         <label className="flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Date</span>
@@ -210,10 +217,10 @@ export function PaymentBatchAddDialog({
         </label>
       }
       onSubmit={async (rows) => {
-        return createPaymentsBatch(toServerRows(rows, batchDate), operationId);
+        return createPaymentsBatch(toServerRows(rows.map((row) => ({ ...row, saleType: row.saleType ?? defaultChannel })), batchDate), operationId);
       }}
       onQueue={async (rows) => {
-        const values = toServerRows(rows, batchDate);
+        const values = toServerRows(rows.map((row) => ({ ...row, saleType: row.saleType ?? defaultChannel })), batchDate);
         // The stable operation id is minted here, inside the queue — a replayed
         // sync after a lost response is refused server-side, never doubled.
         // Returns whether the queue actually persisted: when the browser could
@@ -336,31 +343,7 @@ export function PaymentBatchAddDialog({
                 )}
               </div>
             </td>
-            <td className={batchCellClass}>
-              <select
-                value={row.companyId}
-                onChange={(e) => {
-                  // A contact belongs to one company, so switching companies drops
-                  // the picked id — the text stays and re-resolves against the new
-                  // company's list on save.
-                  const stillValid = contactOptions.some((c) => c.id === row.contactId && inCompany(e.target.value)(c));
-                  const patch = { companyId: e.target.value, ...(stillValid ? {} : { contactId: "" }) };
-                  // Chosen by hand, so the contact's own balance doesn't get to
-                  // overrule it — only the account is re-pointed at this company.
-                  update({ ...patch, ...settledIn({ ...row, contactId: "" }, patch) });
-                }}
-                className={batchInputClass}
-              >
-                <option value="" disabled>
-                  Select
-                </option>
-                {companyOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.shortName || c.name}
-                  </option>
-                ))}
-              </select>
-            </td>
+            <td className={batchCellClass}><select aria-label="Payment channel" value={row.saleType ?? defaultChannel} onChange={(event) => update({ saleType: event.target.value })} className={batchInputClass}>{channels.filter((channel) => channel.isActive || channel.id === row.saleType).map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></td>
           </>
         );
       }}
@@ -390,7 +373,7 @@ function Fields({
   chequeOptions: ChequeOption[];
 }) {
   const [paymentType, setPaymentType] = useRecoveryState<PaymentType>("paymentType", defaults?.paymentType ?? "cash");
-  const [companyId, setCompanyId] = useRecoveryState("companyId", defaults?.companyId ?? "");
+  const [companyId] = useRecoveryState("companyId", defaults?.companyId ?? companyOptions[0]?.id ?? "");
   // The chosen company's contacts, plus the global ones — a contact with no
   // company is visible to every company.
   const visibleContacts = useMemo(() => contactOptions.filter(inCompany(companyId)), [contactOptions, companyId]);
@@ -411,30 +394,8 @@ function Fields({
 
   return (
     <>
-      <label className={labelClass}>
-        <span className={labelTextClass}>Company</span>
-        <select
-          name="companyId"
-          required
-          value={companyId}
-          onChange={(e) => {
-            setCompanyId(e.target.value);
-            // Drop a contact that doesn't belong to the newly chosen company —
-            // the typed text stays and re-resolves against the new company.
-            if (contactId && !contactOptions.some((c) => c.id === contactId && c.companyId === e.target.value)) onContactChange("", contactText);
-          }}
-          className={inputClass}
-        >
-          <option value="" disabled>
-            {companyOptions.length === 0 ? "No companies yet — create one first" : "Select a company"}
-          </option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <input type="hidden" name="companyId" value={companyId} />
+      <ChannelField value={defaults?.saleType ?? undefined} />
       {/* Typed, not picked: an unrecognised name becomes a new contact for this
           company on save, the same way a sale creates a customer. */}
       <div className={labelClass}>

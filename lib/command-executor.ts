@@ -8,6 +8,7 @@ import { withCommandReceipt, ReceiptConflict } from "@/lib/command-receipt";
 import { tableForCommand } from "@/lib/command-tables";
 import type { CommandReply } from "@/lib/command-sync";
 import { commandRevisionsMatch } from "@/lib/command-revisions";
+import { resolveArchivedArguments } from "@/lib/queries/record-aliases";
 
 type Result = { error?: string; success?: boolean; needsConfirmation?: boolean; [key: string]: unknown };
 class Refused extends Error { constructor(public result: Result) { super(result.error ?? "Save refused"); } }
@@ -25,7 +26,7 @@ export async function executeRead(action: string, args: CommandValue[]) {
   if (!Object.hasOwn(commandReads, action)) throw new Error("Unknown read");
   const work = commandReads[action as keyof typeof commandReads] as (...args: unknown[]) => Promise<unknown>;
   return database.transaction(async (tx) => commandContext.run({ database: tx, afterCommit: [] }, async () => {
-    const result = await work(...args.map(decodeArgument));
+    const result = await work(...await resolveArchivedArguments(args.map(decodeArgument)));
     const table = tableForCommand(action);
     const ids = [...idsIn(result)].slice(0, 2000);
     let revisions: Record<string, string> = {};
@@ -49,7 +50,7 @@ export async function executeCommand(command: SavedCommand, userId: string): Pro
         if (!await commandRevisionsMatch(tx, table, expected)) throw new Refused({ error: "This record changed after you opened it. Your input is preserved; open the latest record and review your changes." });
       }
       const work = commandActions[command.action as keyof typeof commandActions] as (...args: unknown[]) => Promise<Result>;
-      const response = await commandContext.run({ database: tx, afterCommit }, () => work(...command.args.map(decodeArgument)));
+      const response = await commandContext.run({ database: tx, afterCommit }, async () => work(...await resolveArchivedArguments(command.args.map(decodeArgument))));
       if (response?.error) {
         throw new Refused(response);
       }

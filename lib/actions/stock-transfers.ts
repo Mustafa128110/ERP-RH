@@ -1,4 +1,6 @@
 "use server";
+import { resolveChannel, channelInScope } from "@/lib/queries/channels";
+import { writeStockRows } from "@/lib/queries/stock-writes";
 import {stockDocumentHistory} from "@/lib/queries/stock-document-history";
 import {orderHistoryRecords} from "@/lib/queries/list-history";
 import type {HistoryRequest} from "@/lib/history-window";
@@ -47,7 +49,7 @@ export interface TransferItemRow {
 async function readStockTransfers(ids?:string[]) {
   const session = await getSession();
   requirePermission(session, "stock_transfers", "view");
-  const scope = await companyInPermissionScope(documents.companyId, session, "stock_transfers");
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "stock_transfers"), await channelInScope(documents.saleType));
 
   // Both queries only need the document type, not ids from the first, so they run
   // concurrently — same reasoning as listSales.
@@ -154,6 +156,7 @@ export async function getStockTransfer(documentId: string) {
     number: doc.number,
     companyId: doc.companyId,
     documentDate: doc.documentDate,
+    saleType: doc.saleType,
     status: doc.status,
     // A NULL location on a saved line means Unassigned, not "unset" — mapping it
     // back to the sentinel is what lets the form reselect it instead of opening
@@ -293,26 +296,8 @@ async function writeTransferLines(
     }
   }
 
-  const insertedLines = await tx
-    .insert(documentLines)
-    .values(pairs.map((p) => p.line))
-    .returning({ id: documentLines.id });
+  await writeStockRows(tx, pairs);
 
-  await tx.insert(inventoryTransactions).values(
-    pairs
-      .map((p, i) => ({ ...p, lineId: insertedLines[i].id }))
-      // Nothing to track stock of when the line has no catalog item.
-      .filter((p) => p.line.itemId)
-      .map((p) => ({
-        companyId,
-        documentLineId: p.lineId,
-        movement: p.movement,
-        quantity: p.line.quantity!,
-        baseQuantity: p.line.baseQuantity!,
-        unitCost: String(p.unitCost),
-        totalCost: String(p.unitCost * Number(p.line.baseQuantity)),
-      })),
-  );
 }
 
 // Stock moved, and items can appear out of nowhere (resolve-refs.ts), so the
@@ -335,6 +320,7 @@ export async function createStockTransfer(
   const session = await getLiveSession();
 
   const header = readHeader(formData);
+  const saleType = await resolveChannel(formData.get("saleType"));
   if (header.error) return { error: header.error };
   // Scoped to the submitted company: membership + stock_transfers.create there.
   requirePermission(session, "stock_transfers", "create", { companyId: header.companyId });
@@ -360,6 +346,7 @@ export async function createStockTransfer(
           number,
           status: "posted",
           documentDate: header.documentDate,
+          saleType,
           createdBy: session.userId,
         })
         .returning({ id: documents.id });
@@ -395,6 +382,7 @@ export async function updateStockTransfer(
   const session = await getLiveSession();
 
   const header = readHeader(formData);
+  const saleType = await resolveChannel(formData.get("saleType"), documentId);
   if (header.error) return { error: header.error };
   requirePermission(session, "stock_transfers", "edit", { companyId: header.companyId });
   if (header.fromLocationId) requirePermission(session, "stock_transfers", "edit", { companyId: header.companyId, warehouseId: header.fromLocationId });
@@ -425,7 +413,7 @@ export async function updateStockTransfer(
       }
       await tx
         .update(documents)
-        .set({ companyId: header.companyId, documentDate: header.documentDate, status: "posted", updatedAt: new Date() })
+        .set({ saleType, companyId: header.companyId, documentDate: header.documentDate, status: "posted", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
 
       // inventory_transactions.document_line_id is ON DELETE RESTRICT, so the

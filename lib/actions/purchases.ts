@@ -3,6 +3,7 @@ import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import { documentHistoryWindow } from "@/lib/queries/history-window";
 import type { HistoryRequest } from "@/lib/history-window";
 
+import { channelInScope, getSelectedChannel, resolveChannel } from "@/lib/queries/channels";
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
@@ -106,8 +107,8 @@ export async function listStockPurchases(companyId?: string, documentIds?: strin
   const session = await getSession();
   requirePermission(session, "purchases", "view");
   const scope = and(
-    documentIds ? (documentIds.length ? inArray(documents.id, documentIds) : sql`false`) : undefined,await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
-  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+    await channelInScope(documents.saleType), documentIds ? (documentIds.length ? inArray(documents.id, documentIds) : sql`false`) : undefined,await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",") + ":channel:" + await getSelectedChannel();
 
   return cachedPageRead(READ_DOMAIN.purchases, `${session.userId}:purchases:${cacheScope}:${stableReadKey({ filters: companyId, documentIds })}`, async () => {
 
@@ -118,12 +119,14 @@ export async function listStockPurchases(companyId?: string, documentIds?: strin
     db
       .select({
         id: documents.id,
+        saleType: documents.saleType,
         number: documents.number,
         documentDate: documents.documentDate,
         status: documents.status,
         subtotal: documents.subtotal,
         grandTotal: documents.grandTotal,
         isPaid: documents.isPaid,
+        ledgerClosedAt: documents.ledgerClosedAt,
         // What's actually been paid, not just the flag: a purchase whose only
         // payment is its freight shows "Partial Paid" rather than "Paid"
         // (createStockPurchase records the shipping as a paid expense).
@@ -186,7 +189,7 @@ export async function listStockPurchases(companyId?: string, documentIds?: strin
 export async function listStockPurchasesPage(companyId?: string, request: HistoryRequest = {}) {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
-  const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(await channelInScope(documents.saleType), await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
   return withReadSnapshot(async () => {
     const selected = await documentHistoryWindow(scope, "PURCHASE_INVOICE", request);
     const records = await listStockPurchases(companyId, selected.ids);
@@ -375,6 +378,7 @@ async function recordShippingExpense(tx: PurchaseTx, args: ShippingExpenseArgs) 
   await tx.insert(expenses).values({
     companyId: args.companyId,
     expenseCategoryId: categoryId,
+    saleType: sql`coalesce((SELECT sale_type FROM documents WHERE id=${args.documentId}::uuid),'counter')`,
     cashAccountId: args.cashAccountId,
     amount: args.shipping,
     expenseDate: args.documentDate,
@@ -392,6 +396,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
   const operationId = readOperationId(formData);
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
+  const saleType = await resolveChannel(formData.get("saleType"));
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
   // Scoped to the submitted company: membership + purchases.create there, so a
@@ -552,6 +557,7 @@ export async function createStockPurchase(_prevState: ActionResult | undefined, 
           number,
           status: "posted",
           documentDate,
+          saleType,
           contactId: resolvedContactId,
           subtotal: String(subtotal),
           discountTotal,
@@ -705,6 +711,7 @@ export async function updateStockPurchase(
 
   const companyId = String(formData.get("companyId") ?? "");
   const documentDate = String(formData.get("documentDate") ?? "");
+  const saleType = await resolveChannel(formData.get("saleType"), documentId);
   if (!companyId) return { error: "Company is required." };
   if (!documentDate) return { error: "Document date is required." };
   // Scoped to the submitted company; the record itself is also read scoped below.
@@ -945,6 +952,7 @@ export async function updateStockPurchase(
     await tx
       .update(documents)
       .set({
+        saleType,
         companyId,
         status: "posted",
         documentDate,
@@ -1347,6 +1355,7 @@ export async function mergeStockPurchases(
       number: documents.number,
       companyId: documents.companyId,
       contactId: documents.contactId,
+      saleType: documents.saleType,
       discountTotal: documents.discountTotal,
       taxTotal: documents.taxTotal,
       shippingTotal: documents.shippingTotal,
@@ -1356,6 +1365,8 @@ export async function mergeStockPurchases(
     .from(documents)
     .where(and(inArray(documents.id, documentIds), await companyInScope(documents.companyId)));
   if (docs.length !== documentIds.length) return { error: "One of these purchases no longer exists, or isn't in your company scope." };
+
+  if (new Set(docs.map((document) => document.saleType ?? "counter")).size > 1) return { error: "Merge purchases from the same sales channel." };
 
   // How much of each purchase's shipping was actually paid: the freight expense
   // rows linked to it. A purchase saved before the shipping-expense change has
@@ -1513,7 +1524,7 @@ export async function mergeStockPurchases(
 export async function exportStockPurchasesCsv(companyId?: string): Promise<Record<string, string>[]> {
   const session = await getSession();
   requirePermission(session, "purchases", "view");
-  const scope = and(await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
+  const scope = and(await channelInScope(documents.saleType), await companyInPermissionScope(documents.companyId, session, "purchases"), companyId ? eq(documents.companyId, companyId) : undefined);
 
   const [rows, cheques] = await Promise.all([
     db

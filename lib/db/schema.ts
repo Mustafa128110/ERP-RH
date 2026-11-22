@@ -13,6 +13,7 @@ import {
   timestamp,
   date,
   unique,
+  uniqueIndex,
   index,
   check,
   primaryKey,
@@ -54,7 +55,13 @@ export const themePreferenceEnum = pgEnum("theme_preference", ["light", "dark"])
 // Where a sale came from. Everything sold over the counter is the default and
 // always will be the bulk of it; the other two are the channels that need to be
 // told apart afterwards when the takings are reconciled.
-export const saleTypeEnum = pgEnum("sale_type", ["counter", "balochistan", "shopify"]);
+// Channel identities stay stable when their display names change.
+export const salesChannels = pgTable("sales_channels", {
+  id: text("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
 
 export const chequeTypeEnum = pgEnum("cheque_type", [
   "ACCOUNT_PAYEE",
@@ -86,6 +93,8 @@ export const documentTypeCodeEnum = pgEnum("document_type_code", [
   "STOCK_TRANSFER",
   "STOCK_ADJUSTMENT",
   "STOCK_OPENING",
+  "STOCK_CONVERSION",
+  "LEDGER_CLOSING",
   "PAYMENT_RECEIVED",
   "PAYMENT_MADE",
   "JOURNAL_ENTRY",
@@ -124,6 +133,8 @@ export const documentSeriesEnum = pgEnum("document_series", [
   "CN",
   "DB",
   "OB",
+  "LC",
+  "CV",
 ]);
 
 // --- Identity & Companies ---
@@ -238,7 +249,16 @@ export const companies = pgTable("companies", {
   taxNumber: varchar("tax_number", { length: 100 }),
   address: text("address"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+}, () => [uniqueIndex("companies_single_company").on(sql`true`)]);
+
+export const consolidationHistory = pgTable("consolidation_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind").notNull(),
+  sourceId: text("source_id").notNull(),
+  targetId: text("target_id"),
+  original: jsonb("original").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("consolidation_history_kind_source").on(table.kind, table.sourceId)]).enableRLS();
 
 // --- Contacts & Shared Lookups ---
 
@@ -328,6 +348,7 @@ export const expenses = pgTable(
   "expenses",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    saleType: text("sale_type").notNull().default("counter").references(() => salesChannels.id),
     companyId: uuid("company_id").notNull().references(() => companies.id),
     expenseCategoryId: uuid("expense_category_id").notNull().references(() => expenseCategories.id),
     // Settlement — exactly one set, same as documents.bank_account_id/cash_account_id.
@@ -520,7 +541,8 @@ export const documents = pgTable(
     // document type, the same way `reason` belongs only to adjustments — a
     // purchase invoice has no sale type. Sales always carry one; it defaults to
     // counter rather than being asked twice for the common case.
-    saleType: saleTypeEnum("sale_type"),
+    ledgerClosedAt: timestamp("ledger_closed_at", { withTimezone: true }),
+    saleType: text("sale_type").notNull().default("counter").references(() => salesChannels.id),
     // Quotations only: the date the quoted prices stop being honoured. NULL on
     // every other document type, the same way `reason` belongs only to
     // adjustments and `saleType` only to sales.
@@ -669,13 +691,14 @@ export const paymentAllocations = pgTable(
 export const contactOpeningBalances = pgTable(
   "contact_opening_balances",
   {
+    channelId: text("channel_id").notNull().default("counter").references(() => salesChannels.id),
     companyId: uuid("company_id").notNull().references(() => companies.id),
     contactId: uuid("contact_id").notNull().references(() => contacts.id),
     documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    primaryKey({ columns: [table.companyId, table.contactId] }),
+    primaryKey({ columns: [table.companyId, table.contactId, table.channelId] }),
     // Reading one party's statement resolves the opening balance by document id
     // as well, when walking back from a ledger row to what it is.
     unique().on(table.documentId),
@@ -945,3 +968,12 @@ export const chequeRegister = pgTable(
     // Payments link and settle a cheque by its document.
     index("idx_cheque_document").on(table.documentId),
   ],  );
+
+export const contactLedgers = pgTable("contact_ledgers", {
+ companyId: uuid("company_id").notNull().references(() => companies.id),
+ contactId: uuid("contact_id").notNull().references(() => contacts.id),
+ channelId: text("channel_id").notNull().references(() => salesChannels.id),
+ isActive: boolean("is_active").notNull().default(true),
+ closedAt: timestamp("closed_at", {withTimezone:true}),
+ createdAt: timestamp("created_at", {withTimezone:true}).notNull().defaultNow(),
+}, table=>[primaryKey({columns:[table.companyId,table.contactId,table.channelId]}),]).enableRLS();

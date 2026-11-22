@@ -1,6 +1,7 @@
 import { requireSession } from "@/lib/auth/session";
-import { getSelectedScope } from "@/lib/auth/scope";
-import { getAccessibleCompanies } from "@/lib/actions/scope";
+import { getChannels, getSelectedChannel } from "@/lib/queries/channels";
+import { ChannelProvider } from "@/components/layout/ChannelProvider";
+import { ColumnSizing } from "@/components/layout/ColumnSizing";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { KeyboardShortcuts } from "@/components/layout/KeyboardShortcuts";
@@ -13,7 +14,7 @@ import { ExportShareProvider } from "@/components/ui/ExportShareSheet";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
-  const [companies, selected] = await Promise.all([getAccessibleCompanies(), getSelectedScope()]);
+  const [channels, selected] = await Promise.all([getChannels(), getSelectedChannel()]);
   const permissions = new Set(session.globalPermissions);
   for (const companyPermissions of session.permissionsByCompany.values()) {
     for (const permission of companyPermissions) permissions.add(permission);
@@ -26,6 +27,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
       {/* Who this browser is, for the user-scoped local persistence. */}
       <SessionSeed userId={session.userId} />
+      <ColumnSizing />
+      <ChannelProvider channels={channels} selected={selected}>
       <SyncProvider>
         <ExportShareProvider>
           {/* Seeds the client reference cache with the offline workflows' minimum
@@ -37,7 +40,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:block print:overflow-visible">
             <div className="print:hidden">
-              <Topbar username={session.name} companies={companies} selected={selected} />
+              <Topbar username={session.name} channels={channels} selected={selected} />
             </div>
             {/* Sits above the scroll container, not inside it, so the sentence stays
                 put while a long list scrolls under it. Renders nothing when online. */}
@@ -51,6 +54,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </ExportShareProvider>
       </SyncProvider>
+      </ChannelProvider>
     </div>
   );
 }

@@ -1,4 +1,6 @@
 "use client";
+import { useChannels } from "@/components/layout/ChannelProvider";
+import { saleTypeLabel } from "@/lib/sale-constants";
 
 import { useRef, useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
@@ -93,6 +95,7 @@ export function StockPurchaseManager({
   taxSettings: Record<string, Record<string, string>>;
   canHardDelete: boolean;
 }) {
+  const { channels } = useChannels();
   const [open, setOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseDetail | null>(null);
@@ -197,7 +200,7 @@ export function StockPurchaseManager({
       ),
     },
     { key: "supplier", label: "Supplier" },
-    { key: "company", label: "Company", width: 100 },
+    { key: "channel", label: "Channel", render: (row) => saleTypeLabel(String(row.saleType ?? "counter"), channels) },
   ];
 
   useNewEntry(() => setOpen(true));

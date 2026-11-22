@@ -1,4 +1,6 @@
 "use client";
+import {ChannelField,useChannels} from "@/components/layout/ChannelProvider";
+import {entryChannel} from "@/lib/sale-constants";
 import { FormRecovery, revisionOf, useRecoveryState } from "@/components/ui/FormRecovery";
 import { saveStatus } from "@/lib/save-status";
 
@@ -26,6 +28,7 @@ export type BankOption = Option & { companyId: string | null };
 export type ChequeOption = Option & { companyId: string | null };
 
 interface ExpenseValues {
+  saleType?: string;
   companyId: string;
   expenseCategoryId: string;
   bankAccountId: string | null;
@@ -63,9 +66,10 @@ type BatchRow = {
 // by both the live submit and the offline queue — the queued payload must be
 // byte-for-byte the same shape createExpensesBatch reads, or a queued expense
 // would arrive different from one typed online.
-function toServerRows(rows: BatchRow[], batchDate: string): ExpenseBatchRow[] {
+function toServerRows(rows: BatchRow[], batchDate: string, saleType: string): ExpenseBatchRow[] {
   return rows.map((r) => ({
     companyId: r.companyId,
+    saleType,
     expenseCategoryId: r.expenseCategoryId,
     expenseCategoryName: r.expenseCategoryText,
     settlementType: r.settlementType,
@@ -99,6 +103,8 @@ export function ExpenseBatchAddDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const {channels,selected} = useChannels();
+  const [saleType,setSaleType] = useState(entryChannel(channels,selected));
   const defaultCompanyId = companyOptions[0]?.id ?? "";
 
   // Which account list a row's settlement dropdown shows depends on its
@@ -157,22 +163,22 @@ export function ExpenseBatchAddDialog({
       initialRows={1}
       autoAppend
       draftKey={userId ? `expense-batch:${userId}` : "expense-batch"}
-      draftMetadata={{ date: batchDate }}
-      restoreDraftMetadata={value => { if (/^\d{4}-\d{2}-\d{2}$/.test(value.date)) setBatchDate(value.date); }}
-      headers={["Company", "Category", "Amount", "Settle via", "Account", "Note"]}
-      toolbar={
+      draftMetadata={{ date: batchDate, saleType }}
+      restoreDraftMetadata={value => { if (/^\d{4}-\d{2}-\d{2}$/.test(value.date)) setBatchDate(value.date); if (value.saleType) setSaleType(value.saleType); }}
+      headers={["Category", "Amount", "Settle via", "Account", "Note"]}
+      toolbar={<> <ChannelField value={saleType} onChange={setSaleType} />
         <label className="flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-steel">Date</span>
           <span className="w-44 rounded border border-sand">
             <DateField value={batchDate} onChange={setBatchDate} className={batchInputClass} />
           </span>
-        </label>
+        </label></>
       }
       onSubmit={async (rows) => {
-        return createExpensesBatch(toServerRows(rows, batchDate), operationId);
+        return createExpensesBatch(toServerRows(rows, batchDate, saleType), operationId);
       }}
       onQueue={async (rows) => {
-        const values = toServerRows(rows, batchDate);
+        const values = toServerRows(rows, batchDate, saleType);
         // The stable operation id is minted here, inside the queue — a replayed
         // sync after a lost response is refused server-side, never doubled.
         // Returns whether the queue actually persisted: when the browser could
@@ -182,33 +188,7 @@ export function ExpenseBatchAddDialog({
       }}
       renderRow={(row, _index, update) => (
         <>
-          <td className={batchCellClass}>
-            <select
-              value={row.companyId}
-              onChange={(e) => {
-                // A category belongs to one company, so switching companies drops
-                // the picked id — the text stays and re-resolves against the new
-                // company's list on save.
-                const stillValid = categoryOptions.some((c) => c.id === row.expenseCategoryId && c.companyId === e.target.value);
-                const accountStillValid = settlementList(row.settlementType, e.target.value).some((account) => account.id === row.settlementId);
-                update({
-                  companyId: e.target.value,
-                  ...(stillValid ? {} : { expenseCategoryId: "" }),
-                  settlementId: accountStillValid ? row.settlementId : row.settlementType === "cash" ? defaultCashId(e.target.value) : "",
-                });
-              }}
-              className={batchInputClass}
-            >
-              <option value="" disabled>
-                Select
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.shortName || c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+          <td className="hidden"><input type="hidden" value={row.companyId} /></td>
           <td className={batchCellClass}>
             <ComboBox
               value={row.expenseCategoryText}
@@ -294,7 +274,9 @@ function Fields({
   cashAccountOptions: CashOption[];
   chequeOptions: ChequeOption[];
 }) {
-  const [companyId, setCompanyId] = useRecoveryState("companyId", defaults?.companyId ?? companyOptions[0]?.id ?? "");
+  const {channels,selected} = useChannels();
+  const [saleType,setSaleType] = useRecoveryState("saleType",defaults?.saleType ?? entryChannel(channels,selected));
+  const [companyId] = useRecoveryState("companyId", defaults?.companyId ?? companyOptions[0]?.id ?? "");
   const [expenseCategoryId, setExpenseCategoryId] = useRecoveryState("expenseCategoryId", defaults?.expenseCategoryId ?? "");
   const [categoryText, setCategoryText] = useRecoveryState("categoryText", () => categoryOptions.find((c) => c.id === defaults?.expenseCategoryId)?.name ?? "");
   const [settlementType, setSettlementType] = useRecoveryState<SettlementType>("settlementType",
@@ -313,29 +295,8 @@ function Fields({
 
   return (
     <>
-      <label className={labelClass}>
-        <span className={labelTextClass}>Company</span>
-        <select
-          name="companyId"
-          required
-          value={companyId}
-          onChange={(e) => {
-            setCompanyId(e.target.value);
-            // Drop a category that doesn't belong to the newly chosen company.
-            if (expenseCategoryId && !categoryOptions.some((c) => c.id === expenseCategoryId && c.companyId === e.target.value)) setExpenseCategoryId("");
-          }}
-          className={inputClass}
-        >
-          <option value="" disabled>
-            {companyOptions.length === 0 ? "No companies yet — create one first" : "Select a company"}
-          </option>
-          {companyOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <input type="hidden" name="companyId" value={companyId} />
+      <ChannelField value={saleType} onChange={setSaleType} />
 
       {/* Typed, not picked: an unrecognised name becomes a new category for this
           company on save, the same way a sale line creates an item. */}

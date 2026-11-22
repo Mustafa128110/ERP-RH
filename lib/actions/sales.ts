@@ -3,6 +3,7 @@ import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import { documentHistoryWindow } from "@/lib/queries/history-window";
 import type { HistoryRequest } from "@/lib/history-window";
 
+import { channelInScope, getSelectedChannel, resolveChannel } from "@/lib/queries/channels";
 import { and, desc, eq, getTableColumns, gte, ilike, inArray, lte, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
@@ -93,12 +94,12 @@ export async function listSales(filters: SalesFilters = {}, documentIds?: string
     await companyInPermissionScope(documents.companyId, session, "sales"),
     filters.from ? gte(documents.documentDate, filters.from) : undefined,
     filters.to ? lte(documents.documentDate, filters.to) : undefined,
-    filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : undefined,
+    filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : await channelInScope(documents.saleType),
     filters.customer ? ilike(contacts.displayName, `%${filters.customer}%`) : undefined,
-    filters.status === "outstanding" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} > ${documents.paidAmount}`) : undefined,
+    filters.status === "outstanding" ? and(eq(documents.status, "posted"), sql`${documents.ledgerClosedAt} IS NULL AND ${documents.grandTotal} > ${documents.paidAmount}`) : undefined,
     filters.status === "paid" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} <= ${documents.paidAmount}`) : undefined,
   );
-  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",") + ":channel:" + await getSelectedChannel();
 
   return cachedPageRead(READ_DOMAIN.sales, `${session.userId}:sales:${cacheScope}:${stableReadKey({ filters: filters, documentIds })}`, async () => {
 
@@ -113,6 +114,7 @@ export async function listSales(filters: SalesFilters = {}, documentIds?: string
         number: documents.number,
         documentDate: documents.documentDate,
         status: documents.status,
+        ledgerClosedAt: documents.ledgerClosedAt,
         subtotal: documents.subtotal,
         grandTotal: documents.grandTotal,
         isPaid: documents.isPaid,
@@ -177,9 +179,9 @@ export async function listSalesPage(filters: SalesFilters = {}, request: History
     await companyInPermissionScope(documents.companyId, session, "sales"),
     filters.from ? gte(documents.documentDate, filters.from) : undefined,
     filters.to ? lte(documents.documentDate, filters.to) : undefined,
-    filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : undefined,
+    filters.saleType && isSaleType(filters.saleType) ? eq(documents.saleType, filters.saleType) : await channelInScope(documents.saleType),
     filters.customer ? ilike(contacts.displayName, `%${filters.customer}%`) : undefined,
-    filters.status === "outstanding" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} > ${documents.paidAmount}`) : undefined,
+    filters.status === "outstanding" ? and(eq(documents.status, "posted"), sql`${documents.ledgerClosedAt} IS NULL AND ${documents.grandTotal} > ${documents.paidAmount}`) : undefined,
     filters.status === "paid" ? and(eq(documents.status, "posted"), sql`${documents.grandTotal} <= ${documents.paidAmount}`) : undefined,
   );
   return withReadSnapshot(async () => {
@@ -615,8 +617,9 @@ export async function createSale(_prevState: (ActionResult & { id?: string; isPa
   // Unrecognised (or absent) falls back to counter rather than erroring — it is
   // the answer for the overwhelming majority of sales, and a rejected invoice
   // over a dropdown nobody touched helps nobody.
+  if (formData.get("settlementType") === "cheque" || formData.get("chequeId")) return { error: "Record cheques on the Payments page; sales accept a cash or bank account." };
   const saleTypeRaw = String(formData.get("saleType") ?? "");
-  const saleType = isSaleType(saleTypeRaw) ? saleTypeRaw : DEFAULT_SALE_TYPE;
+  const saleType = await resolveChannel(saleTypeRaw);
 
   const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
   let tax;
@@ -807,8 +810,9 @@ export async function updateSale(documentId: string, _prevState: ActionResult | 
     // Unrecognised (or absent) falls back to counter rather than erroring — it is
     // the answer for the overwhelming majority of sales, and a rejected invoice
     // over a dropdown nobody touched helps nobody.
-    const saleTypeRaw = String(formData.get("saleType") ?? "");
-    const saleType = isSaleType(saleTypeRaw) ? saleTypeRaw : DEFAULT_SALE_TYPE;
+    if (formData.get("settlementType") === "cheque" || formData.get("chequeId")) return { error: "Record cheques on the Payments page; sales accept a cash or bank account." };
+  const saleTypeRaw = String(formData.get("saleType") ?? "");
+    const saleType = await resolveChannel(saleTypeRaw, documentId);
 
     const subtotal = round1(validLines.reduce((sum, l) => sum + Number(l.quantity) * (Number(l.unitPrice) || 0), 0));
     let tax;

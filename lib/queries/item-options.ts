@@ -26,7 +26,7 @@ export function queryItemOptions(scope: SQL | undefined): Promise<ItemOptionRow[
       FROM document_lines dl
       JOIN documents d ON d.id = dl.document_id
       JOIN document_types dt ON dt.id = d.document_type_id
-      WHERE dt.code IN ('PURCHASE_INVOICE', 'STOCK_OPENING')
+      WHERE (dt.code IN ('PURCHASE_INVOICE', 'STOCK_OPENING') OR (dt.code::text='STOCK_CONVERSION' AND dl.stock_movement=1))
         AND d.status = 'posted'
         AND dl.item_id IS NOT NULL
         AND dl.base_quantity > 0
@@ -39,7 +39,7 @@ export function queryItemOptions(scope: SQL | undefined): Promise<ItemOptionRow[
       FROM document_lines dl
       JOIN documents d ON d.id = dl.document_id
       JOIN document_types dt ON dt.id = d.document_type_id
-      WHERE dt.code = 'SALES_INVOICE'
+      WHERE (dt.code='SALES_INVOICE' OR (dt.code::text='STOCK_CONVERSION' AND dl.stock_movement=1))
         AND d.status = 'posted'
         AND dl.item_id IS NOT NULL
         AND dl.base_quantity > 0

@@ -1,4 +1,5 @@
 import "server-only";
+import {OperationError} from "@/lib/operation-errors";
 import { PermissionError } from "@/lib/auth/permissions";
 import { DuplicateOperationError } from "@/lib/actions/operation-id";
 import { ChequeUnavailableError } from "@/lib/actions/cheque-link";
@@ -20,6 +21,7 @@ import { SettlementScopeError } from "@/lib/actions/settlement";
 // SQLSTATEs worth naming. Anything else is a real bug and gets the caller's own
 // fallback, which says what operation failed rather than guessing why.
 const SQLSTATE: Record<string, string> = {
+  "P0076": "belongs to a closed ledger. Retained history cannot be changed; add a new balance adjustment instead.",
   "23505": "already exists",
   "23502": "is required and was left empty",
   "23514": "has a value the database rejected",
@@ -69,12 +71,13 @@ function fieldFromConstraint(name: string | undefined): string | null {
 export type ErrorMessages = Record<string, string>;
 
 export function describeDbError(e: unknown, fallback: string, messages?: ErrorMessages): string {
-  if (e instanceof PermissionError) return e.message;
+  if (e instanceof PermissionError || e instanceof OperationError) return e.message;
 
   const err = find(e);
   const code = err?.code;
 
   if (code && messages?.[code]) return messages[code];
+  if (code === "P0076") return "This transaction belongs to, or is linked to, a closed ledger. Add a new balance adjustment instead of changing retained history.";
 
   if (code && CONNECT_CODES.has(code)) {
     return "The database connection was interrupted. The save may have completed; check its status before entering it again.";
@@ -126,6 +129,7 @@ export async function guard<T extends object>(
   } catch (e) {
     // A replayed save id: nothing was written on this attempt, and the message
     // says exactly that.
+    if (e instanceof OperationError) return { error: e.message };
     if (e instanceof DuplicateOperationError) return { error: e.message };
     // A cheque another document already holds: the guarded link refused, and
     // the message says which resource is contested rather than falling back to

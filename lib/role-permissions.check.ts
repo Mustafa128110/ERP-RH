@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { includeViewPermissions, modulePermissionKeys, presetPermissionKeys } from "./role-permissions";
+const sales = { module: "sales", actions: ["view", "create", "edit", "delete", "approve", "export"] };
+assert.deepEqual(modulePermissionKeys(sales, "none"), []);
+assert.deepEqual(modulePermissionKeys(sales, "view"), ["sales.view", "sales.export"]);
+assert.deepEqual(modulePermissionKeys(sales, "work"), ["sales.view", "sales.create", "sales.edit", "sales.export"]);
+assert.deepEqual(modulePermissionKeys(sales, "full"), sales.actions.map((action) => `sales.${action}`));
+assert.deepEqual(includeViewPermissions(["sales.create"], [sales]), ["sales.create", "sales.view"]);
+assert.deepEqual(includeViewPermissions([], [sales]), []);
+assert.ok(presetPermissionKeys([sales, { module: "users", actions: ["view", "create"] }], "sales").every((key) => !key.startsWith("users.")));
+assert.ok(presetPermissionKeys([sales], "sales").includes("sales.create"));
+console.log("role permission level checks passed");

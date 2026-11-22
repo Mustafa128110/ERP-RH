@@ -1,4 +1,6 @@
 "use client";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
+import { entryChannel } from "@/lib/sale-constants";
 import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -57,6 +59,8 @@ export function StockAdjustmentFormPage({
   }
 
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
+  const { channels, selected } = useChannels();
+  const [saleType, setSaleType] = useState(entryChannel(channels, selected));
   const [companyId, setCompanyId] = useState(() => companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "");
   // The date, location and reason are controlled (not defaultValue) so a draft
   // captures the whole adjustment, not just the grid.
@@ -75,7 +79,7 @@ export function StockAdjustmentFormPage({
   // possible thing to lose — so the whole form (grid, date, location, reason)
   // is drafted while it's being typed. There is no edit path for an adjustment,
   // so there is no "new only" rule to apply here.
-  const draftState = { lines, companyId, documentDate, locationId, reason };
+  const draftState = { saleType, lines, companyId, documentDate, locationId, reason };
   type AdjustmentDraft = typeof draftState;
 
   const { offerDraft, restore: restoreDraft, discard: discardDraft } = useDraft<AdjustmentDraft>(adjustmentDraftKey, {
@@ -84,7 +88,8 @@ export function StockAdjustmentFormPage({
     hasContent: (d) => d.lines.some((l) => l.itemText.trim() || l.quantity.trim()),
     apply: (d) => {
       setLines(d.lines);
-      setCompanyId(d.companyId);
+      setCompanyId(companyOptions[0]?.id ?? d.companyId);
+      setSaleType(d.saleType ?? entryChannel(channels, selected));
       setDocumentDate(d.documentDate);
       setLocationId(d.locationId);
       setReason(d.reason);
@@ -146,10 +151,7 @@ export function StockAdjustmentFormPage({
 
   const visibleItems = useMemo(() => itemOptions.filter((it) => it.companyId === companyId), [itemOptions, companyId]);
 
-  function changeCompany(next: string) {
-    setCompanyId(next);
-    setLines((prev) => prev.map((l) => (l.itemId && !itemOptions.some((it) => it.id === l.itemId && it.companyId === next) ? { ...l, itemId: "" } : l)));
-  }
+
 
   function pickItem(row: number, name: string) {
     const item = visibleItems.find((option) => option.name === name);
@@ -178,19 +180,8 @@ export function StockAdjustmentFormPage({
       <div className="flex flex-col gap-3">
         <span className={sectionTitleClass}>Adjustment</span>
         <div className="flex flex-wrap gap-3">
-          <label className={`${labelClass} w-56`}>
-            <span className={labelTextClass}>Company</span>
-            <select name="companyId" required value={companyId} onChange={(e) => changeCompany(e.target.value)} className={fieldClass}>
-              <option value="" disabled>
-                {companyOptions.length === 0 ? "No companies yet" : "Select a company"}
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <input type="hidden" name="companyId" value={companyId} />
+          <ChannelField value={saleType} onChange={setSaleType} />
           <label className={`${labelClass} w-40`}>
             <span className={labelTextClass}>Date</span>
             <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
@@ -341,7 +332,7 @@ export function StockAdjustmentFormPage({
         {!onDone && (
           <button
             type="button"
-            onClick={() => router.push("/inventory/stock-adjustments")}
+            onClick={() => router.push("/inventory/stock?view=adjustments")}
             className="h-12 rounded px-4 text-sm font-medium text-steel hover:bg-ivory"
           >
             Back to Adjustments
@@ -358,7 +349,7 @@ export function DeleteStockAdjustmentButton({ adjustmentId }: { adjustmentId: st
   const [state, action, pending] = useActionState(deleteStockAdjustment, undefined);
 
   useEffect(() => {
-    if (state?.success) router.push("/inventory/stock-adjustments");
+    if (state?.success) router.push("/inventory/stock?view=adjustments");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.success]);
 

@@ -10,14 +10,17 @@ async function main(){
   // Repeated groups span every proposed page boundary; one group alone has
   // 130 records. Paging must never silently drop members or change its total.
   const values=sql`SELECT n::text AS id,n/3 AS party,CASE WHEN n<130 THEN 0 ELSE n/3 END AS expense_party,n::numeric AS amount FROM generate_series(0,800) n`;
-  const source=sql`SELECT id,'company'::text AS "companyId",party::text AS "contactId",'2026-09-01'::date AS "documentDate",'PAYMENT_MADE'::text AS code,'2026-09-01'::timestamp AS "createdAt",'Company'::text AS company,'Contact '||party AS contact,amount AS "grandTotal",null::text AS "bankAccountName",'Cash'::text AS "cashAccountName",null::text AS "chequeNumber",'PAY-'||id AS number FROM (${values}) v`;
-  const names=['id','companyId','contactId','documentDate','code','createdAt','company','contact','grandTotal','bankAccountName','cashAccountName','chequeNumber','number'];
+  const source=sql`SELECT id,'company'::text AS "companyId",party::text AS "contactId",'2026-09-01'::date AS "documentDate",'PAYMENT_MADE'::text AS code,'counter'::text AS "saleType",'Counter Sales'::text AS "channelName",'2026-09-01'::timestamp AS "createdAt",'Company'::text AS company,'Contact '||party AS contact,amount AS "grandTotal",null::text AS "bankAccountName",'Cash'::text AS "cashAccountName",null::text AS "chequeNumber",'PAY-'||id AS number FROM (${values}) v`;
+  const names=['id','companyId','contactId','documentDate','code','saleType','channelName','createdAt','company','contact','grandTotal','bankAccountName','cashAccountName','chequeNumber','number'];
   const query={getSQL:()=>source,getSelectedFields:()=>Object.fromEntries(names.map(name=>[name,{}]))};
   // Use the transaction through the normal database proxy.
   const {commandContext}=await import('@/lib/db/command-context');
   await commandContext.run({database:tx,afterCommit:[]},async()=>{
    const all=await listHistoryWindow(query,{all:true,sort:'amount',direction:'desc'},paymentHistory);
    assert.equal(all.total,267);assert.equal(all.recordTotal,801);
+   const multiple=await listHistoryWindow(query,{all:true,sort:'date,amount',direction:'asc,desc'},paymentHistory);
+   assert.deepEqual(multiple.ids,all.ids,'the secondary amount order must break equal-date ties across the entire grouped history');
+   assert.deepEqual(multiple.info.sorts,[{key:'date',direction:'asc'},{key:'amount',direction:'desc'}]);
    const ids:string[]=[];
    for(let page=1;page<=3;page++){const part=await listHistoryWindow(query,{page,sort:'amount',direction:'desc'},paymentHistory);assert.equal(part.total,267);assert.equal(part.ids.length,page===3?201:300);ids.push(...part.ids)}
    assert.deepEqual(ids,all.ids);assert.equal(new Set(ids).size,801);
@@ -25,8 +28,8 @@ async function main(){
    assert.deepEqual([...found.ids].sort(),['798','799','800']);assert.equal(found.recordTotal,3,'search includes the full matching group');
    const empty=await listHistoryWindow(query,{query:"number:\"' OR 1=1 --\""},paymentHistory);assert.equal(empty.total,0);
    const last=await listHistoryWindow(query,{page:999999},paymentHistory);assert.equal(last.info.page,3);
-   const expenseSource=sql`SELECT id,'company'::text AS "companyId",expense_party::text AS "expenseCategoryId",'2026-09-01'::date AS "expenseDate",'posted'::text AS status,'2026-09-01'::timestamp AS "createdAt",'Company'::text AS company,'Category '||expense_party AS category,amount,null::text AS "bankAccountName",'Cash'::text AS "cashAccountName",null::text AS "chequeNumber",'Staff'::text AS "createdByName",'Note-'||id AS notes FROM (${values}) v`;
-   const expenseNames=['id','companyId','expenseCategoryId','expenseDate','status','createdAt','company','category','amount','bankAccountName','cashAccountName','chequeNumber','createdByName','notes'];
+   const expenseSource=sql`SELECT id,'company'::text AS "companyId",expense_party::text AS "expenseCategoryId",'counter'::text AS "saleType",'Counter Sales'::text AS "channelName",'2026-09-01'::date AS "expenseDate",'posted'::text AS status,'2026-09-01'::timestamp AS "createdAt",'Company'::text AS company,'Category '||expense_party AS category,amount,null::text AS "bankAccountName",'Cash'::text AS "cashAccountName",null::text AS "chequeNumber",'Staff'::text AS "createdByName",'Note-'||id AS notes FROM (${values}) v`;
+   const expenseNames=['id','companyId','expenseCategoryId','saleType','channelName','expenseDate','status','createdAt','company','category','amount','bankAccountName','cashAccountName','chequeNumber','createdByName','notes'];
    const expenses={getSQL:()=>expenseSource,getSelectedFields:()=>Object.fromEntries(expenseNames.map(name=>[name,{}]))};
    const group=await listHistoryWindow(expenses,{query:'notes:Note-0'},expenseHistory);
    assert.equal(group.ids.length,130,'a group larger than the page size remains whole');

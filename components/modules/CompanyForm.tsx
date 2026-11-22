@@ -1,11 +1,9 @@
 "use client";
-import { useClientUserId } from "@/lib/client-user";
 import { saveStatus } from "@/lib/save-status";
 
 import { useActionState, useEffect } from "react";
-import { updateCompany, deleteCompany, createCompaniesBatch, type CompanyBatchRow } from "@/lib/client-actions/companies";
-import { inputClass, labelClass, labelTextClass, submitClass, deleteButtonClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
-import { BatchAddDialog, batchCellClass, batchInputClass } from "@/components/ui/BatchAddDialog";
+import { updateCompany } from "@/lib/client-actions/companies";
+import { inputClass, labelClass, labelTextClass, submitClass, errorTextClass, successTextClass } from "@/components/ui/form-styles";
 import { optimistically } from "@/lib/optimistic-records";
 
 interface CompanyValues {
@@ -83,99 +81,6 @@ export function CompanyEditForm({
       >
         {pending ? "Saving…" : "Save"}
       </button>
-    </form>
-  );
-}
-
-type BatchRow = {
-  name: string;
-  shortName: string;
-  phone: string;
-  email: string;
-  taxNumber: string;
-  address: string;
-};
-
-const emptyBatchRow = (): BatchRow => ({ name: "", shortName: "", phone: "", email: "", taxNumber: "", address: "" });
-
-export function CompanyBatchAddDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const userId = useClientUserId();
-  return (
-    <BatchAddDialog<BatchRow>
-      draftKey={userId ? `batch:companies:${userId}` : undefined}
-      title="Batch Add Companies"
-      onClose={onClose}
-      onDone={onDone}
-      emptyRow={emptyBatchRow}
-      headers={["Name", "Short Name", "Phone", "Email", "Tax Number", "Address"]}
-      onSubmit={async (rows) => {
-        const values: CompanyBatchRow[] = rows.map((r) => ({
-          name: r.name.trim(),
-          shortName: r.shortName.trim() || null,
-          phone: r.phone.trim() || null,
-          email: r.email.trim() || null,
-          taxNumber: r.taxNumber.trim() || null,
-          address: r.address.trim() || null,
-        }));
-        return createCompaniesBatch(values);
-      }}
-      renderRow={(row, _index, update) => (
-        <>
-          <td className={batchCellClass}>
-            <input value={row.name} onChange={(e) => update({ name: e.target.value })} className={batchInputClass} placeholder="Name" />
-          </td>
-          <td className={batchCellClass}>
-            <input value={row.shortName} onChange={(e) => update({ shortName: e.target.value })} className={batchInputClass} />
-          </td>
-          <td className={batchCellClass}>
-            <input value={row.phone} onChange={(e) => update({ phone: e.target.value })} className={batchInputClass} />
-          </td>
-          <td className={batchCellClass}>
-            <input value={row.email} onChange={(e) => update({ email: e.target.value })} className={batchInputClass} />
-          </td>
-          <td className={batchCellClass}>
-            <input value={row.taxNumber} onChange={(e) => update({ taxNumber: e.target.value })} className={batchInputClass} />
-          </td>
-          <td className={batchCellClass}>
-            <input value={row.address} onChange={(e) => update({ address: e.target.value })} className={batchInputClass} />
-          </td>
-        </>
-      )}
-    />
-  );
-}
-
-export function DeleteCompanyButton({
-  companyId,
-  onDone,
-  onDeleting,
-}: {
-  companyId: string;
-  onDone?: () => void;
-  onDeleting?: () => void;
-}) {
-  // Inside the action, so it runs after the confirm() below has had its say.
-  const [state, action, pending] = useActionState(optimistically(deleteCompany, onDeleting), undefined);
-
-  useEffect(() => {
-    if (state?.success) onDone?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.success]);
-
-  return (
-    <form
-      action={action}
-      onSubmit={(e) => {
-        if (!confirm("Delete this company permanently? This fails if any contacts/items/documents still reference it.")) {
-          e.preventDefault();
-        }
-      }}
-    >
-      <input type="hidden" name="companyId" value={companyId} />
-      <button type="submit" disabled={pending} className={deleteButtonClass}>
-        {pending ? "Deleting…" : "Delete this company"}
-      </button>
-      {state?.error && <p className={`mt-2 ${errorTextClass}`}>{state.error}</p>}
     </form>
   );
 }

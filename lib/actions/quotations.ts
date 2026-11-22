@@ -4,6 +4,7 @@ import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history'
 import {quotationHistory} from '@/lib/queries/history-configs';
 
 
+import { resolveChannel, channelInScope } from "@/lib/queries/channels";
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
@@ -98,7 +99,7 @@ async function readQuotations(request?:HistoryRequest) {
  return withReadSnapshot(async()=>{
   const session = await getSession();
   requirePermission(session, "quotations", "view");
-  const scope = await companyInPermissionScope(documents.companyId, session, "quotations");
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "quotations"), await channelInScope(documents.saleType));
 
   // The line totals come back as an aggregate rather than as rows: the list only
   // needs "how much of this is converted", and pulling every line of every
@@ -208,6 +209,7 @@ export async function getQuotation(documentId: string) {
     companyId: doc.companyId,
     contactId: doc.contactId ?? "",
     documentDate: doc.documentDate,
+    saleType: doc.saleType,
     validUntil: doc.validUntil ?? "",
     discountTotal: doc.discountTotal,
     taxTotal: doc.taxTotal,
@@ -317,6 +319,7 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
       const session = await getLiveSession();
 
       const f = readForm(formData);
+      const saleType = await resolveChannel(formData.get("saleType"));
       if (f.error) return { error: f.error };
       // Scoped to the submitted company — the user must both belong to it and
       // hold quotations.create THERE. A queued submission was filled against
@@ -354,6 +357,7 @@ export async function createQuotation(_prevState: (ActionResult & { id?: string 
             // posted anywhere, which is exactly what makes it a quotation.
             status: "pending",
             documentDate: f.documentDate,
+            saleType,
             validUntil: f.validUntil,
             contactId,
             subtotal: String(f.subtotal),
@@ -396,6 +400,7 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
     const session = await getLiveSession();
 
     const f = readForm(formData);
+    const saleType = await resolveChannel(formData.get("saleType"), documentId);
     if (f.error) return { error: f.error };
     // Scoped to the submitted company: membership and per-company permission,
     // so a forged or stale companyId can't steer an edit into (or out of) a set
@@ -436,6 +441,7 @@ export async function updateQuotation(documentId: string, _prevState: ActionResu
         .set({
           companyId: f.companyId,
           documentDate: f.documentDate,
+          saleType,
           validUntil: f.validUntil,
           contactId: await resolveContactId(tx, f.companyId, f.contactId, f.contactName),
           subtotal: String(f.subtotal),
@@ -545,6 +551,7 @@ export async function convertQuotation(
     // books the receivable and takes its number exactly like a counter sale.
     const saleForm = new FormData();
     saleForm.set("companyId", quotation.companyId);
+    saleForm.set("saleType", quotation.saleType ?? "counter");
     saleForm.set("documentDate", String(formData.get("documentDate") ?? todayISO()));
     saleForm.set("contactId", quotation.contactId);
     saleForm.set("contactName", "");

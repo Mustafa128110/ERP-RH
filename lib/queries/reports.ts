@@ -34,12 +34,12 @@ export type ReportResult = {
   note?: string;
 };
 
-export type ReportFilters = { from?: string; to?: string; company?: string; location?: string };
+export type ReportFilters = { channel?: string; from?: string; to?: string; company?: string; location?: string };
 
 // Every report is scoped the same way, so the fragments are built once. Company
 // scope is not optional and not a filter — it is the boundary of what the signed
 // in user may see at all, resolved by the caller before it gets here.
-export type Scope = { companies: SQL; from: string; to: string; company: string | null; location: string | null };
+export type Scope = { channel?: string; companies: SQL; from: string; to: string; company: string | null; location: string | null };
 
 const NOTES: Partial<Record<ReportSlug, string>> = {
   profit:
@@ -145,7 +145,7 @@ const QUERIES: Record<ReportSlug, Query> = {
     db.execute<ReportRow>(sql`
       SELECT d.document_date::text AS period,
              c.name AS company,
-             coalesce(d.sale_type::text, 'counter') AS "saleType",
+             coalesce((SELECT name FROM sales_channels WHERE id=d.sale_type), 'Counter Sales') AS "saleType",
              count(*)::int AS invoices,
              sum(d.subtotal) AS subtotal,
              sum(d.discount_total) AS discount,
@@ -157,6 +157,7 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code = 'SALES_INVOICE'
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY d.document_date, c.name, d.sale_type
        ORDER BY d.document_date DESC, c.name`),
@@ -183,6 +184,7 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code = 'SALES_INVOICE'
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY i.name, c.name
        ORDER BY profit DESC`),
@@ -237,7 +239,7 @@ const QUERIES: Record<ReportSlug, Query> = {
       SELECT ct.display_name AS contact, c.name AS company,
              sum(d.grand_total) AS invoiced,
              sum(d.paid_amount) AS paid,
-             sum(d.grand_total - d.paid_amount) AS balance
+             sum(CASE WHEN d.ledger_closed_at IS NULL THEN d.grand_total - d.paid_amount ELSE 0 END) AS balance
         FROM documents d
         JOIN document_types dt ON dt.id = d.document_type_id
         JOIN companies c ON c.id = d.company_id
@@ -245,6 +247,7 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code = 'SALES_INVOICE'
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY ct.display_name, c.name
        ORDER BY balance DESC`),
@@ -254,7 +257,7 @@ const QUERIES: Record<ReportSlug, Query> = {
       SELECT ct.display_name AS contact, c.name AS company,
              sum(d.grand_total) AS billed,
              sum(d.paid_amount) AS paid,
-             sum(d.grand_total - d.paid_amount) AS balance
+             sum(CASE WHEN d.ledger_closed_at IS NULL THEN d.grand_total - d.paid_amount ELSE 0 END) AS balance
         FROM documents d
         JOIN document_types dt ON dt.id = d.document_type_id
         JOIN companies c ON c.id = d.company_id
@@ -262,6 +265,7 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code = 'PURCHASE_INVOICE'
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY ct.display_name, c.name
        ORDER BY balance DESC`),
@@ -280,7 +284,9 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.grand_total - d.paid_amount <> 0
+         AND d.ledger_closed_at IS NULL
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        -- Oldest first: the one that has been waiting longest is the one to chase.
        ORDER BY age DESC`),
@@ -332,6 +338,7 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code = 'PURCHASE_INVOICE'
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY d.document_date, ct.display_name, c.name
        ORDER BY d.document_date DESC`),
@@ -349,6 +356,7 @@ const QUERIES: Record<ReportSlug, Query> = {
        WHERE dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE')
          AND d.status = 'posted'
          AND d.company_id IN (${s.companies})
+         AND ${s.channel ? sql`coalesce(d.sale_type, 'counter') = ${s.channel}` : sql`true`}
          AND d.document_date BETWEEN ${s.from} AND ${s.to}
        GROUP BY to_char(d.document_date, 'YYYY-MM'), c.name
        ORDER BY period DESC, c.name`),
@@ -407,6 +415,7 @@ export function reportScope(ids: string[], filters: ReportFilters): Scope | null
     from: filters.from || todayISO().slice(0, 8) + "01",
     to: filters.to || todayISO(),
     company,
+    channel: filters.channel,
     location: filters.location || null,
   };
 }

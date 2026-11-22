@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { runReport } from "@/lib/actions/reports";
+import {ProfitCalendar} from "@/components/modules/ProfitCalendar";
+import { runReport, getProfitCalendar } from "@/lib/actions/reports";
 import { isReportSlug } from "@/lib/report-constants";
 import { ReportView } from "@/components/modules/ReportView";
 import { ListFilters } from "@/components/ui/ListFilters";
@@ -12,11 +13,12 @@ export default async function Page({
   searchParams,
 }: {
   params: Promise<{ reportType: string }>;
-  searchParams: Promise<{ from?: string; to?: string; company?: string; location?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; company?: string; location?: string; month?: string; view?: string }>;
 }) {
   const [{ reportType }, filters] = await Promise.all([params, searchParams]);
   if (!isReportSlug(reportType)) notFound();
 
+  if (reportType === "profit" && filters.view !== "items") return <ProfitCalendar data={await getProfitCalendar(filters.month)} />;
   const report = await runReport(reportType, filters);
 
   return (

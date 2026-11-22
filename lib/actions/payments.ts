@@ -4,6 +4,7 @@ import {withReadSnapshot} from '@/lib/db/read-snapshot';
 import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
 import {paymentHistory} from '@/lib/queries/history-configs';
 
+import { channelInScope, getSelectedChannel, resolveChannel } from "@/lib/queries/channels";
 import { and, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
@@ -102,11 +103,11 @@ async function readPayments(filters: PaymentFilters = {}, request?: HistoryReque
 
   const codes =
     filters.direction === "made" ? (["PAYMENT_MADE"] as const) : filters.direction === "received" ? (["PAYMENT_RECEIVED"] as const) : (["PAYMENT_MADE", "PAYMENT_RECEIVED"] as const);
-  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",") + ":channel:" + await getSelectedChannel();
 
   return cachedPageRead(READ_DOMAIN.payments, `${session.userId}:payments:paged:${cacheScope}:${stableReadKey(filters)}:${stableReadKey(request)}`, async () => withReadSnapshot(async () => {
 
-  const scope = await companyInPermissionScope(documents.companyId, session, "payments");
+  const scope = and(await companyInPermissionScope(documents.companyId, session, "payments"), await channelInScope(documents.saleType));
   const load = (ids?: string[]) => db
     .select({
       id: documents.id,
@@ -126,6 +127,8 @@ async function readPayments(filters: PaymentFilters = {}, request?: HistoryReque
         else ${documents.grandTotal}
       end`,
       companyId: documents.companyId,
+      saleType: documents.saleType,
+      channelName: sql<string>`coalesce((select name from sales_channels where id=${documents.saleType}), 'Counter Sales')`,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       contactId: documents.contactId,
       contact: contacts.displayName,
@@ -222,6 +225,7 @@ function readPaymentForm(formData: FormData) {
   const paymentType = String(formData.get("paymentType") ?? "") as PaymentType;
   return {
     companyId: String(formData.get("companyId") ?? ""),
+    saleType: String(formData.get("saleType") || "counter"),
     // Picked contact, or free-typed text that becomes a contact on save — same
     // as a customer on a sale line.
     contactId: String(formData.get("contactId") ?? "") || null,
@@ -244,6 +248,7 @@ export async function createPayment(
   const session = await getLiveSession();
 
   const values = readPaymentForm(formData);
+  values.saleType = await resolveChannel(values.saleType);
   if (!values.companyId) return { error: "Company is required." };
   // Scoped to the submitted company: membership and per-company permission, so
   // a queued submission filled against a stale cache is refused rather than
@@ -281,6 +286,7 @@ export async function createPayment(
         .insert(documents)
         .values({
           companyId: values.companyId,
+          saleType: values.saleType,
           documentTypeId: documentType.id,
           number,
           status: "posted",
@@ -359,6 +365,7 @@ export async function getPayment(documentId: string) {
       .select({
         id: documents.id,
         _revision: sql<string>`${documents}.xmin::text`,
+        saleType: documents.saleType,
         companyId: documents.companyId,
         contactId: documents.contactId,
         amount: documents.grandTotal,
@@ -395,6 +402,7 @@ export async function getPayment(documentId: string) {
 }
 
 export interface PaymentBatchRow {
+  saleType?: string;
   direction: PaymentDirection;
   companyId: string;
   contactId: string | null;
@@ -428,6 +436,8 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
   const valid = rows.filter(
     (r) => r.companyId && r.paymentDate && (r.chequeId || ((r.bankAccountId || r.cashAccountId) && r.amount.trim() !== "")),
   );
+  const channelIds = [...new Set(valid.map((row) => row.saleType || "counter"))];
+  await Promise.all(channelIds.map((id) => resolveChannel(id)));
   if (valid.length === 0) {
     return { error: "Add at least one row with a company, date, a settlement account, and an amount above zero." };
   }
@@ -505,6 +515,7 @@ export async function createPaymentsBatch(rows: PaymentBatchRow[], operationId?:
         prepared.map(({ row, amount, number, documentType, contactId, documentId }) => ({
           id: documentId,
           companyId: row.companyId,
+          saleType: row.saleType || "counter",
           documentTypeId: documentType.id,
           number,
           status: "posted" as const,
@@ -590,6 +601,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
     const session = await getLiveSession();
 
     const values = readPaymentForm(formData);
+  values.saleType = await resolveChannel(formData.get("saleType"), paymentId);
     if (!values.paymentDate) return { error: "Date is required." };
     if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
 
@@ -664,6 +676,7 @@ export async function updatePayment(paymentId: string, _prevState: ActionResult 
           .update(documents)
           .set({
             contactId,
+            saleType: values.saleType,
             subtotal: values.amount,
             grandTotal: values.amount,
             documentDate: values.paymentDate,

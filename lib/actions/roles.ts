@@ -1,5 +1,6 @@
 "use server";
 
+import { includeViewPermissions } from "@/lib/role-permissions";
 import { eq, sql } from "drizzle-orm";
 import { withReadSnapshot } from "@/lib/db/read-snapshot";
 import { revalidatePath } from "next/cache";
@@ -104,13 +105,16 @@ export async function getRoleForEdit(roleId: string) {
 // The grid posts its ticked keys as a JSON array in a hidden field. A malformed
 // one is a bad request, not a crash — JSON.parse throwing here used to take the
 // whole role form down and lose every tick in it.
-function readPermissionKeys(formData: FormData): string[] {
+async function readPermissionKeys(formData: FormData): Promise<string[]> {
+  let keys: string[];
   try {
     const parsed = JSON.parse(String(formData.get("permissionKeys") ?? "[]"));
-    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
-  } catch {
-    return [];
-  }
+    keys = Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === "string") : [];
+  } catch { return []; }
+  const catalog = await db.select({ module: permissions.module, action: permissions.action }).from(permissions);
+  const grouped = new Map<string, string[]>();
+  for (const permission of catalog) grouped.set(permission.module, [...grouped.get(permission.module) ?? [], permission.action]);
+  return includeViewPermissions(keys, [...grouped].map(([module, actions]) => ({ module, actions })));
 }
 
 // Turns the ticked grid ("products.view", "sales.create", …) into the
@@ -130,7 +134,7 @@ export async function createRole(_prevState: ActionResult | undefined, formData:
       requireGlobalPermission(session, "roles", "create");
 
       const name = String(formData.get("name") ?? "").trim();
-      const keys = readPermissionKeys(formData);
+      const keys = await readPermissionKeys(formData);
       if (!name) return { error: "Role name is required." };
       if (keys.some((key) => !session.globalPermissions.has(key))) {
         return { error: "You cannot put permissions into a role that you do not hold globally." };
@@ -165,7 +169,7 @@ export async function updateRole(roleId: string, _prevState: ActionResult | unde
       requireGlobalPermission(session, "roles", "edit");
 
       const name = String(formData.get("name") ?? "").trim();
-      const keys = readPermissionKeys(formData);
+      const keys = await readPermissionKeys(formData);
       if (!name) return { error: "Role name is required." };
       if (keys.some((key) => !session.globalPermissions.has(key))) {
         return { error: "You cannot put permissions into a role that you do not hold globally." };

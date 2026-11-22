@@ -11,7 +11,6 @@ import {listMarketPurchaseRequestsPage} from './actions/market-purchases';
 import {listStockMovementsPage} from './actions/stock-movements';
 import {listStockTransfersPage} from './actions/stock-transfers';
 import {listStockAdjustmentsPage} from './actions/stock-adjustments';
-import {listInterCompanySalesPage} from './actions/inter-company';
 import {listCashTransfersPage} from './actions/transfers';
 import {getPartyLedger,getPartyLedgerPage} from './actions/ledger';
 import type {HistoryRequest,HistoryInfo} from './history-window';
@@ -20,7 +19,7 @@ async function main(){
  const [user]=await db.execute<{auth:string}>(sql`SELECT supabase_auth_id AS auth FROM users WHERE status='active' ORDER BY created_at LIMIT 1`);
  const [row]=await sessionQuery(user.auth);
  const session:AuthSession={userId:row.id,supabaseAuthId:row.supabase_auth_id,name:row.name,email:row.email,roleNames:row.role_names,globalPermissions:new Set(row.perms.filter(p=>p.companyId===null).map(p=>p.key)),permissionsByCompany:new Map(row.company_ids.map(id=>[id,new Set(row.perms.filter(p=>p.companyId===id).map(p=>p.key))])),companyIds:row.company_ids,warehouseIds:row.warehouse_ids,uiTheme:row.ui_theme,uiScale:row.ui_scale};
- const lists:Record<string,(request:HistoryRequest)=>Promise<{records:{id:string}[];info:HistoryInfo}>>={payments:r=>listPaymentsPage({},r),expenses:r=>listExpensesPage({},r),quotations:listQuotationsPage,market:listMarketPurchaseRequestsPage,movements:r=>listStockMovementsPage({},r),stockTransfers:listStockTransfersPage,adjustments:r=>listStockAdjustmentsPage(undefined,r),interCompany:listInterCompanySalesPage,cashTransfers:listCashTransfersPage};
+ const lists:Record<string,(request:HistoryRequest)=>Promise<{records:{id:string}[];info:HistoryInfo}>>={payments:r=>listPaymentsPage({},r),expenses:r=>listExpensesPage({},r),quotations:listQuotationsPage,market:listMarketPurchaseRequestsPage,movements:r=>listStockMovementsPage({},r),stockTransfers:listStockTransfersPage,adjustments:r=>listStockAdjustmentsPage(undefined,r),cashTransfers:listCashTransfersPage};
  await runAsWhatsAppUser(session,async()=>{
   for(const [name,read] of Object.entries(lists)){
    const all=await read({all:true});const ids:string[]=[];

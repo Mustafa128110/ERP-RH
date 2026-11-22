@@ -9,7 +9,6 @@ const emptyBatchRow = (defaultRoleId: string): BatchRow => ({ name: "", email: "
 
 export function UserBatchAddDialog({
   roleOptions,
-  companyOptions,
   onClose,
   onDone,
 }: {
@@ -18,7 +17,7 @@ export function UserBatchAddDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const defaultRoleId = roleOptions[0]?.id ?? "";
+  const defaultRoleId = "";
 
   return (
     <BatchAddDialog<BatchRow>
@@ -27,7 +26,7 @@ export function UserBatchAddDialog({
       onClose={onClose}
       onDone={onDone}
       emptyRow={() => emptyBatchRow(defaultRoleId)}
-      headers={["Name", "Email", "Password", "Role", "Company"]}
+      headers={["Name", "Email", "Password", "Role"]}
       onSubmit={async (rows) => {
         const values: UserBatchRow[] = rows.map((r) => ({
           name: r.name.trim(),
@@ -56,7 +55,8 @@ export function UserBatchAddDialog({
             />
           </td>
           <td className={batchCellClass}>
-            <select value={row.roleId} onChange={(e) => update({ roleId: e.target.value })} className={batchInputClass}>
+            <select required value={row.roleId} onChange={(e) => update({ roleId: e.target.value })} className={batchInputClass}>
+              <option value="" disabled>Choose a role</option>
               {roleOptions.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
@@ -64,16 +64,7 @@ export function UserBatchAddDialog({
               ))}
             </select>
           </td>
-          <td className={batchCellClass}>
-            <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
-              <option value="global">Global</option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+
         </>
       )}
     />

@@ -526,6 +526,20 @@
       "when": 1789171200000,
       "tag": "0074_cache_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795269600000,
+      "tag": "0075_single_company_channels",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1795305600000,
+      "tag": "0076_channel_ledgers_stock_conversion",
+      "breakpoints": true
     }
   ]
 }

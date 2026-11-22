@@ -1,4 +1,5 @@
 "use server";
+import {resolveChannel,channelInScope} from "@/lib/queries/channels";
 import {pairedHistory} from "@/lib/queries/paired-history";
 import {withReadSnapshot} from "@/lib/db/read-snapshot";
 import type {HistoryRequest} from "@/lib/history-window";
@@ -65,7 +66,7 @@ export async function listCashTransfers():Promise<CashTransferRow[]> {return (aw
 export async function listCashTransfersPage(request:HistoryRequest={}) {
  return withReadSnapshot(async()=>{
   const session=await getSession();requirePermission(session,"accounts","view");
-  return pairedHistory<CashTransferRow>("cash",await companyInPermissionScope(documents.companyId,session,"accounts"),request);
+  return pairedHistory<CashTransferRow>("cash",and(await companyInPermissionScope(documents.companyId,session,"accounts"),await channelInScope(documents.saleType)),request);
  });
 }
 
@@ -76,6 +77,7 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
       const session = await getLiveSession();
 
       const companyId = String(formData.get("companyId") ?? "");
+      const saleType = await resolveChannel(formData.get("saleType"));
       const documentDate = String(formData.get("documentDate") ?? "");
       const fromValue = String(formData.get("fromAccount") ?? "");
       const toValue = String(formData.get("toAccount") ?? "");
@@ -124,6 +126,7 @@ export async function createCashTransfer(_prevState: ActionResult | undefined, f
         await tx.insert(documents).values(
           sides.map((side) => ({
             id: side.documentId,
+            saleType,
             companyId,
             documentTypeId: documentType.id,
             number: side.number,

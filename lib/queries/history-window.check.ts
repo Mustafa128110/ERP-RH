@@ -9,6 +9,10 @@ async function main(){
    const all=await documentHistoryWindow(undefined,code,{all:true,sort:"total",direction:"asc"});
    const raw=await db.execute<{id:string}>(sql`SELECT documents.id FROM documents JOIN document_types ON document_types.id=documents.document_type_id WHERE document_types.code=${code} ORDER BY documents.grand_total ASC,documents.id`);
    assert.deepEqual(all.ids,raw.map(row=>row.id),'numeric sort covers the entire history');
+   const multiple=await documentHistoryWindow(undefined,code,{all:true,sort:"date,number",direction:"asc,desc"});
+   const multiRaw=await db.execute<{id:string}>(sql`SELECT documents.id FROM documents JOIN document_types ON document_types.id=documents.document_type_id WHERE document_types.code=${code} ORDER BY document_date ASC,regexp_replace(number,'[0-9]+$','') DESC,nullif(substring(number from '[0-9]+$'),'')::numeric DESC NULLS LAST,documents.id`);
+   assert.deepEqual(multiple.ids,multiRaw.map(row=>row.id),"multiple priorities cover the complete history");
+   if(code==="SALES_INVOICE")assert.equal((await documentHistoryWindow(undefined,code,{all:true})).info.sort,"number","sales invoices default to invoice-number order");
    const paged:string[]=[];
    for(let page=1;page<=Math.ceil(all.total/100);page++){
     const current=await documentHistoryWindow(undefined,code,{page,sort:'total',direction:'asc'});

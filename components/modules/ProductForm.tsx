@@ -1,4 +1,6 @@
 "use client";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
+import { entryChannel } from "@/lib/sale-constants";
 import { useBatchEditDraft } from "@/components/ui/useBatchEditDraft";
 import { DraftBanner } from "@/components/ui/useDraft";
 
@@ -230,6 +232,8 @@ export function ProductsBatchEditDialog({
   // "We bought more" and "the shelf says twelve" are different statements and
   // write different documents, so the dialog makes you say which — once, for the
   // whole batch, since a delivery is one delivery and a count is one count.
+  const { channels, selected: selectedChannel } = useChannels();
+  const [saleType, setSaleType] = useState(entryChannel(channels, selectedChannel));
   const [mode, setMode] = useState<ProductBatchEditShared["mode"]>("none");
   const [locationId, setLocationId] = useState("");
   const [reason, setReason] = useState("");
@@ -329,7 +333,7 @@ export function ProductsBatchEditDialog({
       let result: { error?: string };
       try {
         result = await updateProductsBatch(
-          { mode, locationId, reason, documentDate },
+          { mode, locationId, reason, documentDate, saleType },
           rows.map((r) => ({
             id: r.id,
             companyId: r.companyId,
@@ -402,7 +406,6 @@ export function ProductsBatchEditDialog({
   };
 
   const headers = [
-    "Company",
     "Item Name",
     "SKU",
     "Urdu Name",
@@ -500,6 +503,7 @@ export function ProductsBatchEditDialog({
               ))}
             </div>
 
+            {mode !== "none" && <ChannelField value={saleType} onChange={setSaleType} />}
             {mode !== "none" && (
               <div className="flex flex-wrap gap-3">
                 <label className={`${labelClass} w-56`}>
@@ -653,22 +657,7 @@ export function ProductsBatchEditDialog({
                     {/* An existing product's company is fixed — moving one would
                         move its stock between two sets of books with no document
                         saying so. A new row still has to pick one. */}
-                    <td className={row.id ? "whitespace-nowrap border border-sand px-2 text-sm text-steel" : cellClass}>
-                      {row.id ? (
-                        (data.rows.find((r) => r.id === row.id)?.company ?? "—")
-                      ) : (
-                        <select value={row.companyId} onChange={(e) => update(i, { companyId: e.target.value })} className={cellInputClass}>
-                          <option value="" disabled>
-                            Select
-                          </option>
-                          {companyOptions.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
+                    <td className="hidden"><input type="hidden" value={row.companyId} /></td>
                     <td className={cellClass}>
                       <input value={row.name} onChange={(e) => update(i, { name: e.target.value })} className={`${cellInputClass} min-w-[14rem]`} />
                     </td>
@@ -956,7 +945,7 @@ export function ProductBatchAddDialog({
       onDone={onDone}
       initialRows={initialRows}
       emptyRow={() => emptyBatchRow(defaultCompanyId)}
-      headers={["Name", "SKU", "Company", "Category", "Brand", "Urdu Name", "Taxable", "Active"]}
+      headers={["Name", "SKU", "Category", "Brand", "Urdu Name", "Taxable", "Active"]}
       toolbar={
         <>
           <QuickAddButton
@@ -1007,18 +996,7 @@ export function ProductBatchAddDialog({
           <td className={batchCellClass}>
             <input value={row.sku} onChange={(e) => update({ sku: e.target.value })} className={batchInputClass} placeholder={projectedSku(i)} />
           </td>
-          <td className={batchCellClass}>
-            <select value={row.companyId} onChange={(e) => update({ companyId: e.target.value })} className={batchInputClass}>
-              <option value="" disabled>
-                Select
-              </option>
-              {companyOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </td>
+          <td className="hidden"><input type="hidden" value={row.companyId} /></td>
           {/* Typeaheads, not dropdowns, for the same two reasons the edit grid
               uses them: a category or brand that doesn't exist yet is created
               from what you type, and a native <select> swallows Up/Down so the

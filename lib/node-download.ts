@@ -12,6 +12,8 @@
 // html2canvas is loaded on demand: ~200KB that only matters the moment someone
 // asks for a file. It comes in as jsPDF's own optional dependency and is pinned
 // in package.json so a jsPDF upgrade can't take it away.
+import { paginateExport } from "@/lib/export-pages";
+
 async function rasterize(node: HTMLElement): Promise<HTMLCanvasElement> {
   const { default: html2canvas } = await import("html2canvas");
   return html2canvas(node, {
@@ -21,6 +23,10 @@ async function rasterize(node: HTMLElement): Promise<HTMLCanvasElement> {
     // black text invisible.
     backgroundColor: "#ffffff",
     logging: false,
+    width: node.scrollWidth,
+    height: node.scrollHeight,
+    scrollX: 0,
+    scrollY: 0,
   });
 }
 
@@ -28,13 +34,16 @@ export type ExportFile = {
   blob: Blob;
   filename: string;
   mimeType: string;
+  pages?: ExportFile[];
 };
 
 // In the document and revoked on a later tick, both deliberately: a detached
 // anchor doesn't reliably start a download in Chrome, and revoking on the line
 // after click() cancels the download that was about to read it — which looks
 // exactly like a button that does nothing.
-export function downloadExportFile({ blob, filename }: ExportFile) {
+export function downloadExportFile(file: ExportFile) {
+  if (file.pages) { for (const page of file.pages) downloadExportFile(page); return; }
+  const { blob, filename } = file;
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -47,12 +56,19 @@ export function downloadExportFile({ blob, filename }: ExportFile) {
 }
 
 export async function downloadNodeAsPng(node: HTMLElement, fileName: string): Promise<ExportFile> {
-  const canvas = await rasterize(node);
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error("The browser could not turn this into an image.");
-  const file = { blob, filename: fileName, mimeType: "image/png" };
-  downloadExportFile(file);
-  return file;
+  const document = await paginateExport(node);
+  try {
+    const files: ExportFile[] = [];
+    for (const [index, page] of document.pages.entries()) {
+      const canvas = await rasterize(page);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("The browser could not turn this into an image.");
+      files.push({ blob, filename: document.pages.length === 1 ? fileName : fileName.replace(/\.png$/i, `-page-${String(index + 1).padStart(2, "0")}.png`), mimeType: "image/png" });
+    }
+    const result = files.length === 1 ? files[0] : { ...files[0], pages: files };
+    downloadExportFile(result);
+    return result;
+  } finally { document.dispose(); }
 }
 
 // The same picture, cut into A4 pages.
@@ -61,36 +77,19 @@ export async function downloadNodeAsPng(node: HTMLElement, fileName: string): Pr
 // the canvas is sliced: each page takes the next band of pixels, drawn through a
 // scratch canvas because jsPDF places whole images and cannot crop.
 export async function downloadNodeAsPdf(node: HTMLElement, fileName: string): Promise<ExportFile> {
-  const canvas = await rasterize(node);
   // jsPDF is the other heavy dependency (with html2canvas it makes up the
   // ~400KB print chunk) — loaded on the click that asks for a file, same as
   // html2canvas above.
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const margin = 10;
-  const pageWidth = doc.internal.pageSize.getWidth() - margin * 2;
-  const pageHeight = doc.internal.pageSize.getHeight() - margin * 2;
-
-  // How many source pixels fit on one page, at the scale that makes the image
-  // span the printable width.
-  const pixelsPerPage = Math.floor((canvas.width * pageHeight) / pageWidth);
-  const slice = document.createElement("canvas");
-  const context = slice.getContext("2d");
-  if (!context) throw new Error("The browser could not prepare the page.");
-
-  for (let top = 0, page = 0; top < canvas.height; top += pixelsPerPage, page++) {
-    const height = Math.min(pixelsPerPage, canvas.height - top);
-    slice.width = canvas.width;
-    slice.height = height;
-    // White first: the last page's band is shorter than a full page, and an
-    // uncleared scratch canvas would carry the previous page's pixels into it.
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, slice.width, slice.height);
-    context.drawImage(canvas, 0, top, canvas.width, height, 0, 0, canvas.width, height);
-
-    if (page > 0) doc.addPage();
-    doc.addImage(slice.toDataURL("image/png"), "PNG", margin, margin, pageWidth, (height * pageWidth) / canvas.width);
-  }
+  const document = await paginateExport(node);
+  try {
+    for (const [index, page] of document.pages.entries()) {
+      const canvas = await rasterize(page);
+      if (index) doc.addPage();
+      doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297);
+    }
+  } finally { document.dispose(); }
 
   const file = { blob: doc.output("blob"), filename: fileName, mimeType: "application/pdf" };
   downloadExportFile(file);

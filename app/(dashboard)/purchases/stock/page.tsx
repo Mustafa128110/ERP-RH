@@ -19,12 +19,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
 
   const rows = purchases.map((p) => ({
     id: p.id,
+      saleType: p.saleType,
     number: p.number,
     company: p.company,
     supplier: p.supplier ?? "—",
     total: money(p.grandTotal),
     date: formatDate(p.documentDate),
-    paid: p.status === "cancelled" ? "Cancelled" : p.isPaid ? "Paid" : Number(p.paidAmount) > 0 ? "Partial Paid" : "Unpaid",
+    paid: p.status === "cancelled" ? "Cancelled" : p.ledgerClosedAt ? "Closed" : p.isPaid ? "Paid" : Number(p.paidAmount) > 0 ? "Partial Paid" : "Unpaid",
     breakdown: {
       subtotal: money(p.subtotal),
       discount: Number(p.discountTotal) > 0 ? money(p.discountTotal) : null,

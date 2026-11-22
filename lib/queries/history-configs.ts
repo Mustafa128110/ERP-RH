@@ -4,17 +4,17 @@ const date=(name:string)=>sql`to_char(max(${c(name)}),'DD-MM-YYYY')`;
 const method=sql`coalesce(CASE WHEN "bankAccountName" IS NOT NULL THEN 'Account: '||"bankAccountName" WHEN "cashAccountName" IS NOT NULL THEN 'Cash: '||"cashAccountName" WHEN "chequeNumber" IS NOT NULL THEN 'Cheque: '||"chequeNumber" END,'—')`;
 const groupedMethod=sql`CASE WHEN count(DISTINCT ${method})=1 THEN max(${method}) ELSE 'Mixed' END`;
 export const paymentHistory:ListHistoryConfig={
- group:sql`CASE WHEN "contactId" IS NULL THEN "id"::text ELSE concat_ws('|',"companyId","contactId","documentDate","code") END`,
+ group:sql`CASE WHEN "contactId" IS NULL THEN "id"::text ELSE concat_ws('|',"companyId","contactId","documentDate","code",coalesce("saleType",'counter')) END`,
  memberOrder:sql`"createdAt" DESC,"id"`,order:sql`max("documentDate") DESC,max("createdAt") DESC`,
- fields:{date:sql`max("documentDate")`,_date:date('documentDate'),company:text('company'),contact:text('contact'),
+ fields:{date:sql`max("documentDate")`,_date:date('documentDate'),company:text('company'),contact:text('contact'),channel:text('channelName'),
   type:sql`CASE max("code"::text) WHEN 'PURCHASE_INVOICE' THEN 'Made (purchase)' WHEN 'PAYMENT_MADE' THEN 'Made' ELSE 'Received' END`,
   amount:sql`sum("grandTotal"::numeric)*CASE WHEN max("code"::text)='PAYMENT_RECEIVED' THEN 1 ELSE -1 END`,method:groupedMethod,number:sql`string_agg("number",' ')`,_methods:sql`string_agg(${method},' ')`},
  aliases:{customer:'contact',supplier:'contact',total:'amount'},
 };
 export const expenseHistory:ListHistoryConfig={
- group:sql`concat_ws('|',"companyId","expenseCategoryId","expenseDate","status")`,
+ group:sql`concat_ws('|',"companyId","expenseCategoryId","expenseDate","status",coalesce("saleType",'counter'))`,
  memberOrder:sql`"createdAt" DESC,"id"`,order:sql`max("expenseDate") DESC,max("createdAt") DESC`,
- fields:{date:sql`max("expenseDate")`,_date:date('expenseDate'),company:text('company'),
+ fields:{date:sql`max("expenseDate")`,_date:date('expenseDate'),company:text('company'),channel:text('channelName'),
   category:sql`max("category")||CASE WHEN count(*)>1 THEN ' ('||count(*)::text||')' ELSE '' END`,
   amount:sql`sum("amount"::numeric)`,method:groupedMethod,
   user:sql`CASE WHEN count(DISTINCT coalesce("createdByName",'—'))=1 THEN max(coalesce("createdByName",'—')) ELSE 'Several' END`,

@@ -28,10 +28,6 @@ export async function getScopeCompanyIds(): Promise<string[]> {
 const getCookieScopeCompanyIds = cache(async (): Promise<string[]> => {
   const session = await getSession();
   if (!session) return [];
-  const selected = (await cookies()).get(SCOPE_COOKIE)?.value;
-  if (selected && selected !== "all" && session.companyIds.includes(selected)) {
-    return [selected];
-  }
   return session.companyIds;
 });
 

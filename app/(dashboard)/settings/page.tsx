@@ -3,8 +3,7 @@ import { getSettings, settingsOverview } from "@/lib/actions/settings";
 import { SETTING_DEFS } from "@/lib/setting-constants";
 import { SettingsForm } from "@/components/modules/SettingsForm";
 import { AppearanceSettings } from "@/components/modules/AppearanceSettings";
-import { StockFilter } from "@/components/modules/StockFilters";
-import { SALE_TYPES } from "@/lib/sale-constants";
+import { ChannelManager } from "@/components/modules/ChannelManager";
 import { requireSession } from "@/lib/auth/session";
 import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
 import { getTaxes } from "@/lib/queries/lookups";
@@ -35,12 +34,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <h1 className="text-xl text-navy-800">Settings</h1>
-          <p className="text-sm text-steel">Thresholds and text this app actually reads. Stored per company.</p>
+          <p className="text-sm text-steel">Thresholds and text this app actually reads. Royal Hardware.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {overview && overview.companies.length > 1 && (
-            <StockFilter param="company" allLabel={overview.companies[0]?.name ?? "Company"} options={overview.companies.map((c) => ({ id: c.id, name: c.name }))} />
-          )}
           {overview && (
             <Link href="/settings/backups" className="flex h-11 items-center rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory">
               Backups &amp; Export →
@@ -74,7 +70,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
           {overview && (
           <div className="rounded-lg border border-sand bg-white p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-navy-800">Companies</h2>
+              <h2 className="text-sm font-semibold text-navy-800">Company details</h2>
               <Link href="/companies" className="text-xs font-medium text-navy-800 hover:underline">
                 Manage →
               </Link>
@@ -110,21 +106,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
           </div>
           )}
 
-          {overview && (
-          <div className="rounded-lg border border-sand bg-white p-5">
-            <h2 className="mb-3 text-sm font-semibold text-navy-800">Sale channels</h2>
-            {/* Read from lib/sale-constants.ts — the list the sale form itself
-                offers, rather than a second copy that could disagree with it. */}
-            <ul className="flex flex-col divide-y divide-sand">
-              {SALE_TYPES.map((t) => (
-                <li key={t.value} className="py-2 text-sm text-ink">
-                  {t.label}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-steel">Every sale is filed under one of these. Add one in lib/sale-constants.ts and the schema enum.</p>
-          </div>
-          )}
+          {overview && <ChannelManager />}
         </div>
       </div>
     </div>

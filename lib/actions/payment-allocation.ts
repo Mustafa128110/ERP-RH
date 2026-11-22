@@ -25,7 +25,7 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
 
   const [result] = await tx.execute<{ allocated: string; allocations: number }>(sql`
     WITH selected_payments AS MATERIALIZED (
-      SELECT d.id, d.company_id, d.contact_id, d.grand_total AS amount,
+      SELECT d.id, d.company_id, d.contact_id, coalesce(d.sale_type,'counter') AS channel, d.grand_total AS amount,
              dt.code, d.document_date, d.created_at
       FROM documents d
       JOIN document_types dt ON dt.id = d.document_type_id
@@ -33,7 +33,7 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
       LEFT JOIN cash_accounts c ON c.id = d.cash_account_id
       WHERE d.id IN (${uuidList(ids)})
         AND dt.code IN ('PAYMENT_RECEIVED', 'PAYMENT_MADE')
-        AND d.contact_id IS NOT NULL AND d.status = 'posted'
+        AND d.contact_id IS NOT NULL AND d.status = 'posted' AND d.ledger_closed_at IS NULL
         AND (
           (d.bank_account_id IS NOT NULL AND (b.company_id IS NULL OR b.company_id = d.company_id))
           OR (d.cash_account_id IS NOT NULL AND c.company_id = d.company_id)
@@ -46,12 +46,12 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
     ), payment_rows AS (
       SELECT p.*,
              coalesce(sum(p.amount) OVER (
-               PARTITION BY p.company_id, p.contact_id, p.code
+               PARTITION BY p.company_id, p.contact_id, p.channel, p.code
                ORDER BY p.document_date, p.created_at, p.id
                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
              ), 0) AS range_start,
              sum(p.amount) OVER (
-               PARTITION BY p.company_id, p.contact_id, p.code
+               PARTITION BY p.company_id, p.contact_id, p.channel, p.code
                ORDER BY p.document_date, p.created_at, p.id
              ) AS range_end
       FROM selected_payments p
@@ -59,7 +59,7 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
       -- Opening-balance and legacy contact-journal direction comes from the
       -- party ledger row: debit is receivable, credit is payable. These rows are
       -- real obligations, so payments settle them in the same FIFO as invoices.
-      SELECT d.id, d.company_id, d.contact_id,
+      SELECT d.id, d.company_id, d.contact_id, coalesce(d.sale_type,'counter') AS channel,
              (CASE
                 WHEN dt.code = 'SALES_INVOICE' THEN 'PAYMENT_RECEIVED'
                 WHEN dt.code = 'PURCHASE_INVOICE' THEN 'PAYMENT_MADE'
@@ -74,7 +74,7 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
       LEFT JOIN ledger_entries party_entry
         ON party_entry.document_id = d.id
        AND dt.code IN ('OPENING_BALANCE', 'JOURNAL_ENTRY')
-      WHERE d.status = 'posted'
+      WHERE d.status = 'posted' AND d.ledger_closed_at IS NULL
         AND dt.code IN ('SALES_INVOICE', 'PURCHASE_INVOICE', 'OPENING_BALANCE', 'JOURNAL_ENTRY')
         AND d.grand_total > d.paid_amount
         -- Company and contact only: the queue is computed above, so it cannot be
@@ -82,18 +82,18 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
         -- rows and keeps one party's whole account consistent under concurrency.
         AND EXISTS (
           SELECT 1 FROM selected_payments p
-          WHERE p.company_id = d.company_id AND p.contact_id = d.contact_id
+          WHERE p.company_id = d.company_id AND p.contact_id = d.contact_id AND p.channel=coalesce(d.sale_type,'counter')
         )
       FOR UPDATE OF d
     ), invoice_rows AS (
       SELECT i.*,
              coalesce(sum(i.balance) OVER (
-               PARTITION BY i.company_id, i.contact_id, i.queue
+               PARTITION BY i.company_id, i.contact_id, i.channel, i.queue
                ORDER BY i.is_opening DESC, i.document_date, i.created_at, i.id
                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
              ), 0) AS range_start,
              sum(i.balance) OVER (
-               PARTITION BY i.company_id, i.contact_id, i.queue
+               PARTITION BY i.company_id, i.contact_id, i.channel, i.queue
                ORDER BY i.is_opening DESC, i.document_date, i.created_at, i.id
              ) AS range_end
       FROM invoice_locked i
@@ -105,6 +105,7 @@ export async function allocatePaymentsFifo(tx: Tx, paymentDocumentIds: string[])
       JOIN invoice_rows i
         ON i.company_id = p.company_id
        AND i.contact_id = p.contact_id
+       AND i.channel = p.channel
        AND i.queue = p.code
        AND least(p.range_end, i.range_end) > greatest(p.range_start, i.range_start)
       ON CONFLICT (payment_document_id, invoice_document_id)
@@ -219,7 +220,7 @@ export async function reallocateAccountPaymentsFifo(
     JOIN document_types dt ON dt.id = d.document_type_id
     WHERE d.company_id = ${companyId}::uuid
       AND d.contact_id = ${contactId}::uuid
-      AND d.status = 'posted'
+      AND d.status = 'posted' AND d.ledger_closed_at IS NULL
       AND dt.code = ${paymentCode}::document_type_code
     ORDER BY d.document_date, d.created_at, d.id
     FOR UPDATE OF d

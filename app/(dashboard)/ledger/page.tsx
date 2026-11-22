@@ -3,9 +3,8 @@ import { INVOICE_COMPANY_NAME } from "@/lib/invoice-pdf";
 import { getCompanies, getContactOptions } from "@/lib/queries/lookups";
 import { LedgerManager } from "@/components/modules/LedgerManager";
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ company?: string }> }) {
-  const [{ company }, balances, companyRows, contactRows] = await Promise.all([
-    searchParams,
+export default async function Page() {
+  const [balances, companyRows, contactRows] = await Promise.all([
     listLedgerBalances(),
     getCompanies(),
     getContactOptions(),
@@ -17,9 +16,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
   // first company on file if that record has been renamed.
   const outward = companyRows.find((c) => c.name === INVOICE_COMPANY_NAME) ?? companyRows[0];
 
+  const byContact = new Map(balances.map(balance=>[balance.contactId,balance]));
+  for (const contact of contactRows) if (!byContact.has(contact.id) && outward) byContact.set(contact.id,{contactId:contact.id,displayName:contact.displayName,companyId:outward.id,company:outward.name,credit:0,debit:0,balance:0,recentPayments:[],recentInvoices:[],recentPurchases:[]});
   return (
     <LedgerManager
-      balances={balances.filter((b) => !company || b.companyId === company)}
+      balances={[...byContact.values()].sort((a,b)=>a.displayName.localeCompare(b.displayName))}
       companyOptions={companyRows.map((c) => ({ id: c.id, name: c.name }))}
       letterhead={{
         name: outward?.name ?? INVOICE_COMPANY_NAME,

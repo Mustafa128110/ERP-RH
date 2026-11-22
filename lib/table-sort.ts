@@ -6,6 +6,31 @@ export type TableSortColumn = {
 };
 
 export type TableSortDirection = "asc" | "desc";
+export type TableSort = { key: string; direction: TableSortDirection };
+
+export function parseTableSorts(sort?: string, direction?: string, allowed?: readonly string[]): TableSort[] {
+  const directions = (direction ?? "desc").split(",");
+  const seen = new Set<string>();
+  return (sort ?? "").split(",").slice(0, 32).flatMap((key, index) => {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) || seen.has(key) || allowed && !allowed.includes(key)) return [];
+    seen.add(key);
+    return [{ key, direction: directions[index] === "asc" ? "asc" as const : "desc" as const }];
+  });
+}
+
+export function promoteTableSort(sorts: TableSort[], key: string): TableSort[] {
+  const previous = sorts.find((sort) => sort.key === key);
+  const rest = sorts.filter((sort) => sort.key !== key);
+  return previous?.direction === "asc" && sorts[0]?.key === key ? rest : [{ key, direction: previous?.direction === "desc" ? "asc" : "desc" }, ...rest];
+}
+
+export function compareSortedRows(a: Record<string, unknown>, b: Record<string, unknown>, sorts: TableSort[]): number {
+  for (const sort of sorts) {
+    const result = compareTableValues(a[sort.key], b[sort.key], sort.direction);
+    if (result) return result;
+  }
+  return 0;
+}
 
 export function tableColumnSortKey(column: TableSortColumn, excludedKey: string): string | null {
   if (column.key === excludedKey || column.sortable === false) return null;
@@ -39,5 +64,8 @@ export function compareTableValues(a: unknown, b: unknown, direction: TableSortD
     return (leftTime - rightTime) * multiplier;
   }
 
-  return left.localeCompare(right) * multiplier;
+  const number = (value: string) => /^-?[\d,]+(?:\.\d+)?$/.test(value.trim()) ? Number(value.replaceAll(",", "")) : null;
+  const leftNumber = number(left), rightNumber = number(right);
+  if (leftNumber !== null && rightNumber !== null) return (leftNumber - rightNumber) * multiplier;
+  return left.localeCompare(right, undefined, { numeric: true }) * multiplier;
 }

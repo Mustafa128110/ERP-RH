@@ -381,3 +381,19 @@ export async function getOfflineReadinessData() {
     cheques,
   };
 }
+
+// Shared stock-document options; transfers and adjustments use the same catalogue
+// and warehouse boundary rather than maintaining separate copies.
+export async function getStockFormOptions() {
+  const [companyRows, itemRows, unitRows, locationRows, session] = await Promise.all([
+    getCompanies(), getItemOptions(), getUnits(), getLocations(), getSession(),
+  ]);
+  const visibleLocations = session?.warehouseIds.length ? locationRows.filter((location) => session.warehouseIds.includes(location.id)) : locationRows;
+  return {
+    companyOptions: companyRows.map((company) => ({ id: company.id, name: company.name })),
+    itemOptions: itemRows.map((item) => ({ id: item.id, name: `${item.name} (${item.sku})`, companyId: item.companyId, baseUnitId: item.baseUnitId, salesRate: item.salesRate })),
+    unitOptions: unitRows.map((unit) => ({ id: unit.id, name: unitPickerLabel(unit) })),
+    canUseUnassigned: !session?.warehouseIds.length,
+    locationOptions: visibleLocations.map((location) => ({ id: location.id, name: location.name })),
+  };
+}

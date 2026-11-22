@@ -25,13 +25,14 @@ export function ExportShareProvider({ children }: { children: React.ReactNode })
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const value = useMemo(() => ({ presentExport: (next: ExportFile) => { setError(null); setFile(next); } }), []);
-  const nativeFile = file ? new File([file.blob], file.filename, { type: file.mimeType || file.blob.type }) : null;
-  const shareAvailable = !!(nativeFile && typeof navigator !== "undefined" && "share" in navigator && "canShare" in navigator && navigator.canShare({ files: [nativeFile] }));
+  const exportedFiles = file ? file.pages ?? [file] : [];
+  const nativeFiles = exportedFiles.map((file) => new File([file.blob], file.filename, { type: file.mimeType || file.blob.type }));
+  const shareAvailable = !!(nativeFiles.length > 0 && typeof navigator !== "undefined" && "share" in navigator && "canShare" in navigator && navigator.canShare({ files: nativeFiles }));
 
   async function share() {
     if (!file || sharing) return;
-    if (!nativeFile || !shareAvailable) return;
-    const data = { files: [nativeFile], title: file.filename };
+    if (!nativeFiles.length || !shareAvailable) return;
+    const data = { files: nativeFiles, title: file.filename };
     setSharing(true);
     setError(null);
     try {
@@ -61,7 +62,7 @@ export function ExportShareProvider({ children }: { children: React.ReactNode })
         >
           <div className="flex flex-col gap-3">
             <p role="status" aria-live="polite" className="rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-success">
-              {file.mimeType === "application/pdf" ? "PDF downloaded." : "Image downloaded."}{shareAvailable ? " Choose Share file to send it through an app on this device." : " The file is ready on this device."}
+              {file.pages ? `${file.pages.length} A4 page images ready.` : file.mimeType === "application/pdf" ? "PDF downloaded." : "Image downloaded."}{shareAvailable ? " Choose Share file to send it through an app on this device." : " The file is ready on this device."}
             </p>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
               <dt className="text-steel">File</dt>
@@ -69,6 +70,7 @@ export function ExportShareProvider({ children }: { children: React.ReactNode })
               <dt className="text-steel">Size</dt>
               <dd className="text-right tabular-nums text-ink">{fileSize(file.blob.size)}</dd>
             </dl>
+            {file.pages && <ul className="flex flex-col gap-2">{file.pages.map((page) => <li key={page.filename}><button type="button" onClick={() => downloadExportFile(page)} className="text-sm text-navy-800 underline">Download {page.filename}</button></li>)}</ul>}
             {!shareAvailable && <p role="status" className="text-sm text-steel">File sharing is not available in this browser. Use Download again if you need another copy.</p>}
             {error && <p role="alert" className={errorTextClass}>{error}</p>}
           </div>

@@ -10,13 +10,18 @@ import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
-import { DEFAULT_SALE_TYPE, SALE_TYPES, type SaleType } from "@/lib/sale-constants";
+import { DEFAULT_SALE_TYPE, entryChannel, type SaleType } from "@/lib/sale-constants";
+import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
+import { useGlobalColumnWidths } from "@/components/ui/useGlobalColumnWidths";
+import type { ColumnDef, Row } from "@/lib/table";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";
 import { useClientUserId } from "@/lib/client-user";
 import { DraftBanner, useDraft } from "@/components/ui/useDraft";
 import { calculateTax } from "@/lib/tax-calculation";
 import { multiplierToBase, priceBetweenUnits, unitIdsForProduct, type UnitConversionOption } from "@/lib/unit-conversion";
+
+const saleColumnMinimum = (column: ColumnDef) => Number(column.width ?? 100);
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
 // Borderless input that fills its table cell; the cell border is the only line.
@@ -80,22 +85,11 @@ const DEFAULT_CASH_ACCOUNT = "Cash on Hand";
 // never offers one user's half-typed sale to another.
 const SALE_DRAFT_KEY = "sale";
 
-// M52 doesn't sell over a counter — its sales go out on credit and are settled
-// later — so a new M52 sale opens unpaid. Everywhere else the money comes in
-// with the goods, which is why "yes" is the default at all. Matched by name,
-// same as the two rows above.
-const UNPAID_BY_DEFAULT_COMPANY = "M52";
-
 // createSale returns the new id, updateSale doesn't — one shape covers both so
 // the wrapped action has a single return type. `needsConfirmation` is the third
 // answer: not saved, not broken, waiting for a yes (see confirmNoticeClass).
 type SaleActionState = { error?: string; success?: boolean; id?: string; needsConfirmation?: boolean; queued?: boolean; isPayment?: boolean } | undefined;
 
-const SETTLEMENT_TYPES: { value: SettlementType; label: string }[] = [
-  { value: "account", label: "Account" },
-  { value: "cash", label: "Cash" },
-  { value: "cheque", label: "Cheque" },
-];
 
 export type SaleDefaults = {
   _revision: string;
@@ -129,7 +123,6 @@ export function SaleFormPage({
   unitOptions,
   bankAccountOptions,
   cashAccountOptions,
-  chequeOptions,
   taxOptions,
   conversionOptions,
   taxSettings,
@@ -171,6 +164,7 @@ export function SaleFormPage({
   onDeleting?: () => void;
 }) {
   const router = useRouter();
+  const { channels, selected: selectedChannel } = useChannels();
   const isEdit = !!saleId;
   // The draft key is composed per render from the logged-in user: SessionSeed
   // (in the layout, above this form) sets the id before children render, so the
@@ -199,9 +193,9 @@ export function SaleFormPage({
   // Which way the Paid select starts, for the company being sold from. Used on
   // first render, on switching company, and on the reset after a save — so all
   // three agree instead of "yes" being written in three places.
-  function defaultPaidMode(company: string, currentSaleType?: SaleType): PaidMode {
+  function defaultPaidMode(currentSaleType?: SaleType): PaidMode {
     if ((currentSaleType ?? saleType) === "balochistan") return "no";
-    return companyOptions.find((c) => c.id === company)?.name === UNPAID_BY_DEFAULT_COMPANY ? "no" : "yes";
+    return "yes";
   }
 
   // An edit gets the saved lines plus one blank row at the bottom, the same way
@@ -223,6 +217,14 @@ export function SaleFormPage({
         ]
       : [emptyLine(), emptyLine(), emptyLine(), emptyLine()],
   );
+  const saleColumns = useMemo<ColumnDef[]>(() => [
+    { key: "__sno", label: "#", width: 100 }, { key: "item", label: "Item", width: 340 },
+    { key: "unit", label: "Unit", width: 128 }, { key: "quantity", label: "Qty", width: 96 },
+    { key: "unitPrice", label: "Unit Price", width: 112 }, { key: "rateList", label: "Rate List", width: 112 },
+    { key: "total", label: "Total", width: 130 }, { key: "marketPurchase", label: "Market Buy", width: 110 }, { key: "actions", label: "", width: 48 },
+  ], []);
+  const sizingRows = useMemo<Row[]>(() => lines.map((line, index) => ({ __sno: index + 1, item: line.itemText, unit: line.unitText, quantity: line.quantity, unitPrice: line.unitPrice, rateList: line.listPrice, total: line.quantity && line.unitPrice ? money(Number(line.quantity) * Number(line.unitPrice)) : "" })), [lines]);
+  const gridWidth = useGlobalColumnWidths(saleColumns, sizingRows, saleColumnMinimum);
   const [companyId, setCompanyId] = useState(
     () => defaults?.companyId ?? companyOptions.find((c) => c.name === "Royal Hardware")?.id ?? "",
   );
@@ -236,7 +238,7 @@ export function SaleFormPage({
   const [customerText, setCustomerText] = useState(() =>
     defaults ? (customerOptions.find((c) => c.id === defaults.contactId)?.name ?? "") : DEFAULT_CUSTOMER,
   );
-  const initialSaleType = defaults?.saleType ?? DEFAULT_SALE_TYPE;
+  const initialSaleType = defaults?.saleType ?? entryChannel(channels, selectedChannel);
   const [saleType, setSaleType] = useState<SaleType>(initialSaleType);
   // A sale is paid in full, part paid, or not at all. Part paid carries how much
   // came in; the rest of the grand total stays owed.
@@ -245,10 +247,10 @@ export function SaleFormPage({
       ? (defaults.isPaid ? "yes" : Number(defaults.paidAmount) > 0 ? "partial" : "no")
       : initialSaleType === "balochistan"
         ? "no"
-        : defaultPaidMode(companyId, initialSaleType),
+        : defaultPaidMode(initialSaleType),
   );
   const [paidAmount, setPaidAmount] = useState(() => (defaults && !defaults.isPaid ? (defaults.paidAmount ?? "") : ""));
-  const [settlementType, setSettlementType] = useState<SettlementType>(defaults?.settlementType ?? "cash");
+  const [settlementType, setSettlementType] = useState<SettlementType>(defaults?.settlementType === "account" ? "account" : "cash");
   const [documentDate, setDocumentDate] = useState(() => defaults?.documentDate ?? todayISO());
   const [settlementAccounts, setSettlementAccounts] = useState<Record<string, string>>({});
 
@@ -281,7 +283,7 @@ export function SaleFormPage({
     // it believed it had typed fresh.
     apply: (d) => {
       setLines(d.lines.map((line) => ({ ...line, marketPurchase: Boolean(line.marketPurchase) })));
-      setCompanyId(d.companyId);
+      setCompanyId(companyOptions.some((company) => company.id === d.companyId) ? d.companyId : companyOptions[0]?.id ?? "");
       setContactId(d.contactId);
       setCustomerText(d.customerText);
       setDiscountTotal(d.discountTotal);
@@ -289,7 +291,7 @@ export function SaleFormPage({
       setShippingTotal(d.shippingTotal);
       setIsPaid(d.isPaid);
       setPaidAmount(d.paidAmount);
-      setSettlementType(d.settlementType);
+      setSettlementType(d.settlementType === "account" ? "account" : "cash");
       setDocumentDate(d.documentDate ?? defaults?.documentDate ?? todayISO());
       setSaleType(d.saleType ?? defaults?.saleType ?? DEFAULT_SALE_TYPE);
       setSettlementAccounts(d.settlementAccounts ?? {});
@@ -299,7 +301,6 @@ export function SaleFormPage({
   // Cash accounts belong to a company, so only the selected company's drawers are
   // offered — otherwise a Royal Hardware sale could be settled into M52's cash.
   const visibleCashAccounts = cashAccountOptions.filter((a) => a.companyId === companyId);
-  const settlementOptions = settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? visibleCashAccounts : chequeOptions;
   const settlementFieldName = settlementType === "account" ? "bankAccountId" : settlementType === "cash" ? "cashAccountId" : "chequeId";
   const settlementDefault =
     settlementType === "account"
@@ -333,11 +334,11 @@ export function SaleFormPage({
     setDiscountTotal("");
     setTaxId(taxSettings[companyId]?.default_sales_tax_id ?? "");
     setShippingTotal("");
-    setIsPaid(defaultPaidMode(companyId, DEFAULT_SALE_TYPE));
+    setIsPaid(defaultPaidMode(entryChannel(channels, selectedChannel)));
     setPaidAmount("");
     setSettlementType("cash");
     if (!keepDate) setDocumentDate(todayISO());
-    setSaleType(DEFAULT_SALE_TYPE);
+    setSaleType(entryChannel(channels, selectedChannel));
     setSettlementAccounts({});
 
     focusCell(0, 0);
@@ -434,25 +435,7 @@ export function SaleFormPage({
   // new company's Counter. A typed-but-unmatched item keeps its text, only the
   // resolved itemId clears.
   // Done on change (not in an effect) — it's a response to the user's action.
-  function changeCompany(next: string) {
-    setCompanyId(next);
-    // The company decides whether a sale is normally paid on the spot, so the
-    // Paid select follows it — on a new sale only. An edit already knows what it
-    // was settled as, and re-filing it under another company must not silently
-    // rewrite that.
-    if (!isEdit) {
-      setIsPaid(defaultPaidMode(next));
-      setPaidAmount("");
-      setTaxId(taxSettings[next]?.default_sales_tax_id ?? "");
-    }
-    if (contactId && !customerOpts.some((c) => c.id === contactId && inCompany(next)(c))) {
-      setContactId(counterId(next));
-      setCustomerText(DEFAULT_CUSTOMER);
-    }
-    setLines((prev) =>
-      prev.map((l) => (l.itemId && !itemOpts.some((it) => it.id === l.itemId && it.companyId === next) ? { ...l, itemId: "", listPrice: "" } : l)),
-    );
-  }
+
 
   // Picking a catalog item fills both price columns from what that item is known
   // to cost and to sell for: the rate list (last purchase) into the reference
@@ -599,19 +582,7 @@ export function SaleFormPage({
         <div className="flex flex-col gap-3">
           <span className={sectionTitleClass}>Document</span>
           <div className="flex flex-wrap gap-3">
-            <label className={`${labelClass} w-full sm:w-56`}>
-              <span className={labelTextClass}>Company</span>
-              <select name="companyId" required value={companyId} onChange={(e) => changeCompany(e.target.value)} className={fieldClass}>
-                <option value="" disabled>
-                  {companyOptions.length === 0 ? "No companies yet" : "Select a company"}
-                </option>
-                {companyOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <input type="hidden" name="companyId" value={companyId} />
             <label className={`${labelClass} w-full sm:w-56`}>
               <span className={labelTextClass}>Customer</span>
               <ComboBox
@@ -632,34 +603,7 @@ export function SaleFormPage({
               <span className={labelTextClass}>Document Date</span>
               <DateField name="documentDate" required value={documentDate} onChange={setDocumentDate} className={fieldClass} />
             </label>
-            <label className={`${labelClass} w-full sm:w-44`}>
-              <span className={labelTextClass}>Type</span>
-              {/* Counter is preselected rather than left blank: it's what nearly
-                  every sale is, and the other two exist to be told apart from it
-                  when the takings are reconciled. */}
-              <select
-                name="saleType"
-                required
-                value={saleType}
-                onChange={(e) => {
-                  const nextType = e.target.value as SaleType;
-                  const prevType = saleType;
-                  setSaleType(nextType);
-                  if (nextType === "balochistan") {
-                    setIsPaid("no");
-                  } else if (prevType === "balochistan" && nextType === "counter") {
-                    setIsPaid("yes");
-                  }
-                }}
-                className={fieldClass}
-              >
-                {SALE_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ChannelField value={saleType} onChange={setSaleType} className="w-full sm:w-52" />
             {/* The numbers being watched while lines are typed, and the totals
                 block is below the fold on a long sale — so they're repeated here
                 at the end of the header row, styled exactly as they are down
@@ -672,18 +616,17 @@ export function SaleFormPage({
             it isn't shown here; the server stamps it on save. --- */}
         <div className="flex flex-col gap-2">
           <span className={sectionTitleClass}>Items</span>
-          <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
-            <table className="sale-items-grid w-full md:table-fixed border-collapse text-sm">
+          <div className="overflow-x-auto rounded border border-sand">
+            <table className="sale-items-grid md:table-fixed border-collapse text-sm" style={{ width: saleColumns.reduce((sum, column) => sum + gridWidth(column), 0) }}>
+              <colgroup>{saleColumns.map((column) => <col key={column.key} style={{ width: gridWidth(column) }} />)}</colgroup>
               <thead>
                 <tr>
                   <th className={`${thClass} w-10 text-right`}>#</th>
                   <th className={thClass}>Item</th>
                   <th className={`${thClass} w-32`}>Unit</th>
                   <th className={`${thClass} w-24`}>Qty</th>
-                  <th className={`${thClass} w-28`} title="Cost per unit — from the rate list, editable for items that have no purchase history yet">
-                    Rate List
-                  </th>
                   <th className={`${thClass} w-28`}>Unit Price</th>
+                  <th className={`${thClass} w-28`} title="Cost per unit from the rate list">Rate List</th>
                   <th className={`${thClass} w-28 text-right`}>Total</th>
                   <th className={`${thClass} w-24 text-center`} title="Buy specifically from the market to fulfil this sale">Market Buy</th>
                   <th className="w-8 border border-sand" />
@@ -732,22 +675,9 @@ export function SaleFormPage({
                     {/* Cost rate: prefilled from the rate list when the item has
                         purchase history, typed in when it doesn't (a new item has
                         no history, and this is where its first rate comes from). */}
-                    <td data-label="Rate list" className={`${tdClass} sale-line-rate`}>
-                      <input
-                        data-cell={`${r}-3`}
-                        type="number"
-                        min="0"
-                        step="any"
-                        placeholder="Rate"
-                        aria-label={`Rate list for line ${r + 1}`}
-                        value={line.listPrice}
-                        onChange={(e) => updateLine(r, { listPrice: e.target.value })}
-                        className={`${cellInput} text-right text-steel`}
-                      />
-                    </td>
                     <td data-label="Unit price" className={`${tdClass} sale-line-price`}>
                       <input
-                        data-cell={`${r}-4`}
+                        data-cell={`${r}-3`}
                         type="number"
                         min="0"
                         step="any"
@@ -756,6 +686,19 @@ export function SaleFormPage({
                         value={line.unitPrice}
                         onChange={(e) => updateLine(r, { unitPrice: e.target.value })}
                         className={`${cellInput} text-right`}
+                      />
+                    </td>
+                    <td data-label="Rate list" className={`${tdClass} sale-line-rate`}>
+                      <input
+                        data-cell={`${r}-4`}
+                        type="number"
+                        min="0"
+                        step="any"
+                        placeholder="Rate"
+                        aria-label={`Rate list for line ${r + 1}`}
+                        value={line.listPrice}
+                        onChange={(e) => updateLine(r, { listPrice: e.target.value })}
+                        className={`${cellInput} text-right text-steel`}
                       />
                     </td>
                     <td className="sale-line-total border border-sand px-2 text-right tabular-nums text-steel">
@@ -850,6 +793,16 @@ export function SaleFormPage({
               <option value="yes">Yes</option>
             </select>
           </label>
+          {isPaid !== "no" && <label className={`${labelClass} w-full sm:w-80`}>
+            <span className={labelTextClass}>Payment account</span>
+            <select required value={`${settlementType}:${settlementAccounts[`${settlementType}:${companyId}`] ?? settlementDefault ?? ""}`} onChange={(event) => { const [type, id] = event.target.value.split(":"); setSettlementType(type as SettlementType); setSettlementAccounts((previous) => ({ ...previous, [`${type}:${companyId}`]: id })); }} className={fieldClass}>
+              <option value={`${settlementType}:`} disabled>Select a payment account</option>
+              <optgroup label="Cash accounts">{visibleCashAccounts.map((account) => <option key={account.id} value={`cash:${account.id}`}>{account.name}</option>)}</optgroup>
+              <optgroup label="Bank accounts">{bankAccountOptions.map((account) => <option key={account.id} value={`account:${account.id}`}>{account.name}</option>)}</optgroup>
+            </select>
+            <input type="hidden" name="settlementType" value={settlementType} />
+            <input type="hidden" name={settlementFieldName} value={settlementAccounts[`${settlementType}:${companyId}`] ?? settlementDefault ?? ""} />
+          </label>}
           {isPaid === "partial" && (
             <label className={`${labelClass} w-full sm:w-40`}>
               <span className={labelTextClass}>Amount Paid</span>
@@ -877,45 +830,6 @@ export function SaleFormPage({
         {/* The amount actually settled — the whole total when paid in full, so the
             server never has to infer it from the mode. */}
         <input type="hidden" name="paidAmount" value={paidNow.toFixed(2)} />
-
-        {isPaid !== "no" && (
-          <div className="flex flex-col gap-3 rounded border border-sand p-3">
-            <span className={sectionTitleClass}>Payment</span>
-            <div className={`${labelClass} w-full sm:w-72`}>
-              <span className={labelTextClass}>Settle via</span>
-              <div className="flex gap-2">
-                {SETTLEMENT_TYPES.map((t) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setSettlementType(t.value)}
-                    className={`h-11 flex-1 rounded border text-sm font-semibold ${
-                      settlementType === t.value ? "border-navy-800 bg-navy-800 text-white" : "border-sand text-steel hover:bg-ivory"
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <input type="hidden" name="settlementType" value={settlementType} />
-            <label className={`${labelClass} w-full sm:w-56`}>
-              <span className={labelTextClass}>{settlementType === "account" ? "Account" : settlementType === "cash" ? "Cash Account" : "Cheque"}</span>
-              {/* Keyed on the company too: switching it changes both the option
-                  list and which drawer is the default. */}
-              <select name={settlementFieldName} required value={settlementAccounts[`${settlementType}:${companyId}`] ?? settlementDefault ?? ""} onChange={(e) => setSettlementAccounts({ ...settlementAccounts, [`${settlementType}:${companyId}`]: e.target.value })} className={fieldClass}>
-                <option value="" disabled>
-                  {settlementOptions.length === 0 ? "None available — create one first" : "Select"}
-                </option>
-                {settlementOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
 
         {state?.error && (
           <p role={state.needsConfirmation ? "status" : "alert"} aria-live="polite" className={state.needsConfirmation ? confirmNoticeClass : errorTextClass}>{state.error}</p>

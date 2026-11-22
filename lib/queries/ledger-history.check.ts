@@ -20,6 +20,10 @@ async function main(){
   ids.push(...part.ids);
  }
  assert.deepEqual(ids,full.ids);assert.equal(full.selected.at(-1)?.balance,full.summary.closing);
+ const multiple=await ledgerHistoryWindow(query,{all:true,sort:'debit,date',direction:'asc,desc'});
+ const multipleRaw=await db.execute<{id:string}>(sql`SELECT "ledgerId" AS id FROM (${source}) rows WHERE "documentStatus"<>'cancelled' ORDER BY debit ASC,date DESC,"ledgerId"`);
+ assert.deepEqual(multiple.ids,multipleRaw.map(row=>row.id));
+ for(const row of multiple.selected)assert.equal(row.balance,full.balances.get(row.id),'display sorting never changes the chronological running balance');
  const reverse=await ledgerHistoryWindow(query,{all:true,direction:'desc'});assert.deepEqual(reverse.selected,[...full.selected].reverse());
  const range=await ledgerHistoryWindow(query,{from:'2026-04-01',to:'2026-08-01',all:true});
  const rangeRaw=await db.execute<{id:string;debit:string;credit:string;date:string}>(sql`SELECT "ledgerId" AS id,debit,credit,date::text FROM (${source}) s WHERE "documentStatus"<>'cancelled' ORDER BY date,"ledgerId"`);

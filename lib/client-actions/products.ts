@@ -4,6 +4,7 @@ import * as server from "@/lib/actions/products";
 import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/products";
 export const listProductsWithRates: typeof server.listProductsWithRates = backgroundRead("products.listProductsWithRates", server.listProductsWithRates);
+export const deleteProducts: typeof server.deleteProducts = backgroundAction("products.deleteProducts", server.deleteProducts);
 export const peekNextSku = server.peekNextSku;
 export const getProductAssignmentOptions: typeof server.getProductAssignmentOptions = backgroundRead("products.getProductAssignmentOptions", server.getProductAssignmentOptions);
 export const assignBaseUnitToProducts: typeof server.assignBaseUnitToProducts = backgroundAction("products.assignBaseUnitToProducts", server.assignBaseUnitToProducts);

@@ -1,4 +1,5 @@
 "use server";
+import {channelInScope,getSelectedChannel,resolveChannel} from "@/lib/queries/channels";
 import type {HistoryRequest} from '@/lib/history-window';
 import {withReadSnapshot} from '@/lib/db/read-snapshot';
 import {listHistoryWindow,orderHistoryRecords} from '@/lib/queries/list-history';
@@ -9,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
   expenses,
+  salesChannels,
   expenseCategories,
   companies,
   users,
@@ -40,17 +42,19 @@ export interface ExpenseFilters {
 async function readExpenses(filters: ExpenseFilters = {}, request?: HistoryRequest) {
   const session = await getSession();
   requirePermission(session, "expenses", "view");
-  const cacheScope = (await getScopeCompanyIds()).sort().join(",");
+  const cacheScope = (await getScopeCompanyIds()).sort().join(",") + ":" + await getSelectedChannel();
 
   return cachedPageRead(READ_DOMAIN.expenses, `${session.userId}:expenses:v2:paged:${cacheScope}:${stableReadKey(filters)}:${stableReadKey(request)}`, async () => withReadSnapshot(async () => {
 
-  const scope = await companyInPermissionScope(expenses.companyId, session, "expenses");
+  const scope = and(await companyInPermissionScope(expenses.companyId, session, "expenses"), await channelInScope(expenses.saleType));
   const load = (ids?: string[]) => db
     .select({
       id: expenses.id,
       createdAt: expenses.createdAt,
       _revision: sql<string>`${expenses}.xmin::text`,
       companyId: expenses.companyId,
+      saleType: expenses.saleType,
+      channelName: sql<string>`(SELECT name FROM sales_channels WHERE id=${expenses.saleType})`,
       company: sql<string>`coalesce(${companies.shortName}, ${companies.name})`,
       expenseCategoryId: expenses.expenseCategoryId,
       category: expenseCategories.name,
@@ -121,6 +125,7 @@ export async function listChequesForExpenses(currentExpenseId?: string) {
 }
 
 export interface ExpenseBatchRow {
+  saleType?: string;
   companyId: string;
   // Either a picked category or free-typed text, same as an item on a sale line:
   // an unrecognised name becomes a new category for that company on save.
@@ -165,6 +170,11 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
       requirePermission(session, "expenses", "create", { companyId });
     }
 
+    const fallback = await resolveChannel(undefined);
+    const channels = [...new Set(valid.map(row => row.saleType || fallback))];
+    const available = await db.select({id:salesChannels.id}).from(salesChannels).where(and(inArray(salesChannels.id,channels),eq(salesChannels.isActive,true)));
+    if (available.length !== channels.length) return {error:"Select an available channel for every expense."};
+
     // One transaction for the whole batch: each expense inserts and moves its
     // settlement balance, and if any row fails the lot rolls back rather than
     // leaving balances half-adjusted.
@@ -191,6 +201,7 @@ export async function createExpensesBatch(rows: ExpenseBatchRow[], operationId?:
         valid.map((r, index) => ({
           companyId: r.companyId,
           expenseCategoryId: categoryIds[index]!,
+          saleType: r.saleType || fallback,
           bankAccountId: r.bankAccountId,
           cashAccountId: r.cashAccountId,
           chequeId: r.chequeId,
@@ -264,13 +275,14 @@ export async function createExpense(_prevState: ActionResult | undefined, formDa
     if (!values.expenseDate) return { error: "Date is required." };
     if (Number.isNaN(Number(values.amount)) || Number(values.amount) <= 0) return { error: "Amount must be greater than zero." };
     if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
+    const saleType = await resolveChannel(formData.get("saleType"));
     const operationId = readOperationId(formData);
 
     await db.transaction(async (tx) => {
       // First statement: claim the operation id, or abort as a duplicate.
       if (!(await claimOperation(tx, operationId))) throw new DuplicateOperationError();
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
-      await tx.insert(expenses).values({ ...values, expenseCategoryId: categoryId, createdBy: session.userId });
+      await tx.insert(expenses).values({ ...values, saleType, expenseCategoryId: categoryId, createdBy: session.userId });
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 
@@ -299,6 +311,8 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
     if (Number.isNaN(Number(values.amount)) || Number(values.amount) <= 0) return { error: "Amount must be greater than zero." };
     if (!values.bankAccountId && !values.cashAccountId && !values.chequeId) return { error: "Select an account, cash account, or cheque." };
 
+    const [previousChannel] = await db.select({channel:expenses.saleType}).from(expenses).where(eq(expenses.id,expenseId)).limit(1);
+    const saleType = await resolveChannel(formData.get("saleType"),undefined,previousChannel?.channel);
     let missing = false;
     let companyChanged = false;
 
@@ -331,7 +345,7 @@ export async function updateExpense(expenseId: string, _prevState: ActionResult 
       // Reverse the old settlement before applying the new one, same as Payments.
       await adjustSettlementBalance(tx, "out", existing.amount, existing.bankAccountId, existing.cashAccountId, existing.chequeId, -1, existing.companyId);
       const categoryId = (await resolveExpenseCategoryId(tx, values.companyId, expenseCategoryId || null, expenseCategoryName))!;
-      await tx.update(expenses).set({ ...values, expenseCategoryId: categoryId }).where(eq(expenses.id, expenseId));
+      await tx.update(expenses).set({ ...values, saleType, expenseCategoryId: categoryId }).where(eq(expenses.id, expenseId));
       await adjustSettlementBalance(tx, "out", values.amount, values.bankAccountId, values.cashAccountId, values.chequeId, 1, values.companyId);
     });
 

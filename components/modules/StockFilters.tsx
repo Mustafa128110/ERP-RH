@@ -1,5 +1,7 @@
 "use client";
 
+import { useChannels } from "@/components/layout/ChannelProvider";
+import { setScopeChannel } from "@/lib/actions/channels";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 // One select per query param. The stock page filters by company and by location,
@@ -19,7 +21,9 @@ export function StockFilter({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { channels, selected } = useChannels();
   const current = searchParams.get(param) ?? "";
+  if (param === "company") return <select aria-label="Channel filter" value={selected} onChange={async (event) => { const result = await setScopeChannel(event.target.value); if (!result.error) router.refresh(); }} className="h-10 rounded border border-sand px-3 text-sm"><option value="all">All channels</option>{channels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select>;
 
   function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;

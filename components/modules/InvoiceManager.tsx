@@ -58,7 +58,7 @@ const columns: ColumnDef[] = [
   { key: "balance", label: "Balance", align: "right" },
   { key: "status", label: "Status", badge: true },
   { key: "age", label: "Age", align: "right" },
-  { key: "saleType", label: "Type" },
+  { key: "saleType", label: "Channel" },
 ];
 
 // The invoice list is where sales are read back and corrected. A row opens the
@@ -87,6 +87,7 @@ export function InvoiceManager({
   const [pdfId, setPdfId] = useState<string | null>(null);
   const [pngId, setPngId] = useState<string | null>(null);
   const [returning, setReturning] = useState<ReturnableSale | null>(null);
+  const [returnMode, setReturnMode] = useState<"all" | "partial">("partial");
   const [returnQuantities, setReturnQuantities] = useState<Record<string, string>>({});
   const [returnBusy, setReturnBusy] = useState(false);
   const [returnError, setReturnError] = useState<string | null>(null);
@@ -180,6 +181,7 @@ export function InvoiceManager({
       const sale = await getReturnableSale(id);
       if (!sale) return;
       setReturning(sale);
+      setReturnMode("partial");
       setReturnQuantities(Object.fromEntries(sale.lines.map((line) => [line.sourceLineId, ""])));
       returnOperationId.current = crypto.randomUUID();
     } finally {
@@ -368,9 +370,11 @@ export function InvoiceManager({
       {returning && (
         <Dialog title={`Sales Return · ${returning.number}`} onClose={() => !returnBusy && setReturning(null)} size="wide">
           <FormRecovery domain="documents" id={`return:${returning.id}`} revision={JSON.stringify([returning._revision, returning.lines.map(line => [line.sourceLineId, line.availableQuantity])])} revisions={{ [`documents:${returning.id}`]: returning._revision }} createAction="returns.createSalesReturn">
+          <RecoveryValue name="returnMode" value={returnMode} restore={value => setReturnMode(value === "all" ? "all" : "partial")} />
           <RecoveryValue name="returnQuantities" value={returnQuantities} restore={value => setReturnQuantities(value as Record<string, string>)} />
           <form onSubmit={(event) => void saveReturn(event)} className="flex flex-col gap-4">
             <input type="hidden" name="sourceDocumentId" value={returning.id} />
+            <label className="text-sm">Return type<select name="returnMode" value={returnMode} onChange={(event) => setReturnMode(event.target.value as "all" | "partial")} className="ml-3 rounded border border-sand p-2"><option value="all">Complete sale — all remaining products</option><option value="partial">Only selected products / quantities</option></select></label>
             <label className="w-fit text-sm text-ink">Return date
               <input name="documentDate" type="date" required defaultValue={todayISO()} className="mt-1 block rounded border border-sand bg-white px-3 py-2" />
             </label>
@@ -391,7 +395,7 @@ export function InvoiceManager({
                     <th className="p-2 text-right">Return now</th>
                   </tr>
                 </thead>
-                <tbody>{returning.lines.map((line) => <tr key={line.sourceLineId} className="border-t border-sand"><td className="p-2 text-ink">{line.itemName ?? "Uncatalogued line"}{line.unitSymbol ? ` · ${line.unitSymbol}` : ""}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 text-right tabular-nums">{line.returnedQuantity}</td><td className="p-2 text-right"><input type="number" min="0" max={line.availableQuantity} step="0.001" value={returnQuantities[line.sourceLineId] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [line.sourceLineId]: event.target.value }))} className="w-24 rounded border border-sand px-2 py-1 text-right" aria-label={`Return quantity for ${line.itemName ?? "line"}`} /></td></tr>)}</tbody>
+                <tbody>{returning.lines.map((line) => <tr key={line.sourceLineId} className="border-t border-sand"><td className="p-2 text-ink">{line.itemName ?? "Uncatalogued line"}{line.unitSymbol ? ` · ${line.unitSymbol}` : ""}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 text-right tabular-nums">{line.returnedQuantity}</td><td className="p-2 text-right"><input type="number" min="0" max={line.availableQuantity} step="0.001" disabled={returnMode === "all"} value={returnMode === "all" ? line.availableQuantity : returnQuantities[line.sourceLineId] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [line.sourceLineId]: event.target.value }))} className="w-24 rounded border border-sand px-2 py-1 text-right" aria-label={`Return quantity for ${line.itemName ?? "line"}`} /></td></tr>)}</tbody>
               </table>
             </div>
             {returning.returns.length > 0 && <div className="rounded border border-sand p-3 text-sm"><p className="font-medium text-navy-800">Return history</p><ul className="mt-2 divide-y divide-sand">{returning.returns.map((entry) => <li key={entry.id} className="flex items-center justify-between gap-3 py-2"><span>{entry.number} · {entry.documentDate} · {money(entry.grandTotal)} · {entry.status}</span>{entry.status === "posted" && <button type="button" disabled={returnBusy} onClick={() => void cancelReturn(entry.id)} className="rounded border border-sand px-2 py-1 text-xs hover:bg-ivory">Cancel return</button>}</li>)}</ul></div>}

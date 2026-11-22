@@ -81,8 +81,6 @@ const REQUIRED = [
   ["accounts.ts", "export async function createCheque", 'requirePermission(session, "cheques", "create", { companyId: values.companyId })'],
   ["products.ts", "export async function createProductsBatch", 'requirePermission(session, "products", "create", { companyId })'],
   // Inter-company writes on both sides — each scoped to its own company.
-  ["inter-company.ts", "export async function createInterCompanySale", 'requirePermission(session, "sales", "create", { companyId: sellerCompanyId })'],
-  ["inter-company.ts", "export async function createInterCompanySale", 'requirePermission(session, "purchases", "create", { companyId: buyerCompanyId })'],
 
   // Update/delete read-before-write is scoped, and the delete permission is
   // re-checked against the row's own company.
@@ -122,9 +120,6 @@ const REQUIRED = [
   ["stock-transfers.ts", "export async function createStockTransfer", "await getLiveSession()"],
   ["stock-transfers.ts", "export async function updateStockTransfer", "await getLiveSession()"],
   ["stock-transfers.ts", "export async function deleteStockTransfer", "await getLiveSession()"],
-  ["inter-company.ts", "export async function createInterCompanySale", "await getLiveSession()"],
-  ["inter-company.ts", "export async function updateInterCompanySale", "await getLiveSession()"],
-  ["inter-company.ts", "export async function deleteInterCompanySale", "await getLiveSession()"],
   ["ledger.ts", "export async function createOpeningBalanceEntry", "await getLiveSession()"],
   ["ledger.ts", "export async function setContactBalance", "await getLiveSession()"],
   ["ledger.ts", "export async function deleteLedgerRow", "await getLiveSession()"],

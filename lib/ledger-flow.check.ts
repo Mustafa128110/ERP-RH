@@ -204,6 +204,9 @@ function impactOfNoChangeIsEmpty() {
 }
 
 function main() {
+  const channelResult=settleFifo([{...inv("import-invoice",100,"2024-01-01"),channel:"import"},{...inv("shop-invoice",100,"2024-01-02"),channel:"shop"}],[{...pay("shop-payment",150,"2024-02-01"),channel:"shop"}]);
+  assert.deepEqual(allocOf(channelResult),["shop-payment->shop-invoice:100"],"payments cannot settle an invoice from another channel");
+  assert.equal(channelResult.advance.receivable,50,"excess stays an advance in its channel");
   sides();
   oldestFirst();
   oneReceiptSplitsAcrossInvoices();

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { salesReturnHeaderTotals } from "./return-constants";
+import { saleReturnQuantity, salesReturnHeaderTotals } from "./return-constants";
 
 const round = (value: number) => Math.round(value * 10) / 10;
 
@@ -9,3 +9,7 @@ assert.deepEqual(salesReturnHeaderTotals({ ...source, selectedSubtotal: 100, sel
 assert.deepEqual(salesReturnHeaderTotals({ ...source, selectedSubtotal: 50, selectedTax: 9, hasPriorReturns: true, returnsEverySourceLineNow: true }), { discount: 5, shipping: 2.5, tax: 9, grandTotal: 56.5, exact: false });
 
 console.log("sales-return header calculations passed");
+
+assert.equal(saleReturnQuantity("all", 10, 3, 0), 7);
+assert.equal(saleReturnQuantity("all", 10, 10, 0), 0);
+assert.equal(saleReturnQuantity("partial", 10, 3, 2), 2);

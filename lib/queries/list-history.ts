@@ -1,4 +1,5 @@
 import "server-only";
+import { parseTableSorts } from "@/lib/table-sort";
 import {sql,type SQL,type SQLWrapper} from "drizzle-orm";
 import {db} from "@/lib/db";
 import {parseTableSearch} from "@/lib/search-query";
@@ -23,7 +24,8 @@ export async function listHistoryWindow(query:SQLWrapper, request:HistoryRequest
   if(!names.includes('id'))throw new Error('History source needs an id');
   const page=Math.min(1000000,Math.max(1,Math.floor(request.page||1)));
   const search=(request.query??'').slice(0,300),direction=request.direction==='asc'?'asc':'desc';
-  const sort=Object.hasOwn(config.fields,request.sort??'')?request.sort!:'';
+  const sorts=parseTableSorts(request.sort,request.direction,Object.keys(config.fields));
+  const sort=sorts[0]?.key??'';
   const pairs=Object.entries(config.fields).flatMap(([name,value])=>[sql`${name}::text`,value]);
   const predicates=parseTableSearch(search.replaceAll(',',' ')).map(term=>{
     const field=term.field?(config.aliases?.[term.field]??Object.keys(config.fields).find(key=>key.toLowerCase()===term.field)):undefined;
@@ -31,7 +33,7 @@ export async function listHistoryWindow(query:SQLWrapper, request:HistoryRequest
     const haystack=field?sql`fields->>${field}::text`:sql`(SELECT string_agg(value,' ') FROM jsonb_each_text(fields))`;
     return sql`position(${term.value} in lower(coalesce(${haystack},'')))>0`;
   });
-  const order=sort?sql`nullif(fields->${sort}::text,'null'::jsonb) ${sql.raw(direction)} NULLS LAST,id`:sql`ordering,id`;
+  const order=sorts.length?sql`${sql.join(sorts.map(({key,direction})=>sql`nullif(fields->${key}::text,'null'::jsonb) ${sql.raw(direction)} NULLS LAST`),sql`, `)},id`:sql`ordering,id`;
   const [result]=await db.execute<{ids:string[];total:number;recordTotal:number;page:number}>(sql`
     WITH source(${sql.join(names.map(name=>sql.identifier(name)),sql`,`)}) AS (${query.getSQL()}),
     grouped AS (
@@ -48,7 +50,7 @@ export async function listHistoryWindow(query:SQLWrapper, request:HistoryRequest
     SELECT totals.*,coalesce((SELECT jsonb_agg(member.id ORDER BY selected.position,member.position)
       FROM selected CROSS JOIN LATERAL unnest(selected.ids) WITH ORDINALITY member(id,position)),'[]'::jsonb) AS ids FROM totals
   `);
-  return {...result,info:{page:result.page,pageSize:HISTORY_PAGE_SIZE,total:result.total,recordTotal:result.recordTotal,query:search,sort,direction,all:!!request.all} satisfies HistoryInfo};
+  return {...result,info:{page:result.page,pageSize:HISTORY_PAGE_SIZE,total:result.total,recordTotal:result.recordTotal,query:search,sort,direction:sorts[0]?.direction??direction,sorts,all:!!request.all} satisfies HistoryInfo};
 }
 
 export function orderHistoryRecords<T extends {id:string}>(rows:T[],ids:string[]){

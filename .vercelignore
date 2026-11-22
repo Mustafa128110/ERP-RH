@@ -1,0 +1,23 @@
+# Only application sources go to hosting. Recovery data and local credentials stay here.
+.git/
+.env*
+.vercel/
+.claude/
+.freebuff/
+.mimocode/
+db-export/
+docs/
+example doc/
+node_modules/
+.next/
+coverage/
+out/
+build/
+graphify-out/
+docs/graphify-out/
+*.log
+*.tsbuildinfo
+*.pem
+supabase/.temp/
+supabase/.branches/
+supabase/.supabase/

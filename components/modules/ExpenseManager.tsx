@@ -1,4 +1,6 @@
 "use client";
+import {useChannels} from "@/components/layout/ChannelProvider";
+import {saleTypeLabel} from "@/lib/sale-constants";
 
 import { useRef, useState } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
@@ -20,6 +22,7 @@ type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };
 
 interface Expense {
+  saleType?: string;
   id: string;
   companyId: string;
   company: string;
@@ -50,6 +53,7 @@ type ModalState =
 // Row only holds primitives, and a group's members are a list.
 const buildColumns = (byRowId: Map<string, DayGroup<Expense>>): ColumnDef[] => [
   { key: "date", label: "Date" },
+  { key: "channel", label: "Channel" },
   {
     key: "category",
     label: "Category",
@@ -154,6 +158,7 @@ export function ExpenseManager({
   // filtering happens up there rather than over the rows already handed down.
   filters?: React.ReactNode;
 }) {
+  const {channels} = useChannels();
   // Seed the client reference cache from the live options (so an offline batch
   // dialog can still fill its pickers) and fall back to the cached copy when the
   // page rendered empty. Live always wins when present.
@@ -212,7 +217,7 @@ export function ExpenseManager({
   // their amounts together.
   const groups = groupSameDay(
     shown,
-    (e) => `${e.companyId}|${e.expenseCategoryId}|${e.expenseDate}|${e.status}`,
+    (e) => `${e.companyId}|${e.expenseCategoryId}|${e.expenseDate}|${e.status}|${e.saleType ?? "counter"}`,
     (e) => e.amount,
   );
   const byRowId = new Map(groups.map((g) => [g.key, g]));
@@ -232,6 +237,7 @@ export function ExpenseManager({
       // record, and the edit form is given the id that gets picked.
       id: key,
       date: formatDate(first.expenseDate),
+      channel: saleTypeLabel(first.saleType ?? "counter",channels),
       category: members.length > 1 ? `${first.category} (${members.length})` : first.category,
       company: companyCodeMap?.get(first.companyId) ?? first.company,
       amount: money(total),
