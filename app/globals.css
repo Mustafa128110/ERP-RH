@@ -507,12 +507,11 @@ table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date
 table[data-responsive] td.p-0 { padding: 0 !important; }
 table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
 
-/* A scroll gives the table the entire viewport. Its original controls move
+/* A scroll gives the table the full content area beside the sidebar. Controls move
  * into one circular popup and return, with their state intact, at the top. */
 .workspace-control-slot { display: contents; }
 [data-workspace-focused] [data-page-header],
-[data-workspace-focused] .workspace-control-slot,
-[data-workspace-focused] .workspace-sidebar > aside {
+[data-workspace-focused] .workspace-control-slot {
   display: none !important;
 }
 [data-workspace-focused] .workspace-control-slot[data-workspace-local] { display: contents !important; }

@@ -24,7 +24,8 @@ Table sorts accumulate priorities (newest first); sales invoices start by number
 Columns use fixed widths by purpose, with dates and figures kept on one line.
 Names and descriptions wrap and receive spare viewport width. Tables fill the
 available screen and scroll horizontally on smaller screens, retaining every
-column. Scrolling expands the table to the full viewport; a three-dot button
+column. Scrolling expands the table beside the sidebar, preserving its open or
+collapsed state; a three-dot button
 opens the existing controls in a circular menu. Returning to the top restores
 the heading and toolbar. Filters and selections survive the move. A fixed 24px
 reading gap remains between columns. `npm run check:table-layout:browser` checks

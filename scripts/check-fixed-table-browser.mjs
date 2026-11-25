@@ -62,6 +62,8 @@ try{
  await page.addInitScript(()=>localStorage.setItem('erp:global-column-widths:v2',JSON.stringify({item:10000,total:10000})));
  await page.goto(`http://127.0.0.1:${server.address().port}`);
  await page.locator('[data-row-index="0"]').waitFor();await page.evaluate(()=>document.fonts.ready);
+ const sidebar=page.locator('.workspace-sidebar > aside:visible');
+ const sidebarBefore=await sidebar.boundingBox();assert.ok(sidebarBefore?.width>0);
  const geometry=()=>page.locator('[data-list] table').evaluate(table=>Array.from(table.querySelectorAll('thead th')).map(cell=>Math.round(cell.getBoundingClientRect().width)));
  await page.waitForFunction(()=>document.querySelector('[data-list] table')?.getBoundingClientRect().width<5000);
  const before=await geometry();
@@ -75,7 +77,8 @@ try{
  await page.locator('[data-list]').evaluate(element=>element.scrollTop=900);
  await page.locator('[data-workspace-focused]').waitFor();
  const full=await page.locator('[data-list]').boundingBox();
- assert.ok(Math.abs(full.x)<2&&Math.abs(full.y)<2&&Math.abs(full.width-1600)<2&&Math.abs(full.height-1000)<2,'Scrolled table must fill the viewport: '+JSON.stringify(full));
+ assert.deepEqual(await sidebar.boundingBox(),sidebarBefore,'Scrolling must preserve the open sidebar');
+ assert.ok(Math.abs(full.x-sidebarBefore.width)<2&&Math.abs(full.y)<2&&Math.abs(full.width-(1600-sidebarBefore.width))<2&&Math.abs(full.height-1000)<2,'Scrolled table must fill the space beside the sidebar: '+JSON.stringify(full));
  await page.getByRole('button',{name:'Table options',exact:true}).click();
  const menu=page.getByRole('dialog',{name:'Table options',exact:true});await menu.waitFor({state:'visible'});
  assert.ok(await menu.evaluate(node=>{const box=node.getBoundingClientRect();return getComputedStyle(node).borderRadius==='50%'&&Math.abs(box.width-box.height)<2&&box.right<=innerWidth&&box.bottom<=innerHeight;}));
@@ -92,8 +95,12 @@ try{
  assert.equal(await page.getByLabel('Fixture filter',{exact:true}).inputValue(),'Retain the typed filter');
  assert.equal(await page.getByRole('button',{name:'Table options',exact:true}).count(),0);
  await page.screenshot({path:join(out,'desktop-top.png')});
+ await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
+ const collapsedSidebar=await sidebar.boundingBox();assert.ok(collapsedSidebar.width<sidebarBefore.width);
  await page.locator('[data-list]').evaluate(node=>node.scrollTop=200);await page.locator('[data-workspace-focused]').waitFor();
+ assert.deepEqual(await sidebar.boundingBox(),collapsedSidebar,'Scrolling must also preserve a manually collapsed sidebar');
  await page.locator('[data-list]').evaluate(node=>node.scrollTop=0);await page.locator('[data-workspace-focused]').waitFor({state:'detached'});
+ await page.getByRole('button',{name:'Expand sidebar',exact:true}).click();
  await page.locator('[data-list]').evaluate(node=>node.scrollTop=600);await page.locator('[data-workspace-focused]').waitFor();
  await page.getByRole('button',{name:'Table options',exact:true}).click();
  await menu.getByRole('button',{name:'Find fixture records',exact:true}).click();
