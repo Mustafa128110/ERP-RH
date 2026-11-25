@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSale, updateSale, deleteSale, getCustomerOutstanding } from "@/lib/client-actions/sales";
 import type { SettlementType } from "@/lib/actions/settlement";
-import { fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, confirmNoticeClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
+import { gridCellInputClass as cellInput, gridHeadingClass as thClass, gridCellClass as tdClass, fieldClass, labelClass, labelTextClass, errorTextClass, successTextClass, confirmNoticeClass, TRANSPORT_ERROR_MESSAGE } from "@/components/ui/form-styles";
 import { ComboBox } from "@/components/ui/ComboBox";
 import { DateField } from "@/components/ui/DateField";
 import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
@@ -23,10 +23,6 @@ import { multiplierToBase, priceBetweenUnits, unitIdsForProduct, type UnitConver
 
 
 const sectionTitleClass = "text-sm font-semibold text-navy-800";
-// Borderless input that fills its table cell; the cell border is the only line.
-const cellInput = "h-9 w-full min-w-0 bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";
-const thClass = "border border-sand px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-steel";
-const tdClass = "border border-sand p-0";
 
 type Option = { id: string; name: string };
 type ScopedOption = Option & { companyId: string };

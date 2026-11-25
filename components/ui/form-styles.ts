@@ -19,6 +19,10 @@ export const inputClass = "h-12 w-full rounded border border-sand px-3 text-base
 // declared this exact string; it is one thing, so it lives in one place.
 // w-full because on a phone every form is a single column.
 export const fieldClass = "h-11 w-full rounded border border-sand px-3 text-sm text-ink focus:border-navy-800";
+// Continuous spreadsheet cells used by sales and product conversion entry.
+export const gridCellInputClass = "h-9 w-full min-w-0 bg-transparent px-2 text-sm text-ink outline-none focus:bg-navy-800/5";
+export const gridHeadingClass = "border border-sand px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-steel";
+export const gridCellClass = "border border-sand p-0";
 
 export const labelClass = "flex flex-col gap-1 text-sm";
 export const labelTextClass = "font-medium text-ink";

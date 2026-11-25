@@ -7,7 +7,7 @@ import {resolveBaseQuantities,MissingUnitConversionError} from "@/lib/queries/un
 import {nextDocumentNumber} from "@/lib/db/document-numbers";
 import {nextSequenceRange,SKU_SCOPE,formatSku} from "@/lib/db/sequences";
 import {claimOperation,DuplicateOperationError} from "@/lib/actions/operation-id";
-import {conversionCostShares,validateConversion,type ConversionInput,type ConversionOutput} from "@/lib/stock-conversion";
+import {conversionCostShares,validateConversion,conversionLines,type ConversionInput,type ConversionOutput} from "@/lib/stock-conversion";
 import {OperationError} from "@/lib/operation-errors";
 import {toTitleCase} from "@/lib/format";
 type Tx=Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -35,6 +35,7 @@ async function inputCosts(tx:Tx,locationId:string|null,requests:{itemId:string;q
 }
 export type ConversionPost={companyId:string;channelId:string;locationId:string|null;documentDate:string;note:string;inputs:ConversionInput[];outputs:ConversionOutput[];operationId:string;userId:string;documentTypeId:typeof documentTypes.$inferSelect.id;series:typeof documentTypes.$inferSelect.series};
 export async function postStockConversion(tx:Tx,input:ConversionPost){
+ input={...input,...conversionLines(input.inputs,input.outputs)};
  validateConversion(input.inputs,input.outputs);
  if(!await claimOperation(tx,input.operationId))throw new DuplicateOperationError();
  const existingIds=[...new Set([...input.inputs,...input.outputs].map(row=>row.itemId).filter(Boolean))];

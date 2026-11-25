@@ -22,7 +22,9 @@ import {StockConversionManager} from './components/modules/StockConversionManage
 import {StockSheet} from './components/modules/StockSheet';
 import {ProductName} from './components/ui/ProductName';
 import {setClientUserId} from './lib/client-user';
-import {clearDraft} from './lib/draft';
+import {clearDraft,saveDraft} from './lib/draft';
+import {encodeCacheValue} from './lib/cache-codec';
+window.seedLegacyConversion=()=>saveDraft('create:fixture-user:documents:stock-conversion',{revision:'0',fields:[],dates:[],states:{inputs:encodeCacheValue([{itemId:'sack',unitId:'sack-unit',quantity:'1'}]),outputs:encodeCacheValue([{itemId:'',newName:'Nail packets',mode:'new',unitId:'packet-unit',quantity:'50',salesRate:'5',costShare:'100'},{itemId:'',newName:'',mode:'new',unitId:'',quantity:'',salesRate:'',costShare:'100'}])}});
 window.clearConversionRecovery=()=>clearDraft('create:fixture-user:documents:stock-conversion');
 setClientUserId('fixture-user');
 import {ProfitCalendar} from './components/modules/ProfitCalendar';
@@ -76,7 +78,7 @@ const bundle=await build({stdin:{contents:entry,loader:'tsx',resolveDir:process.
 }}]});
 const cssFolders=[existsSync('.next/static') ? '.next/static' : '.next/dev/static'];
 const css=cssFolders.flatMap(folder=>readdirSync(folder,{recursive:true}).filter(file=>String(file).endsWith('.css')).map(file=>readFileSync(join(folder,file),'utf8'))).join('\n');
-const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'text/javascript':req.url==='/app.css'?'text/css':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].text:req.url==='/app.css'?css:'<!doctype html><html><head><link rel="stylesheet" href="/app.css"><style>body{font-family:Arial,sans-serif}table{border-collapse:collapse}th,td{padding:8px}section{margin:20px;overflow:auto}input,select{max-width:100%}</style></head><body><div id="root"></div><script src="/app.js"></script></body></html>')});
+const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'text/javascript':req.url==='/app.css'?'text/css':'text/html');res.end(req.url==='/app.js'?bundle.outputFiles[0].text:req.url==='/app.css'?css:'<!doctype html><html><head><link rel="stylesheet" href="/app.css"><style>body{font-family:Arial,sans-serif}table{border-collapse:collapse}table:not([data-column-layout]) th,table:not([data-column-layout]) td{padding:8px}section{margin:20px;overflow:auto}input,select{max-width:100%}</style></head><body><div id="root"></div><script src="/app.js"></script></body></html>')});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({headless:true,...(process.env.ERP_BROWSER_EXECUTABLE?{executablePath:process.env.ERP_BROWSER_EXECUTABLE}:{})});
 const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -168,6 +170,9 @@ try{
  await page.getByLabel('Output stock unit 1').fill('Packet');await page.getByRole('option',{name:'Packet',exact:true}).click();
  await page.getByLabel('Output quantity 1',{exact:true}).fill('50');
  await page.getByLabel('Output selling rate 1',{exact:true}).fill('5');
+ assert.equal(await page.getByText('Arrow keys navigate cells; Ctrl+Enter saves.',{exact:false}).count(),0);
+ const cells=await page.locator('.conversion-items-grid tbody tr:first-child td').evaluateAll(cells=>cells.map(cell=>({padding:getComputedStyle(cell).padding,border:getComputedStyle(cell).borderLeftWidth,control:cell.querySelector('input,select')})).map(({control,...cell})=>({...cell,...(control?{controlBorder:getComputedStyle(control).borderTopWidth,controlRadius:getComputedStyle(control).borderRadius}:{})})));
+ assert.ok(cells.filter(cell=>cell.controlBorder!==undefined).every(cell=>cell.padding==='0px'&&cell.border==='1px'&&cell.controlBorder==='0px'&&cell.controlRadius==='0px'),'conversion controls must meet their shared cell borders without gutters: '+JSON.stringify(cells));
  await page.screenshot({path:join(out,'conversion-grid.png'),fullPage:true});
  await page.getByRole('button',{name:'Post conversion',exact:true}).click();
  await page.waitForFunction(()=>window.actionLog.some(action=>action.name==='createStockConversion'));
@@ -182,6 +187,13 @@ try{
  assert.equal(await page.getByLabel('Input product 2',{exact:true}).inputValue(),'','a trailing input row remains available');
  assert.equal(await page.getByLabel('New product name 2',{exact:true}).inputValue(),'','a trailing output row remains available');
  await page.getByLabel('Input quantity 1',{exact:true}).focus();await page.keyboard.press('ArrowDown');assert.equal(await page.getByLabel('Input quantity 2',{exact:true}).evaluate(input=>input===document.activeElement),true);
+ // Old recovered forms included an untouched output with a default 100% share.
+ await page.evaluate(()=>window.showInvoices());await page.evaluate(()=>window.clearConversionRecovery());await page.evaluate(()=>window.seedLegacyConversion());await page.evaluate(()=>window.showConversion());
+ await page.getByRole('button',{name:'New conversion',exact:true}).click();await page.getByRole('button',{name:'Restore edit',exact:true}).click();
+ assert.equal(await page.getByLabel('New product name 1',{exact:true}).inputValue(),'Nail packets');
+ await page.getByRole('button',{name:'Post conversion',exact:true}).click();
+ await page.waitForFunction(()=>window.actionLog.filter(action=>action.name==='createStockConversion').length===2);
+ assert.equal(await page.evaluate(()=>window.actionLog.findLast(action=>action.name==='createStockConversion').args[0].outputs.length),1,'a recovered spare row must not create an invalid output');
  await page.evaluate(()=>window.showFractions());await page.getByText('Bolt 1½×⅝',{exact:true}).waitFor();
  const fractions=await page.locator('.product-fraction').first().evaluate(span=>({font:getComputedStyle(span).fontFamily,parentFont:getComputedStyle(span.parentElement).fontFamily,size:parseFloat(getComputedStyle(span).fontSize),parentSize:parseFloat(getComputedStyle(span.parentElement).fontSize)}));assert.equal(fractions.font,fractions.parentFont);assert.ok(fractions.size>=fractions.parentSize,'fraction glyphs must be readable at normal font size');
  await page.evaluate(()=>window.showSheet());await page.getByLabel('Product name: Bolt',{exact:true}).waitFor();assert.equal(await page.getByRole('dialog').count(),0,'stock editing stays directly in the table');

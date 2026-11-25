@@ -1022,9 +1022,9 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
 
 /* A 12px inset on each side leaves a fixed 24px reading gap between
  * neighbouring columns, including when content minima require scrolling. */
-table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid) > thead > tr > th,
-table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid) > tbody > tr:not([data-virtual-spacer]) > td,
-table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid) > tfoot > tr > td {
+table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid):not(:where(.conversion-items-grid)) > thead > tr > th,
+table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid):not(:where(.conversion-items-grid)) > tbody > tr:not([data-virtual-spacer]) > td,
+table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid):not(:where(.conversion-items-grid)) > tfoot > tr > td {
   padding-inline: 12px !important;
 }
 table[data-column-layout][data-responsive] > tbody > tr:not([data-virtual-spacer]) > td.p-0 {

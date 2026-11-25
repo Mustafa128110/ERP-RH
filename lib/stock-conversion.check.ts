@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {conversionCostShares,validateConversion} from "./stock-conversion";
+import {conversionCostShares,validateConversion,conversionLines,blankConversionLine} from "./stock-conversion";
 assert.deepEqual(conversionCostShares(100,[100]),[100]);
 assert.deepEqual(conversionCostShares(0.01,[50,50]),[0.01,0]);
 assert.deepEqual(conversionCostShares(100,[33.333,33.333,33.334]),[33.33,33.33,33.34]);
@@ -11,4 +11,17 @@ assert.equal(conversionCostShares(100,[100])[0]/output.quantity,2,"one 100-cost 
 assert.throws(()=>validateConversion([input,input],[output]),/duplicate input/);
 assert.throws(()=>validateConversion([input],[{...output,itemId:"sack"}]),/different output/);
 assert.throws(()=>validateConversion([input],[{...output,quantity:0}]),/positive quantity/);
+const legacy=conversionLines([input],JSON.parse(JSON.stringify([{...output,quantity:"50",salesRate:"5",costShare:"100"},{itemId:"",newName:"",unitId:"",quantity:"",salesRate:"",costShare:"100"}])));
+assert.equal(legacy.outputs.length,1,"an untouched spare row with a default share is not an output product");
+validateConversion(legacy.inputs,legacy.outputs);
+assert.equal(legacy.outputs[0].quantity,50);assert.equal(legacy.outputs[0].salesRate,5);
+assert.equal(blankConversionLine({salesRate:"0",quantity:0}),true);
+assert.equal(blankConversionLine({quantity:"1"}),false,"a partially filled row must be retained");
+assert.equal(blankConversionLine({newName:"Packets"}),false);
+assert.equal(blankConversionLine({unitId:"packet-unit"}),false);
+assert.equal(blankConversionLine({salesRate:"invalid"}),false);
+assert.throws(()=>validateConversion([input],[{...output,unitId:""}]),/Output row 1: choose a stock unit/);
+assert.throws(()=>validateConversion([input],[{...output,salesRate:-1}]),/Output row 1: selling rate/);
+const malformed=conversionLines([input],JSON.parse(JSON.stringify([{...output,salesRate:true}])));
+assert.throws(()=>validateConversion(malformed.inputs,malformed.outputs),/selling rate/);
 console.log("stock conversion validation and conserved cost allocation checks passed");

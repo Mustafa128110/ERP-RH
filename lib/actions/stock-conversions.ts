@@ -8,7 +8,7 @@ import {companyInPermissionScope} from "@/lib/auth/scope";
 import {documents} from "@/lib/db/schema";
 import {resolveChannel,channelInScope} from "@/lib/queries/channels";
 import {postStockConversion} from "@/lib/queries/stock-conversion";
-import {type ConversionInput,type ConversionOutput,validateConversion} from "@/lib/stock-conversion";
+import {type ConversionInput,type ConversionOutput,validateConversion,conversionLines} from "@/lib/stock-conversion";
 import {OperationError} from "@/lib/operation-errors";
 import {guard,DUPLICATE,type ActionResult} from "@/lib/actions/guard";
 import {recordAudit} from "@/lib/actions/audit";
@@ -36,6 +36,7 @@ export async function createStockConversion(input:{companyId:string;channelId:st
   const session=await getLiveSession();requirePermission(session,"stock_adjustments","create",{companyId:input.companyId,warehouseId:input.locationId??undefined});
   if(session.warehouseIds.length&&!input.locationId)return {error:"Choose a warehouse assigned to your role."};
   if(!/^\d{4}-\d{2}-\d{2}$/.test(input.documentDate))return {error:"Choose a valid conversion date."};
+  input={...input,...conversionLines(input.inputs,input.outputs)};
   try{validateConversion(input.inputs,input.outputs);}catch(error){if(error instanceof OperationError)return {error:error.message};throw error;}
   if(input.outputs.some(row=>!row.itemId))requirePermission(session,"products","create",{companyId:input.companyId});
   const channelId=await resolveChannel(input.channelId);
