@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {projectLocalRecords} from "./local-records";
+import type {SavedCommand} from "./command-protocol";
+const rows=[{id:"a",name:"Original",sku:"SKU",rate1:"1",_revision:"10",_ruleIds:"",_hasUnitRule:false}];
+const command:SavedCommand={id:"local",userId:"user",action:"products.updateProductsBatch",args:[{mode:"none"},[{id:"a",name:"Changed",sku:"NEW",_revision:"999",ruleIds:["rule"],password:"secret"}]],status:"pending",version:1,path:"/inventory/stock",label:"Product edit",createdAt:100,updatedAt:200,attempts:0};
+const project=(entry=command,served=100)=>projectLocalRecords(rows,"id","items",[entry],served);
+assert.equal(project().records[0].name,"Changed");assert.equal(project().records[0]._revision,"10");assert.equal(project().records[0]._ruleIds,"rule");assert.deepEqual(project().pending,["a"]);
+assert.equal("password" in project().records[0],false);assert.equal(rows[0].name,"Original");
+for(const status of ["failed","cancelled","discarded"] as const)assert.deepEqual(project({...command,status}).records,rows);
+assert.equal(project({...command,status:"confirmed"},150).records[0].name,"Changed");assert.deepEqual(project({...command,status:"confirmed"},200).records,rows);
+assert.deepEqual(projectLocalRecords(rows,"id","contacts",[command],0).records,rows);
+assert.deepEqual(project({...command,action:"products.deleteProducts",args:[["a"]]}).records,[],"batch deletes disappear immediately while pending");
+const created=project({...command,action:"products.createProductsBatch",args:[[{name:"Typed product",sku:"Typed SKU"}]]});
+assert.equal(created.records[0].name,"Typed product");assert.ok(created.pending[0].startsWith("local:"));
+console.log("local projections preserve drafts, versions, failure rollback and fresh server reconciliation");

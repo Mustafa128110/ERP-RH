@@ -33,6 +33,16 @@ try {
   // Public business schema and Supabase auth data are portable. Provider-owned
   // realtime/storage/vault services must be provisioned by Supabase separately.
   run(resolve('db-export/restore-tools/pgsql/bin/pg_restore.exe'),['--exit-on-error','--no-owner','--no-privileges','--schema=public','--schema=auth','--schema=drizzle','--schema=supabase_migrations',`--dbname=${url}`,join(extract,'snapshot.dump')]);
+  // Portable dumps exclude owner-specific grants. PostgreSQL otherwise gives
+  // PUBLIC execution of restored functions, so reinstate the server-only API
+  // boundary before a recovered target can be considered ready.
+  for(const migration of ['0068_close_public_database_api.sql','0069_remove_inherited_public_api_grants.sql']){
+   await local.unsafe(readFileSync(resolve('drizzle',migration),'utf8'));
+  }
+  const [permissions]=await local`SELECT
+   has_schema_privilege('anon','public','USAGE') OR has_schema_privilege('authenticated','public','USAGE') AS schema_exposed,
+   EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND (has_function_privilege('anon',p.oid,'EXECUTE') OR has_function_privilege('authenticated',p.oid,'EXECUTE'))) AS routines_exposed`;
+  assert.equal(permissions.schema_exposed,false);assert.equal(permissions.routines_exposed,false);
   const expected=JSON.parse(readFileSync(join(extract,'contents.json'),'utf8'));
   const query=expected.map(({name})=>`SELECT '${name}' AS name,count(*)::text AS rows,md5(coalesce(string_agg(to_jsonb(t)::text,E'\\n' ORDER BY to_jsonb(t)::text COLLATE "C"),'')) AS digest FROM public."${name.replaceAll('"','""')}" t`).join(' UNION ALL ');
   const actual=await local.unsafe(query);

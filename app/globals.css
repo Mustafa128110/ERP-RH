@@ -450,15 +450,15 @@ tr[data-pending] {
   opacity: 0.55;
   transition: opacity 120ms ease-out;
 }
+tr[data-stock-tone="negative"] { background-color: var(--color-error-tint); box-shadow: inset 3px 0 var(--color-error); }
+tr[data-stock-tone="low"] { background-color: var(--color-amber-50); box-shadow: inset 3px 0 var(--color-warning); }
+tr[data-stock-tone="negative"]:hover { background-color: color-mix(in srgb, var(--color-error) 20%, var(--color-white)); }
+tr[data-stock-tone="low"]:hover { background-color: var(--color-brass-100); }
 
-/*
- * Desktop layout for list tables. The compact tabular reading model remains at
- * md and up; the explicit mobile card transformation below keeps every fact
- * readable rather than requiring a 360px screen to pan across a desktop grid.
- */
+/* Fixed columns fill their viewport. Narrow screens scroll the complete table. */
 table[data-responsive] {
   table-layout: fixed;
-  min-width: var(--table-min-width, max-content);
+  min-width: max(100%, var(--table-min-width, 100%));
 }
 
 table[data-responsive] tr[data-virtual-spacer],
@@ -471,76 +471,119 @@ table[data-responsive] tr[data-virtual-spacer] td {
 }
 table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
 
-/* Mobile lists maintain proper tabular form with horizontal scrolling,
- * sticky headers, and clear column alignment. */
-@media (max-width: 767px) {
-  .mobile-data-list {
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
-  }
-  table[data-responsive] {
-    display: table !important;
-    min-width: 0;
-    width: 100%;
-    table-layout: fixed;
-    border-collapse: collapse;
-  }
-  table[data-responsive] thead {
-    display: table-header-group !important;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-  table[data-responsive] thead tr {
-    display: table-row !important;
-  }
-  table[data-responsive] thead th {
-    display: table-cell !important;
-    padding: 0.5rem 0.75rem !important;
-    font-size: 0.75rem !important;
-  }
-  table[data-responsive] tbody {
-    display: table-row-group !important;
-    padding: 0;
-  }
-  table[data-responsive] tbody tr {
-    display: table-row !important;
-    border: 0;
-    border-radius: 0;
-    margin-bottom: 0;
-    background: transparent;
-  }
-  table[data-responsive] td {
-    display: table-cell !important;
-    padding: 0.5rem 0.75rem !important;
-    font-size: 0.8125rem !important;
-    line-height: 1.25rem !important;
-    border-bottom: 1px solid var(--color-sand) !important;
-    vertical-align: middle !important;
-    white-space: nowrap !important;
-  }
-  table[data-responsive] td.p-0 {
-    padding: 0 !important;
-  }
-  table[data-responsive] td.p-0 > a,
-  table[data-responsive] td.p-0 > span {
-    display: block !important;
-    padding: 0.5rem 0.75rem !important;
-    white-space: nowrap !important;
-  }
-  table[data-responsive] td::before {
-    display: none !important;
-    content: none !important;
-  }
-  table[data-responsive] td[data-label=""] {
-    min-height: 0;
-    display: table-cell !important;
-  }
-  table[data-responsive] th.hidden,
-  table[data-responsive] td.hidden {
-    display: none !important;
-  }
+.mobile-data-list {
+  max-width: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+}
+table[data-column-layout] > thead > tr > th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+table[data-column-layout] > tbody > tr:not([data-virtual-spacer]) > td {
+  vertical-align: middle;
+}
+table[data-column-layout] td[data-cell-kind="text"],
+table[data-column-layout] td[data-cell-kind="text"] :is(a, span, div, p) {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+table[data-column-layout] td[data-cell-kind="text"].truncate,
+table[data-column-layout] td[data-cell-kind="text"] :is(.truncate, [class*="line-clamp"]) {
+  overflow: visible;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
+}
+table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date"]),
+table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date"]) :is(a, span, div, p) {
+  white-space: nowrap !important;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-variant-numeric: tabular-nums;
+}
+table[data-responsive] td.p-0 { padding: 0 !important; }
+table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
+
+/* A scroll gives the table the entire viewport. Its original controls move
+ * into one circular popup and return, with their state intact, at the top. */
+.workspace-control-slot { display: contents; }
+[data-workspace-focused] [data-page-header],
+[data-workspace-focused] .workspace-control-slot,
+[data-workspace-focused] .workspace-sidebar > aside {
+  display: none !important;
+}
+[data-workspace-focused] .workspace-control-slot[data-workspace-local] { display: contents !important; }
+[data-workspace-focused] [role="dialog"] [data-page-header] { display: block !important; }
+[data-workspace-focused] [data-workspace-main] { padding: 0 !important; }
+[data-workspace-focused] [data-list="global"] {
+  border: 0;
+  border-radius: 0;
+}
+.workspace-options-toggle {
+  position: fixed;
+  top: max(0.5rem, env(safe-area-inset-top));
+  right: max(0.5rem, env(safe-area-inset-right));
+  z-index: 40;
+  display: flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-sand);
+  border-radius: 999px;
+  background: var(--color-white);
+  color: var(--color-navy-800);
+  box-shadow: 0 3px 12px #0002;
+}
+.workspace-options {
+  position: fixed;
+  top: max(3.75rem, calc(env(safe-area-inset-top) + 3rem));
+  right: max(0.75rem, env(safe-area-inset-right));
+  z-index: 40;
+  width: min(38rem, calc(100vw - 1.5rem), calc(100dvh - 5rem));
+  aspect-ratio: 1;
+  border: 1px solid var(--color-sand);
+  border-radius: 50%;
+  background: var(--color-white);
+  box-shadow: 0 12px 48px #0003;
+}
+.workspace-options[hidden] { display: none; }
+.workspace-options-content { position: absolute; inset: 15%; overflow: auto; overscroll-behavior: contain; }
+.workspace-options-groups { display: flex; flex-direction: column; gap: 1rem; }
+.workspace-options-groups > [data-workspace-controls="Application"] { order: 10; }
+.workspace-options [data-workspace-controls] { min-width: 0; max-width: 100%; }
+.workspace-options [data-workspace-controls]:not(:empty)::before {
+  content: attr(data-workspace-controls);
+  display: block;
+  flex-basis: 100%;
+  margin-bottom: 0.4rem;
+  color: var(--color-steel);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.workspace-options .workspace-topbar { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr); height: auto; padding: 0; border: 0; }
+.workspace-options .workspace-topbar > div:not(.hidden) { grid-column: 1 / -1; }
+.workspace-options [data-global-search] { width: 100%; }
+.workspace-options::after {
+  content: "Scroll for more options";
+  position: absolute;
+  right: 20%;
+  bottom: 7%;
+  left: 20%;
+  color: var(--color-steel);
+  font-size: 0.6875rem;
+  text-align: center;
+  pointer-events: none;
+}
+.workspace-options :is(input, select, button, a) { max-width: 100%; }
+.workspace-options :is(input, select) { min-width: 0; }
+.workspace-options [data-workspace-controls] > .flex { flex-wrap: wrap; }
+@media print {
+  [data-table-workspace] { height: auto !important; }
+  [data-list] { overflow: visible !important; }
 }
 
 /* Compact fact containers used outside DataTable must carry the same containment
@@ -549,6 +592,8 @@ table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+.product-name, .product-fraction { font-family: inherit; font-variant-numeric: normal; }
+.product-fraction { font-size: 1.15em; line-height: inherit; }
 .numeric-contain {
   min-width: 0;
   max-width: 100%;

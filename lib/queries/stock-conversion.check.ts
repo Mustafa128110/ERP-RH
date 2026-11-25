@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import {sql} from "drizzle-orm";
 import {db} from "@/lib/db";
-import {items,units,documents,documentLines,inventoryTransactions,documentTypes} from "@/lib/db/schema";
+import {items,units,documents,documentLines,inventoryTransactions,documentTypes,settings} from "@/lib/db/schema";
 import {postStockConversion} from "./stock-conversion";
 import {fifoValuations} from "./stock-cost";
 import {queryItemOptions} from "./item-options";
 import {queryProductRates} from "./products";
 import {commandContext} from "@/lib/db/command-context";
-import {OperationError} from "@/lib/operation-errors";
 async function main(){const rollback=new Error("rollback conversion fixtures");try{await db.transaction(async tx=>{
  const [company]=await tx.execute<{id:string}>(sql`SELECT id FROM companies LIMIT 1`),[user]=await tx.execute<{id:string}>(sql`SELECT id FROM users LIMIT 1`),[location]=await tx.execute<{id:string}>(sql`SELECT id FROM locations LIMIT 1`);
  const token=randomUUID(),sackUnit=randomUUID(),packetUnit=randomUUID(),sack=randomUUID();
@@ -25,6 +24,9 @@ async function main(){const rollback=new Error("rollback conversion fixtures");t
  assert.equal(first.totalCost,100,"conversion takes the next FIFO layer, not the weighted average");const packet=first.productsCreated[0].id;
  const quantities=await tx.execute<{id:string;quantity:number}>(sql`SELECT dl.item_id AS id,sum(it.movement*it.base_quantity)::float8 AS quantity FROM inventory_transactions it JOIN document_lines dl ON dl.id=it.document_line_id WHERE dl.item_id IN (${sack}::uuid,${packet}::uuid) GROUP BY dl.item_id ORDER BY dl.item_id`);
  assert.deepEqual(new Map(quantities.map(row=>[row.id,row.quantity])),new Map([[sack,2],[packet,50]]));
+ const partialRollback=new Error("rollback partial shortage");
+ try{await tx.transaction(async nested=>{const partial=await postStockConversion(nested,{...shared,operationId:randomUUID(),inputs:[{itemId:sack,unitId:sackUnit,quantity:3}],outputs:[{itemId:packet,unitId:packetUnit,quantity:150,salesRate:5,costShare:100}]});assert.equal(partial.totalCost,566.67,"existing FIFO layers and only the shortage use their respective recorded costs");throw partialRollback;});}catch(error){if(error!==partialRollback)throw error;}
+
  await commandContext.run({database:tx,afterCommit:[]},async()=>{
   assert.deepEqual(await fifoValuations([{itemId:sack,locationId:location.id},{itemId:packet,locationId:location.id}]),[400,100],"total physical stock value remains 500");
   const option=(await queryItemOptions(sql`items.id=${packet}::uuid`))[0];assert.equal(Number(option.salesRate),5);assert.equal(Number(option.rate),2);
@@ -36,9 +38,16 @@ async function main(){const rollback=new Error("rollback conversion fixtures");t
  const third=await postStockConversion(tx,{...shared,operationId:randomUUID(),inputs:[{itemId:sack,unitId:sackUnit,quantity:1},{itemId:packet,unitId:packetUnit,quantity:10}],outputs:[{itemId:"",newName:`QA nail kits ${token}`,unitId:packetUnit,quantity:10,salesRate:30,costShare:100}]});
  assert.equal(third.totalCost,220,"multiple inputs retain their own FIFO cost before allocation");
  await commandContext.run({database:tx,afterCommit:[]},async()=>assert.deepEqual(await fifoValuations([{itemId:sack,locationId:location.id},{itemId:packet,locationId:location.id},{itemId:box,locationId:location.id},{itemId:third.productsCreated[0].id,locationId:location.id}]),[0,200,80,220]));
+ const negative=await postStockConversion(tx,{...shared,operationId:randomUUID(),inputs:[{itemId:sack,unitId:sackUnit,quantity:1}],outputs:[{itemId:packet,unitId:packetUnit,quantity:50,salesRate:5,costShare:100}]});
+ assert.equal(negative.totalCost,166.67,"a shortage uses the actual recorded average incoming cost");
+ const deeper=await postStockConversion(tx,{...shared,operationId:randomUUID(),inputs:[{itemId:sack,unitId:sackUnit,quantity:1}],outputs:[{itemId:packet,unitId:packetUnit,quantity:50,salesRate:5,costShare:100}]});
+ assert.equal(deeper.totalCost,166.67,"already negative stock can still convert using recorded cost");
+ const [balance]=await tx.execute<{quantity:string}>(sql`SELECT sum(it.movement*it.base_quantity)::text AS quantity FROM inventory_transactions it JOIN document_lines dl ON dl.id=it.document_line_id WHERE dl.item_id=${sack}::uuid`);assert.equal(Number(balance.quantity),-2);
  const [before]=await tx.execute(sql`SELECT (SELECT count(*)::int FROM items) AS items,(SELECT count(*)::int FROM documents) AS documents,(SELECT count(*)::int FROM inventory_transactions) AS movements`);
- await assert.rejects(()=>tx.transaction(nested=>postStockConversion(nested,{...shared,operationId:randomUUID(),inputs:[{itemId:sack,unitId:sackUnit,quantity:1}],outputs:[{itemId:"",newName:"Must not survive",unitId:packetUnit,quantity:50,salesRate:5,costShare:100}]})),OperationError);
- assert.deepEqual((await tx.execute(sql`SELECT (SELECT count(*)::int FROM items) AS items,(SELECT count(*)::int FROM documents) AS documents,(SELECT count(*)::int FROM inventory_transactions) AS movements`))[0],before,"insufficient stock rolls back every new record");
+ await assert.rejects(()=>tx.transaction(nested=>postStockConversion(nested,{...shared,operationId:randomUUID(),inputs:[{itemId:sack,unitId:sackUnit,quantity:1}],outputs:[{itemId:"",newName:"Must not survive",unitId:randomUUID(),quantity:50,salesRate:5,costShare:100}]})));
+ assert.deepEqual((await tx.execute(sql`SELECT (SELECT count(*)::int FROM items) AS items,(SELECT count(*)::int FROM documents) AS documents,(SELECT count(*)::int FROM inventory_transactions) AS movements`))[0],before,"an invalid output unit rolls back every new record");
+ await tx.insert(settings).values({companyId:company.id,key:`product_rates:${packet}`,value:JSON.stringify({rate1:"12.34",rate2:"11.11",rate3:"10.01",salesRate:"15.99"})});
+ await commandContext.run({database:tx,afterCommit:[]},async()=>{const option=(await queryItemOptions(sql`items.id=${packet}::uuid`))[0];assert.equal(Number(option.rate),12.34);assert.equal(Number(option.salesRate),15.99);const product=(await queryProductRates([company.id])).find(product=>product.id===packet)!;assert.equal(Number(product.purchaseRate1),12.34);assert.equal(Number(product.purchaseRate2),11.11);assert.equal(Number(product.purchaseRate3),10.01);assert.equal(Number(product.salesRate),15.99);});
  throw rollback;
  });}catch(error){if(error!==rollback)throw error;}console.log("stock conversion FIFO, new-item rates, multi-input/output conservation and rollback checks passed (rolled back)");}
 main().finally(()=>db.$client.end()).catch(error=>{console.error(error);process.exitCode=1;});

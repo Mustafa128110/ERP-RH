@@ -7,31 +7,15 @@ import { changeCommand } from "@/lib/command-store";
 import { getClientUserId } from "@/lib/client-user";
 import { COMMAND_LIMIT_BYTES, confirmedArguments, unresolved, type SavedCommand, type CommandValue } from "@/lib/command-protocol";
 import { canCancel } from "@/lib/command-sync";
+import {CorrectionFields as ValueEditor} from "./CorrectionFields";
+import {correctionRead} from "@/lib/correction-read";
+import {decodeCacheValue} from "@/lib/cache-codec";
+import {encodeArgument} from "@/lib/command-protocol";
 import type { ColumnDef } from "@/lib/table";
 
 const columns: ColumnDef[] = [
   { key: "label", label: "Your saved work" }, { key: "status", label: "Status" }, { key: "message", label: "Details" },
 ];
-function fieldLabel(key: string) { return key.replace(/Json$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase()); }
-const internal = /^(operationId|confirmAllocations|confirm|confirmed)$/;
-function ValueEditor({ value, label, onChange, disabled }: { value: CommandValue; label: string; onChange: (value: CommandValue) => void; disabled: boolean }) {
-  if (value === null) return null;
-  if (typeof value === "object" && !Array.isArray(value) && Array.isArray(value.$form)) {
-    return <div className="space-y-3">{(value.$form as string[][]).map(([key, item], index) => internal.test(key) ? null :
-      <ValueEditor key={`${key}:${index}`} label={key} value={item} disabled={disabled || /Id$/.test(key)} onChange={next => onChange({ $form: (value.$form as CommandValue[]).map((pair, i) => i === index ? [key, String(next ?? "")] : pair) })} />)}</div>;
-  }
-  if (Array.isArray(value)) return <div className="space-y-3">{value.map((item, i) => <fieldset key={i} className="rounded border border-sand p-2"><legend className="px-1 text-xs text-steel">{fieldLabel(label)} {i + 1}</legend><ValueEditor value={item} label="Field" disabled={disabled} onChange={next => onChange(value.map((old, index) => index === i ? next : old))} /></fieldset>)}</div>;
-  if (typeof value === "object") return <div className="grid gap-3 sm:grid-cols-2">{Object.entries(value).map(([key, item]) => internal.test(key) ? null : <ValueEditor key={key} label={key} value={item} disabled={disabled || key === "id" || /Id$/.test(key)} onChange={next => onChange({ ...value, [key]: next })} />)}</div>;
-  if (typeof value === "string" && /Json$/.test(label)) {
-    let parsed: CommandValue = null;
-    try { parsed = JSON.parse(value) as CommandValue; } catch { /* show original input intact */ }
-    if (parsed && typeof parsed === "object") return <ValueEditor label={label} value={parsed} disabled={disabled} onChange={next => onChange(JSON.stringify(next))} />;
-  }
-  return <label className="flex flex-col gap-1 text-xs text-steel">{fieldLabel(label)}
-    {typeof value === "boolean" ? <input type="checkbox" checked={value} disabled={disabled} onChange={event => onChange(event.target.checked)} /> :
-      <input className="h-9 rounded border border-sand bg-white px-2 text-sm text-ink disabled:bg-ivory" value={String(value)} readOnly={disabled} type={typeof value === "number" ? "number" : "text"} step="any" onChange={event => onChange(typeof value === "number" ? Number(event.target.value) : event.target.value)} />}
-  </label>;
-}
 function download(entry: SavedCommand) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(entry, null, 2)], { type: "application/json" }));
   const link = document.createElement("a"); link.href = url; link.download = `saved-work-${entry.id}.json`; link.click();
@@ -43,6 +27,11 @@ export function CommandReview({ entry, onClose }: { entry: SavedCommand; onClose
   const [busy, setBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const editable = entry.status === "failed";
+  const [latest,setLatest]=useState<{value:CommandValue;revisions:Record<string,string>}|null>(null);
+  const [reviewed,setReviewed]=useState(false);
+  const stale=/changed.*(opened|tab)|latest record/i.test(entry.error??"");
+  async function loadLatest(){const read=correctionRead(entry);if(!read){setError("Open this record's page to review its latest version before retrying.");return;}setBusy(true);setError(null);try{const response=await fetch("/api/commands",{method:"POST",headers:{"Content-Type":"application/json","x-erp-command":"1"},body:JSON.stringify({mode:"read",action:read.action,args:read.args.map(encodeArgument)}),signal:AbortSignal.timeout(30000)});const body=await response.json();if(!response.ok||body.error)throw new Error(body.error||"Could not load the latest record.");if(Object.keys(entry.revisions??{}).some(key=>!body.revisions?.[key]))throw new Error("Not all latest versions could be loaded. Open the original record page and review this batch there.");setLatest({value:JSON.parse(JSON.stringify(decodeCacheValue(body.encoded))),revisions:body.revisions??{}});setReviewed(false);}catch(problem){setError(problem instanceof Error?problem.message:"Could not load the latest record.");}finally{setBusy(false);}}
+
   async function save() {
     const user = getClientUserId();
     if (!user) return;
@@ -50,18 +39,21 @@ export function CommandReview({ entry, onClose }: { entry: SavedCommand; onClose
     try {
       if (new TextEncoder().encode(JSON.stringify({ ...entry, args })).length > COMMAND_LIMIT_BYTES - 1000) throw new Error("This correction is too large. Reduce the batch before retrying.");
       const updated = await changeCommand(user, entry.id, current => {
-        if (current.status !== "failed") return current;
-        const revised = confirmed ? confirmedArguments(entry.action, args) : args;
-        return { ...current, args: revised, status: "pending", updatedAt: Date.now(), error: undefined, needsConfirmation: false };
+        if (current.status !== "failed"||current.updatedAt!==entry.updatedAt) return current;
+        let revised = confirmed ? confirmedArguments(entry.action, args) : args;
+        const versions=reviewed&&latest?latest.revisions:current.revisions;
+        if(reviewed&&latest&&entry.action==="products.saveStockSheet")revised=revised.map(arg=>Array.isArray(arg)?arg.map(row=>row&&typeof row==="object"&&!Array.isArray(row)?{...row,_revision:versions?.[`items:${row.id}`]??row._revision}:row):arg);
+        return { ...current, revisions:versions, args: revised, status: "pending", updatedAt: Date.now(), error: undefined, needsConfirmation: false };
       });
       if (!updated || updated.status !== "pending") throw new Error("This operation changed in another tab. Reopen its current status.");
       onClose();
     } catch (problem) { setError(problem instanceof Error ? problem.message : "Could not save the correction. Your original input is retained."); }
     finally { setBusy(false); }
   }
-  return <Dialog title={entry.label} onClose={onClose} size="wide" footer={<div className="flex items-center justify-end gap-3"><button type="button" onClick={() => download(entry)} className="text-sm text-navy-800">Download a copy</button>{editable && <button type="button" disabled={busy || !!entry.needsConfirmation && !confirmed} onClick={() => void save()} className="rounded bg-navy-800 px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? "Storing…" : "Save correction and retry"}</button>}</div>}>
+  return <Dialog title={`${editable?"Correct: ":""}${entry.label}`} onClose={onClose} size="wide" footer={<div className="flex items-center justify-end gap-3"><button type="button" onClick={() => download(entry)} className="text-sm text-navy-800">Download a copy</button>{editable && <button type="button" disabled={busy || !!entry.needsConfirmation && !confirmed || stale&&(!latest||!reviewed)} onClick={() => void save()} className="rounded bg-navy-800 px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? "Storing…" : "Save correction and retry"}</button>}</div>}>
     <p className="mb-3 text-sm text-steel">{entry.status === "confirmed" ? "Confirmed by the server." : "Stored on this device. Official invoice numbers and final balances appear after the server confirms the save."}</p>
-    {entry.error && <p className="mb-3 text-sm text-error">{entry.error}</p>}
+    {entry.error&&<div role="alert" className="mb-4 rounded border border-error/30 bg-rose-50 p-3 text-sm"><p className="font-semibold text-error">What needs correcting</p><p className="mt-1 text-ink whitespace-pre-wrap">{entry.error}</p><p className="mt-2 text-steel">Edit the affected fields below, then save the correction to retry this same operation.</p></div>}
+    {stale&&<div className="mb-4 rounded border border-sand p-3 text-sm"><button type="button" disabled={busy} onClick={()=>void loadLatest()} className="rounded border border-sand px-3 py-2">Load latest details for comparison</button>{latest&&<><details className="my-3"><summary>Latest saved details</summary><ValueEditor label="Latest record" value={latest.value} disabled onChange={()=>{}}/></details><label className="flex items-start gap-2"><input type="checkbox" checked={reviewed} onChange={event=>setReviewed(event.target.checked)}/>I compared the latest details with my corrections below and want to save these corrections.</label></>}</div>}
     {entry.compactedAt && <p className="mb-3 text-sm text-steel">This older confirmed operation retains its receipt. Open its saved record for the current details.</p>}
     {error && <p role="alert" className="mb-3 text-sm text-error">{error}</p>}
     {entry.needsConfirmation && <label className="mb-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />I have reviewed the change described above and confirm it.</label>}

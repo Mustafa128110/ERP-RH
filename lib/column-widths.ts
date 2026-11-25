@@ -1,4 +1,4 @@
-// Semantic column names share a width across every list and entry grid.
+// Fixed semantic widths. Record contents never change column geometry.
 export const TABLE_COLUMN_GUTTER = 12;
 export function columnWidthKey(key: string): string {
   if (key.trim() === "#") return "serial";
@@ -15,6 +15,7 @@ export function columnWidthKey(key: string): string {
     ["contact", "customer", "supplier", "party", "displayname"],
     ["date", "documentdate", "paymentdate"],
     ["channel", "saletype"],
+    ["count", "entries", "documents"],
     ["description", "summary", "notes", "note", "reason", "address"],
   ];
   return groups.find((group) => group.includes(normalized))?.[0] ?? normalized;
@@ -23,26 +24,42 @@ export function columnWidthKey(key: string): string {
 export function minimumColumnWidth(key: string): number {
   const canonical = columnWidthKey(key);
   if (canonical === "select") return 48;
-  if (["actions", "action", "remove", "pdf", "png", "download"].includes(canonical)) return 40;
-  return 64;
+  if (["serial", "actions", "action", "remove", "pdf", "png", "download", "setup", "unitrules", "basequantity"].includes(canonical)) return 64;
+  if (canonical === "age") return 96;
+  if (canonical === "count") return 160;
+  if (["return", "marketbuy", "marketpurchase"].includes(canonical)) return 96;
+  if (columnContentKind(key) === "number") return 256;
+  if (columnContentKind(key) === "date") return /time|created|updated/.test(canonical) ? 208 : 144;
+  if (canonical === "item" || canonical === "contact") return 320;
+  if (canonical === "description") return 320;
+  if (canonical === "unit") return 112;
+  if (canonical === "status") return 144;
+  if (/accountnumber|iban/.test(canonical)) return 320;
+  return 176;
+}
+
+export function columnContentKind(key: string, align?: "left" | "right"): "text" | "number" | "date" {
+  const canonical = columnWidthKey(key);
+  if (canonical === "serial" || align === "right" || /^(quantity|unitprice|ratelist|total|paid|balance|amount|debit|credit|onhand|valuation|stock|revenue|cost|grossprofit|netprofit|profit|expenses|adjustments|entries|count|age|available|opening|closing|tax|discount|shipping|rate\d*)$/.test(canonical)) return "number";
+  if (/date|createdat|updatedat|closedat|timestamp|^month$|^period$/.test(canonical)) return "date";
+  return "text";
+}
+
+export function fixedColumnMinimum(column: {key: string; align?: "left" | "right"; width?: string | number}): number {
+  const compact = ["serial", "age", "count"].includes(columnWidthKey(column.key));
+  const semantic = columnContentKind(column.key, column.align) === "number" && !compact ? 256 : minimumColumnWidth(column.key);
+  return Math.max(semantic, typeof column.width === "number" ? column.width : 0);
 }
 
 export function columnGrowWeight(key: string): number {
   const canonical = columnWidthKey(key);
-  if (["serial", "select", "actions", "action", "remove", "pdf", "png", "download", "return", "marketbuy", "marketpurchase"].includes(canonical)) return 0;
-  if (canonical === "item" || canonical === "contact") return 5;
-  if (canonical === "description") return 6;
-  if (["date", "unit", "quantity", "status", "age"].includes(canonical)) return 0.75;
-  if (["total", "paid", "balance", "amount", "debit", "credit", "unitprice", "ratelist"].includes(canonical)) return 1;
-  return 2;
+  if (["serial", "select", "actions", "action", "remove", "pdf", "png", "download", "return", "marketbuy", "marketpurchase", "setup", "unitrules", "basequantity", "unit", "status"].includes(canonical) || columnContentKind(key) !== "text") return 0;
+  if (canonical === "item" || canonical === "contact") return 3;
+  if (canonical === "description") return 4;
+  return 1;
 }
 
-export function fittedColumnWidth(headerWidth: number, contentWidths: number[], minimum = 64): number {
-  return Math.ceil(Math.max(minimum, headerWidth ? headerWidth + TABLE_COLUMN_GUTTER * 2 + 28 : 0, ...contentWidths.map((width) => width + TABLE_COLUMN_GUTTER * 2 + 8)));
-}
-
-// Keep expansion separate from measured minima. Fixed-layout HTML tables do not
-// reliably resolve mixed percentage/length calc() widths on <col> elements.
+// Only text columns share spare viewport width; figures and dates stay fixed.
 export function createColumnLayout(columns: {key: string; minimum: number; grow?: number}[], availableWidth = 0) {
   const minimumWidth = columns.reduce((sum, column) => sum + column.minimum, 0);
   let weights = columns.map(column => column.grow ?? columnGrowWeight(column.key));

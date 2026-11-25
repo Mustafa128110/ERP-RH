@@ -6,6 +6,7 @@ import type { ReportResult } from "@/lib/queries/reports";
 import type { ReportSlug } from "@/lib/report-constants";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
+import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 import { errorTextClass, iconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import { money, qty } from "@/lib/format";
@@ -99,7 +100,7 @@ export function ReportView({
         </button>
       </PageHeader>
 
-      {report.note && <p className="shrink-0 rounded border border-sand bg-ivory p-3 text-sm text-steel">{report.note}</p>}
+      {report.note && <WorkspaceControls label="Report details"><p className="shrink-0 rounded border border-sand bg-ivory p-3 text-sm text-steel">{report.note}</p></WorkspaceControls>}
       {error && <p role="alert" className={`${errorTextClass} shrink-0`}>{error}</p>}
 
       <DataTable
@@ -111,7 +112,7 @@ export function ReportView({
       />
 
       {report.totals && (
-        <dl className="flex shrink-0 flex-col gap-3 rounded-lg border border-sand bg-white px-4 py-3 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-6">
+        <WorkspaceControls label="Report totals"><dl className="flex shrink-0 flex-col gap-3 rounded-lg border border-sand bg-white px-4 py-3 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-6">
           {report.columns
             .filter((c) => c.money || c.qty)
             .map((c) => (
@@ -120,7 +121,7 @@ export function ReportView({
                 <dd className="numeric-contain text-right text-base font-semibold tabular-nums text-navy-800">{format(c, report.totals![c.key])}</dd>
               </div>
             ))}
-        </dl>
+        </dl></WorkspaceControls>
       )}
     </div>
   );

@@ -5,6 +5,8 @@ import { COMMAND_EVENT, COMMAND_LIMIT_BYTES, encodeArgument, commandLabel, type 
 import { tableForCommand } from "@/lib/command-tables";
 import { decodeCacheValue } from "@/lib/cache-codec";
 import { clearDraft, draftOperationId } from "@/lib/draft";
+import {publishLocalCommand} from "./local-record-store";
+import {announceServerChange} from "./live-change";
 
 const revisions = new Map<string, string>();
 let revisionUser: string | null = null;
@@ -87,6 +89,7 @@ export async function queueBackgroundAction(action: string, rawArgs: unknown[], 
     if (["expenses.createExpensesBatch", "payments.createPaymentsBatch", "accounts.createChequesBatch"].includes(action)) args[1] = command.id;
     if (new TextEncoder().encode(JSON.stringify(command)).length > COMMAND_LIMIT_BYTES - 1000) return { error: "This batch is too large. Split it before saving." };
     await addCommand(command);
+    publishLocalCommand(command);
     if (recoveryKey) clearDraft(recoveryKey);
     if (draftKey && batchEditor?.dataset.commandRevisions) clearDraft(draftKey);
     pendingHint++;
@@ -105,7 +108,11 @@ export function backgroundAction<F extends AsyncAction>(action: string, confirme
   return (async (...args: unknown[]) => {
     // Quick-add feeds a foreign-key picker and needs a real server ID before
     // its parent can use the new option. Those dialogs explicitly opt out.
-    if (document.querySelector('[data-requires-confirmed-save="true"]')) return confirmedAction(...args as never[]);
+    if (document.querySelector('[data-requires-confirmed-save="true"]')) {
+      const result=await confirmedAction(...args as never[]);
+      if(result&&typeof result==="object"&&!("error" in result&&result.error))announceServerChange();
+      return result;
+    }
     return queueBackgroundAction(action, args);
   }) as unknown as F;
 }

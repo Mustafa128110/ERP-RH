@@ -11,6 +11,8 @@ import { createLocalOutboxStore, type OutboxKind, type OutboxEntry } from "@/lib
 import { invalidateClientCache } from "@/lib/client-cache";
 import { noteOfflineCacheInvalidated } from "@/lib/offline-readiness";
 import { DRAFT_STATUS_EVENT, draftStorageFailures } from "@/lib/draft";
+import {publishLocalCommands} from "@/lib/local-record-store";
+import {subscribeServerChanges} from "@/lib/live-change";
 
 type Entry = Omit<OutboxEntry, "kind"> & { kind: string };
 type Context = {
@@ -66,6 +68,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [draftFailures, setDraftFailures] = useState<Record<string, boolean>>({});
   const storageWarning = queueWarning || (Object.values(draftFailures).some(Boolean) ? "This browser could not preserve a draft. Keep the form open; save it or download a copy before leaving." : null);
   const commandsRef = useRef<SavedCommand[]>([]);
+  const confirmations = useRef<string|null>(null);
+  const needsRouteRefresh=useRef(false);
   const running = useRef(false);
   const ready = useRef<string | null>(null);
   const router = useRouter();
@@ -78,7 +82,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     commandsRef.current = rows;
     setPendingCommandCount(rows.filter(unresolved).length);
     setCommands(rows);
-  }, [userId]);
+    publishLocalCommands(userId,rows);
+    const confirmed=rows.filter(row=>row.status==="confirmed").map(row=>`${row.id}:${row.updatedAt}`).join("|");
+    if(confirmations.current!==null&&confirmations.current!==confirmed)needsRouteRefresh.current=true;
+    if(needsRouteRefresh.current&&navigator.onLine){needsRouteRefresh.current=false;invalidateClientCache();noteOfflineCacheInvalidated();startTransition(()=>router.refresh());}
+    confirmations.current=confirmed;
+  }, [userId,router]);
   const syncNow = useCallback(async () => {
     if (!userId || ready.current !== userId || running.current || !navigator.onLine || !commandsRef.current.some(row => row.status === "pending" || row.status === "syncing")) return;
     running.current = true;
@@ -99,9 +108,15 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     } catch (error) { warn(error); }
     finally { running.current = false; }
   }, [userId, refresh, router, warn]);
+  useEffect(()=>subscribeServerChanges(()=>{
+    needsRouteRefresh.current=true;
+    void refresh().catch(warn);
+  }),[refresh,warn]);
   useEffect(() => {
     let live = true;
     ready.current = null;
+    confirmations.current = null;
+    needsRouteRefresh.current=false;
     void (async () => {
       commandsRef.current = [];
       setPendingCommandCount(0);
@@ -123,7 +138,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     const changed = () => { void refresh().then(() => {
       if (commandsRef.current.some(row => row.status === "pending" && row.attempts === 0)) void syncNow();
     }).catch(warn); };
-    const kick = () => { void syncNow(); };
+    const kick = () => { void refresh().then(syncNow).catch(warn); };
     // Storage events update the UI immediately. Drain periodically as well so
     // a transient error cannot form a tight automatic retry loop.
     const unsubscribe = subscribeCommands(changed);

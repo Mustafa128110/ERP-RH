@@ -90,6 +90,8 @@ for (const file of ["components/modules/SnapshotExport.tsx", "components/modules
   assert.ok(!read(file).includes("const cell ="), `${file} must not reimplement CSV escaping`);
 }
 
+contains("lib/actions/products.ts", "stockSheetError(rows)", "saved.revision!==row._revision", "Only an administrator can edit the stock sheet", 'getLiveSession()');
+contains("lib/actions/settings.ts", "Number.isFinite(Number(raw))");
 const pkg = JSON.parse(read("package.json")) as { dependencies: Record<string, string> };
 assert.equal(pkg.dependencies.next, "^16.3.1");
 

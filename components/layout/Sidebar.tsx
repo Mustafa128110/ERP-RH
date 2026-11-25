@@ -137,7 +137,7 @@ export function Sidebar({ permissions }: { permissions: string[] }) {
               entirely, which is why this has to exist — without it a phone has
               no navigation at all. ----------------------------------------- */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Navigation">
           <div className="absolute inset-0 bg-scrim/60 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} role="presentation" />
           {/* max-w-[85vw] so the page behind stays visible — a full-width menu
               reads as a navigation *page* and loses the sense of going back. */}

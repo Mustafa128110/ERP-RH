@@ -86,12 +86,13 @@ export async function queryProductRates(scopeIds: string[]): Promise<ProductRate
              WHERE iucr.item_id = i.id
            ), '') AS rule_ids,
            cat.name AS category, br.name AS brand, oh.on_hand,
-           coalesce(rl.purchase_rate_1, c.unit_cost) AS purchase_rate_1,
-           rl.purchase_rate_2, rl.purchase_rate_3,
-           s.unit_price AS sales_rate
+           coalesce((pr.value::jsonb->>'rate1')::numeric, rl.purchase_rate_1, c.unit_cost) AS purchase_rate_1,
+           coalesce((pr.value::jsonb->>'rate2')::numeric,rl.purchase_rate_2) AS purchase_rate_2, coalesce((pr.value::jsonb->>'rate3')::numeric,rl.purchase_rate_3) AS purchase_rate_3,
+           coalesce((pr.value::jsonb->>'salesRate')::numeric,s.unit_price) AS sales_rate
     FROM rate_list rl
     JOIN items i ON i.id = rl.id
     JOIN companies co ON co.id = i.company_id
+    LEFT JOIN settings pr ON pr.company_id=i.company_id AND pr.key='product_rates:'||i.id::text
     LEFT JOIN categories cat ON cat.id = i.category_id
     LEFT JOIN brands br ON br.id = i.brand_id
     -- One grouped pass over the movement ledger, joined once — not a LATERAL

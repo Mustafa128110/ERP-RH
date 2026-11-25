@@ -12,7 +12,7 @@ import { gridKeyDown, gridSelectionProps } from "@/components/ui/grid-keys";
 import { money, resolveAdjustment, round1, todayISO } from "@/lib/format";
 import { DEFAULT_SALE_TYPE, entryChannel, type SaleType } from "@/lib/sale-constants";
 import { ChannelField, useChannels } from "@/components/layout/ChannelProvider";
-import { useTableColumnLayout } from "@/components/ui/useGlobalColumnWidths";
+import { useTableColumnLayout } from "@/components/ui/useTableColumnLayout";
 import type { ColumnDef, Row } from "@/lib/table";
 import { inCompany } from "@/lib/contact-scope";
 import { clearDraft } from "@/lib/draft";

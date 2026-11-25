@@ -51,9 +51,10 @@ export function queryItemOptions(scope: SQL | undefined): Promise<ItemOptionRow[
            items.company_id AS "companyId",
            items.base_unit_id AS "baseUnitId",
            items.taxable,
-           purchase_rates.rate,
-           sales_rates.rate AS "salesRate"
+           coalesce((pr.value::jsonb->>'rate1')::numeric,purchase_rates.rate) AS rate,
+           coalesce((pr.value::jsonb->>'salesRate')::numeric,sales_rates.rate) AS "salesRate"
     FROM items
+    LEFT JOIN settings pr ON pr.company_id=items.company_id AND pr.key='product_rates:'||items.id::text
     LEFT JOIN purchase_rates ON purchase_rates.item_id = items.id
     LEFT JOIN sales_rates ON sales_rates.item_id = items.id
     WHERE ${scope ?? sql`true`}

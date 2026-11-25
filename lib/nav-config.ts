@@ -22,9 +22,6 @@ export const navSections: NavSection[] = [
     items: [
       { label: "Categories", href: "/inventory/categories", permission: "categories.view" },
       { label: "Brands", href: "/inventory/brands", permission: "brands.view" },
-      { label: "Units", href: "/inventory/units", permission: "units.view" },
-      { label: "Unit Conversions", href: "/inventory/unit-conversions", permission: "unit_conversions.view" },
-      { label: "Warehouses", href: "/inventory/warehouses", permission: "locations.view" },
       { label: "Stock", href: "/inventory/stock", permission: ["stock.view", "products.view", "stock_transfers.view", "stock_adjustments.view"] },
       { label: "Stock Movements", href: "/inventory/stock-movements", permission: "stock.view" },
     ],
@@ -68,7 +65,7 @@ export const navSections: NavSection[] = [
       { label: "Users", href: "/users", permission: "users.view" },
       { label: "Roles", href: "/roles", permission: "roles.view" },
       { label: "Audit Logs", href: "/audit-logs", permission: "audit.view" },
-      { label: "Settings", href: "/settings", permission: "settings.view" },
+      { label: "Settings", href: "/settings", permission: ["settings.view", "units.view", "unit_conversions.view", "locations.view"] },
     ],
   },
 ];

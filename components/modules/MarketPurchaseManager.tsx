@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { cancelMarketPurchase, confirmMarketPurchases } from "@/lib/client-actions/market-purchases";
 import { DateField } from "@/components/ui/DateField";
 import { PageHeader } from "@/components/ui/PageHeader";
+import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { errorTextClass, fieldClass, labelClass, labelTextClass, primaryActionClass, successTextClass } from "@/components/ui/form-styles";
 import { formatDate, money, qty, todayISO } from "@/lib/format";
@@ -94,8 +95,8 @@ function MarketPurchaseManagerBody({
   return (
     <div className="flex h-full flex-col gap-4">
       <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) on this page waiting for confirmation`} />
-      <HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/>
-      <div className="overflow-x-auto rounded border border-sand bg-white">
+      <WorkspaceControls label="Market purchase filters"><HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/></WorkspaceControls>
+      <div data-list="global" tabIndex={0} className="min-h-0 flex-1 overflow-auto rounded border border-sand bg-white">
         <table className="w-full min-w-[64rem] table-fixed border-collapse text-sm">
           <colgroup>
             <col className="w-10" style={{ width: "2.5rem" }} />
@@ -106,7 +107,7 @@ function MarketPurchaseManagerBody({
             <col className="w-40" style={{ width: "10rem" }} />
             <col className="w-36" style={{ width: "9rem" }} />
           </colgroup>
-          <thead className="bg-ivory text-left text-xs uppercase tracking-wide text-steel">
+          <thead className="sticky top-0 z-10 bg-ivory text-left text-xs uppercase tracking-wide text-steel">
             <tr>
               <th className="w-10 border-b border-sand p-2" />
               <th className="w-32 border-b border-sand p-2">Sale</th>
@@ -139,7 +140,7 @@ function MarketPurchaseManagerBody({
       </div>
 
       {pendingRows.length > 0 && (
-        <form action={action} className="rounded border border-sand bg-white p-4">
+        <WorkspaceControls label="Confirm market purchase"><form action={action} className="rounded border border-sand bg-white p-4">
           <input type="hidden" name="operationId" value={operationId} />
           <input type="hidden" name="requestsJson" value={JSON.stringify(payload)} />
           <div className="flex flex-wrap items-end gap-3">
@@ -157,11 +158,11 @@ function MarketPurchaseManagerBody({
           </div>
           {state?.error && <p className={`mt-3 ${errorTextClass}`}>{state.error}</p>}
           {state?.success && <p className={`mt-3 ${successTextClass}`}>{isQueuedSave(state) ? saveStatus(state) : "Market purchase posted, stock balanced, and Item Purchase expense recorded."}</p>}
-        </form>
+        </form></WorkspaceControls>
       )}
 
-      {requests.some(row=>row.status==="cancelled") && <div className="rounded border border-sand p-4 text-sm"><h2 className="font-semibold">Cancelled requests</h2>{requests.filter(row=>row.status==="cancelled").map(row=><p key={row.id}>{row.saleNumber} · {row.item} · {qty(row.quantity)} {row.unit}</p>)}</div>}
-      {confirmedDocuments.length > 0 && <div className="rounded border border-sand bg-white p-4"><h2 className="mb-3 font-semibold text-navy-800">Confirmed purchases</h2><div className="flex flex-col divide-y divide-sand">{confirmedDocuments.map((doc) => <ConfirmedPurchase key={doc.id} {...doc} />)}</div></div>}
+      {requests.some(row=>row.status==="cancelled") && <WorkspaceControls label="Cancelled requests"><div className="rounded border border-sand p-4 text-sm"><h2 className="font-semibold">Cancelled requests</h2>{requests.filter(row=>row.status==="cancelled").map(row=><p key={row.id}>{row.saleNumber} · {row.item} · {qty(row.quantity)} {row.unit}</p>)}</div></WorkspaceControls>}
+      {confirmedDocuments.length > 0 && <WorkspaceControls label="Confirmed purchases"><div className="rounded border border-sand bg-white p-4"><h2 className="mb-3 font-semibold text-navy-800">Confirmed purchases</h2><div className="flex flex-col divide-y divide-sand">{confirmedDocuments.map((doc) => <ConfirmedPurchase key={doc.id} {...doc} />)}</div></div></WorkspaceControls>}
     </div>
   );
 }

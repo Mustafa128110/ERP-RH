@@ -21,9 +21,43 @@ the same warehouse, preserving recorded FIFO cost. Outputs can be new SKUs with
 their own base units and selling rates. Reports → Profit opens historical months
 and their daily results, including returns, expenses and closing adjustments.
 Table sorts accumulate priorities (newest first); sales invoices start by number.
-Columns share measured content minimums and fill wider screens in proportion to
-their purpose. Names and descriptions receive more space; serial and action
-columns stay compact. A fixed 24px reading gap remains when tables scroll.
+Columns use fixed widths by purpose, with dates and figures kept on one line.
+Names and descriptions wrap and receive spare viewport width. Tables fill the
+available screen and scroll horizontally on smaller screens, retaining every
+column. Scrolling expands the table to the full viewport; a three-dot button
+opens the existing controls in a circular menu. Returning to the top restores
+the heading and toolbar. Filters and selections survive the move. A fixed 24px
+reading gap remains between columns. `npm run check:table-layout:browser` checks
+the shared table and workspace with isolated browser fixtures.
+
+Product sizes use readable fractions and multiplication signs (for example,
+`1 1/2x5/8` displays as `1½×⅝`) in lists, pickers and invoices. Stored product
+identities remain unchanged and searches accept either spelling.
+
+Stock conversions use the shared spreadsheet keyboard controls, placeholders
+and automatic trailing rows. Recent conversion templates are remembered per
+user on the device. Negative inputs are allowed: available FIFO layers retain
+their cost and shortages use recorded average incoming cost, or zero if no
+incoming cost exists. Units and their conversion rules share one Settings
+workspace; Warehouses are also linked from Settings.
+
+Administrators can use **Stock → Edit stock in table → Save page** to edit
+catalogue cells and price defaults without a popup. Counts require a warehouse,
+date and reason, and create a stock adjustment. Historical invoice prices and
+calculated valuations remain derived. The sheet keeps a recoverable local draft,
+requires current record versions, and saves the catalogue, counts and price
+changes atomically. Settings provides separate whole-row negative-stock (red)
+and reorder-warning (amber) switches.
+
+Queued changes appear immediately as pending and are shared with other tabs of
+the same user. Server confirmations refresh those tabs automatically. Corrections
+show the exact refusal and editable fields; stale updates require comparison
+with the latest saved details. Browser titles retain the route label after reload.
+`npm run check:live-updates:browser` checks offline edits, cross-tab updates,
+correction, account isolation and title recovery. `npm run check:single-company:browser`
+also covers conversion templates and direct stock-cell editing.
+`npm run check:stock-sheet:db` requires an explicitly supplied disposable loopback
+`DATABASE_URL_DIRECT`; it refuses hosted databases and rolls its fixtures back.
 
 ## Company consolidation and recovery
 
@@ -46,12 +80,32 @@ Migration `0076_channel_ledgers_stock_conversion` follows the same procedure wit
 financial fingerprints before committing and preserves every existing posting.
 Run the database checks against the isolated rehearsal database before applying.
 
+Legacy M52 channel recovery uses the pre-consolidation backup as evidence:
+`node scripts/extract-m52-backup-evidence.mjs <old-backup-folder>` verifies all
+original table digests and extracts M52 ownership and ledger balances locally.
+After taking and restore-verifying a fresh backup, run
+`npm run check:m52-channel -- <fresh-restore-database>`, then
+`node --env-file=.env scripts/repair-m52-channel.mjs --local <fresh-backup-folder>`.
+Only a successful rehearsal of the exact script and evidence enables `--apply`.
+Portable restores omit provider-specific grants; the verification script reapplies
+`0068`/`0069` permission hardening before accepting the restored database.
+The repair uses the existing M52 channel, restores opening lookup pointers, audits
+each corrected document and invalidates shared caches. It refuses mismatched
+ownership, balances or allocations, and verifies all financial and unrelated
+records before committing. A replay makes no further changes.
+After applying, `node --env-file=.env scripts/verify-m52-channel.mjs <fresh-backup-folder>`
+independently checks the committed financial fingerprints, M52 balances, opening
+links and audit entries without writing to the ERP.
+
 `scripts/create-portable-backup.mjs` copies all public ERP, authentication and
 migration-history tables in one consistent read snapshot into a local clone,
 checks every row digest, and creates an encrypted PostgreSQL recovery archive.
 The clone template must match the current schema exactly; select a verified
 template with `BACKUP_TEMPLATE_DATABASE`. `scripts/verify-backup-restore.mjs`
 restores the archive into a new loopback database and checks every table again.
+On slow connections, `BACKUP_COMPRESS_TRANSPORT=1` uses the hosted database's
+existing pgcrypto support and the loopback maintenance database to compress and
+encrypt the snapshot during transfer; archive contents and verification stay the same.
 Backups stay local; source/configuration recovery archives include `.env` and
 must remain encrypted. Provider services need provisioning during recovery.
 

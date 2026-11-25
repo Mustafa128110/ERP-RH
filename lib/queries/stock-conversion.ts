@@ -20,12 +20,17 @@ async function inputCosts(tx:Tx,locationId:string|null,requests:{itemId:string;q
   coalesce(sum(it.base_quantity) FILTER(WHERE it.movement=-1),0) AS issued
   FROM requested r LEFT JOIN document_lines dl ON dl.item_id=r.item_id AND dl.location_id IS NOT DISTINCT FROM ${locationId}::uuid
   LEFT JOIN inventory_transactions it ON it.document_line_id=dl.id GROUP BY r.position),
+ incoming AS (SELECT r.position,coalesce(
+  sum(it.total_cost) FILTER(WHERE dl.location_id IS NOT DISTINCT FROM ${locationId}::uuid)/nullif(sum(it.base_quantity) FILTER(WHERE dl.location_id IS NOT DISTINCT FROM ${locationId}::uuid),0),
+  sum(it.total_cost)/nullif(sum(it.base_quantity),0),0) AS average_cost
+  FROM requested r LEFT JOIN document_lines dl ON dl.item_id=r.item_id
+  LEFT JOIN inventory_transactions it ON it.document_line_id=dl.id AND it.movement=1 AND it.total_cost IS NOT NULL GROUP BY r.position),
  layers AS (SELECT r.position,it.base_quantity AS quantity,coalesce(it.total_cost/nullif(it.base_quantity,0),0) AS cost,
   coalesce(sum(it.base_quantity) OVER(PARTITION BY r.position ORDER BY d.document_date,it.created_at,it.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start
   FROM requested r JOIN document_lines dl ON dl.item_id=r.item_id AND dl.location_id IS NOT DISTINCT FROM ${locationId}::uuid
   JOIN inventory_transactions it ON it.document_line_id=dl.id AND it.movement=1 JOIN documents d ON d.id=dl.document_id),
- priced AS (SELECT r.position,b.available,round(coalesce(sum((greatest(0,l.quantity-greatest(0,b.issued-l.start))-greatest(0,l.quantity-greatest(0,b.issued+r.quantity-l.start)))*l.cost),0),2) AS cost
-  FROM requested r JOIN balances b ON b.position=r.position LEFT JOIN layers l ON l.position=r.position GROUP BY r.position,b.available)
+ priced AS (SELECT r.position,b.available,round(coalesce(sum((greatest(0,l.quantity-greatest(0,b.issued-l.start))-greatest(0,l.quantity-greatest(0,b.issued+r.quantity-l.start)))*l.cost),0)+greatest(0,r.quantity-greatest(0,b.available))*a.average_cost,2) AS cost
+  FROM requested r JOIN balances b ON b.position=r.position JOIN incoming a ON a.position=r.position LEFT JOIN layers l ON l.position=r.position GROUP BY r.position,b.available,r.quantity,a.average_cost)
  SELECT position,available::text,cost::text,sum(cost) OVER()::text AS "totalCost" FROM priced ORDER BY position`)];
 }
 export type ConversionPost={companyId:string;channelId:string;locationId:string|null;documentDate:string;note:string;inputs:ConversionInput[];outputs:ConversionOutput[];operationId:string;userId:string;documentTypeId:typeof documentTypes.$inferSelect.id;series:typeof documentTypes.$inferSelect.series};
@@ -40,8 +45,6 @@ export async function postStockConversion(tx:Tx,input:ConversionPost){
  try{inputQuantities=(await resolveBaseQuantities(tx,input.inputs.map(row=>({itemId:row.itemId,unitId:row.unitId,quantity:row.quantity})))).map(quantity=>Math.round(quantity*1000)/1000);}catch(error){if(error instanceof MissingUnitConversionError)throw new OperationError(error.message);throw error;}
  if(inputQuantities.some(quantity=>quantity<=0))throw new OperationError("Input quantities must be at least 0.001 base units.");
  const priced=await inputCosts(tx,input.locationId,input.inputs.map((row,index)=>({itemId:row.itemId,quantity:inputQuantities[index]})));
- const unavailable=priced.find(row=>Number(row.available)+1e-9<inputQuantities[row.position]);
- if(unavailable)throw new OperationError(`Input ${unavailable.position+1}: only ${unavailable.available} base units are available in this warehouse.`);
  const fresh=input.outputs.map((row,index)=>({row,index})).filter(({row})=>!row.itemId);
  const numbers=await nextSequenceRange(SKU_SCOPE,fresh.length,tx);
  const newProducts=fresh.map(({row,index},position)=>({id:randomUUID(),companyId:input.companyId,name:toTitleCase(row.newName)!,sku:formatSku(numbers[position]),baseUnitId:row.unitId,index}));

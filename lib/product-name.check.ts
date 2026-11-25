@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import {productName,productSearchText,findProductName} from "./product-name";
+assert.equal(productName("Bolt 5/8x16"),"Bolt ⅝×16");
+assert.equal(productName("Pipe 1 1/2 X 3/4"),"Pipe 1½×¾");
+assert.equal(productName("Pipe 1-1/2x16"),"Pipe 1½×16");
+assert.equal(productName("Nut 2/4"),"Nut ½");
+assert.equal(productName("Washer 13/16x2"),"Washer 13⁄16×2");
+assert.equal(productName("Box xlarge 1/0"),"Box xlarge 1/0");
+assert.equal(productSearchText("1 1/2x16"),productSearchText("1½×16"));
+assert.equal(productName(productName("⅝x16")),"⅝×16");
+const products=[{id:"a",name:"Bolt 5/8x16"},{id:"b",name:"Bolt ⅝×16"}];
+assert.equal(findProductName(products,"Bolt ⅝×16")?.id,"b","an exact selection retains its real identity");
+assert.equal(findProductName(products,"bolt ⅝×16"),undefined,"equivalent labels cannot guess between two products");
+console.log("product fractions, mixed sizes, multiplication and equivalent search checks passed");

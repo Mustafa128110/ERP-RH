@@ -72,6 +72,7 @@ export const commandActions = {
   "payments.createPaymentsBatch": payments.createPaymentsBatch,
   "payments.updatePayment": payments.updatePayment,
   "payments.deletePayment": payments.deletePayment,
+  "products.saveStockSheet": products.saveStockSheet,
   "products.deleteProducts": products.deleteProducts,
   "products.assignBaseUnitToProducts": products.assignBaseUnitToProducts,
   "products.createProductsBatch": products.createProductsBatch,

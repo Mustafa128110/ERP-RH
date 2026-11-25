@@ -37,6 +37,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
           <p className="text-sm text-steel">Thresholds and text this app actually reads. Royal Hardware.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {(["units.view","unit_conversions.view"].some(key=>session.globalPermissions.has(key)||[...session.permissionsByCompany.values()].some(set=>set.has(key))))&&<Link href="/inventory/units" className="rounded border border-sand px-4 py-2 text-sm">Units &amp; conversion rules</Link>}
+          {(session.globalPermissions.has("locations.view")||[...session.permissionsByCompany.values()].some(set=>set.has("locations.view")))&&<Link href="/inventory/warehouses" className="rounded border border-sand px-4 py-2 text-sm">Warehouses</Link>}
           {overview && (
             <Link href="/settings/backups" className="flex h-11 items-center rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory">
               Backups &amp; Export →

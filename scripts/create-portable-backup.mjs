@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import {spawnSync} from 'node:child_process';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomBytes} from 'node:crypto';
 const baseline=process.env.BACKUP_TEMPLATE_DATABASE||JSON.parse(readFileSync('db-export/verified-20261121T133718Z/restore-verification.json','utf8')).database;
 assert.match(baseline,/^(restore|feature_check)_\d+$/);
 const id=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+Z/,'Z');
@@ -15,6 +15,8 @@ if(process.env.BACKUP_DB_PORT)target.port=process.env.BACKUP_DB_PORT;
 const remote=postgres(target.toString(),{max:1,prepare:false,ssl:'require',connect_timeout:20,...(process.env.BACKUP_HOST_ADDR?{host:process.env.BACKUP_HOST_ADDR}:{}),onnotice:()=>{}});
 const admin=postgres('postgresql://restore_verify@127.0.0.1:55474/postgres',{max:1,onnotice:()=>{}});
 const schemas=['public','auth','drizzle','supabase_migrations'];
+const compressedTransport=process.env.BACKUP_COMPRESS_TRANSPORT==='1';
+const transportKey=compressedTransport?randomBytes(32).toString('base64url'):null;
 const quote=value=>'"'+value.replaceAll('"','""')+'"';
 const literal=value=>"'"+value.replaceAll("'","''")+"'";
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
@@ -23,18 +25,52 @@ function run(exe,args,options={}){const result=spawnSync(exe,args,{windowsHide:t
 try{
  const snapshot=await remote.begin('isolation level repeatable read read only',async tx=>{
   await tx`SET LOCAL TIME ZONE 'UTC'`;
+  await tx`SET LOCAL statement_timeout='20min'`;
   console.log('Source snapshot connected');
   const [storage]=await tx`SELECT (SELECT count(*)::int FROM storage.objects) AS objects,(SELECT count(*)::int FROM storage.buckets) AS buckets`;
   assert.equal(storage.objects,0,'Uploaded files require a separate storage backup');assert.equal(storage.buckets,0);
   const columns=[...await tx.unsafe(schemaQuery)];
   console.log('Source schema read');
   const tables=[...new Map(columns.map(column=>[`${column.schema}.${column.name}`,{schema:column.schema,name:column.name}])).values()];
-  const data=[...await tx.unsafe(tables.map(table=>`SELECT ${literal(table.schema)} AS schema,${literal(table.name)} AS name,count(*)::int AS rows,md5(coalesce(string_agg(to_jsonb(t)::text,E'\\n' ORDER BY to_jsonb(t)::text COLLATE "C"),'')) AS digest,coalesce(json_agg(t),'[]'::json)::text AS data FROM ${quote(table.schema)}.${quote(table.name)} t`).join(' UNION ALL '))];
+  const projection=`SELECT count(*)::int AS rows,md5(coalesce(string_agg(to_jsonb(t)::text,chr(10) ORDER BY to_jsonb(t)::text COLLATE "C"),'')) AS digest${compressedTransport?`,encode(extensions.pgp_sym_encrypt(coalesce(json_agg(t),'[]'::json)::text,${literal(transportKey)},'compress-algo=1,compress-level=6'),'base64') AS data`:''} FROM %I.%I t`;
+  const contents=[...await tx.unsafe(`SELECT s.schema,s.name,x.rows,x.digest${compressedTransport?',x.data':''}
+   FROM (SELECT n.nspname AS schema,c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname IN (${schemas.map(literal).join(',')}) AND c.relkind='r') s
+   CROSS JOIN LATERAL XMLTABLE('/table/row' PASSING query_to_xml(format(${literal(projection)},
+    s.schema,s.name),false,false,'') COLUMNS rows int PATH 'rows',digest text PATH 'digest'${compressedTransport?",data text PATH 'data'":''}) x`)];
+  // Keep network responses bounded. A whole table in one JSON field can stall
+  // a pooled connection; a cursor preserves the same read snapshot and exact
+  // numeric JSON without sending multi-megabyte fields over that connection.
+  let data=contents;
+  if(!compressedTransport){
+  const records=new Map(tables.map(table=>[`${table.schema}.${table.name}`,[]]));
+  const rowsQuery=tables.map(table=>`SELECT ${literal(table.schema)} AS schema,${literal(table.name)} AS name,to_jsonb(t)::text AS data FROM ${quote(table.schema)}.${quote(table.name)} t`).join(' UNION ALL ');
+  let streamed=0;
+  for await(const batch of tx.unsafe(rowsQuery).cursor(500)){
+   for(const row of batch)records.get(`${row.schema}.${row.name}`).push(row.data);
+   const previous=streamed;streamed+=batch.length;
+   if(Math.floor(previous/1000)!==Math.floor(streamed/1000))console.log(JSON.stringify({stage:'source rows streamed',rows:streamed}));
+  }
+  data=contents.map(table=>{
+   const rows=records.get(`${table.schema}.${table.name}`);
+   assert.equal(rows.length,table.rows,'Every source row must be streamed before backing up');
+   return {...table,data:'['+rows.join(',')+']'};
+  });
+  }
   console.log('Source rows read');
   const sequences=[...await tx`SELECT schemaname AS schema,sequencename AS name FROM pg_sequences WHERE schemaname IN ('public','auth','drizzle','supabase_migrations')`];
   const values=sequences.length?[...await tx.unsafe(sequences.map(sequence=>`SELECT ${literal(sequence.schema+'.'+sequence.name)} AS name,last_value::text AS value,is_called AS called FROM ${quote(sequence.schema)}.${quote(sequence.name)}`).join(' UNION ALL '))]:[];
   return {columns,data,values,storage};
  });
+ if(compressedTransport){
+  // Only the loopback maintenance database needs this extension. The hosted
+  // database already supplies it; its schema and records are never changed.
+  await admin.unsafe('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+  const decoded=await admin`SELECT t.schema,t.name,pgp_sym_decrypt(decode(t.data,'base64'),${transportKey}) AS data
+   FROM json_to_recordset(${admin.json(snapshot.data)}::json) AS t(schema text,name text,data text)`;
+  const byTable=new Map(decoded.map(table=>[`${table.schema}.${table.name}`,table.data]));
+  snapshot.data=snapshot.data.map(table=>({...table,data:byTable.get(`${table.schema}.${table.name}`)}));
+ }
  console.log(JSON.stringify({stage:'source snapshot read',tables:snapshot.data.length,rows:snapshot.data.reduce((sum,table)=>sum+table.rows,0)}));
  const database=`portable_${Date.now()}`;await admin.unsafe(`CREATE DATABASE ${quote(database)} TEMPLATE ${quote(baseline)}`);
  const local=postgres(`postgresql://restore_verify@127.0.0.1:55474/${database}`,{max:1,onnotice:()=>{}});

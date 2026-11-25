@@ -18,6 +18,7 @@ import {
   locations,
   unitConversions,
   units,
+  settings,
 } from "@/lib/db/schema";
 import { getLiveSession, getSession } from "@/lib/auth/session";
 import { requirePermission, requireAnyPermission } from "@/lib/auth/permissions";
@@ -37,6 +38,8 @@ import { assertConsistentRuleGraphs, rebuildItemBaseQuantities } from "@/lib/que
 import { guard, describeDbError, DUPLICATE, type ActionResult, type CreateResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
 import { cachedPageRead } from "@/lib/read-cache";
+import {OperationError} from "@/lib/operation-errors";
+import {stockSheetError,type StockSheetRow} from "@/lib/stock-sheet";
 
 export type { ProductRateRow } from "@/lib/queries/products";
 
@@ -44,6 +47,40 @@ export type { ProductRateRow } from "@/lib/queries/products";
 // stock list, and the product list itself. A price-only edit changes fewer, but
 // this file's writes reach all four.
 const READS = [READ_DOMAIN.products, READ_DOMAIN.sales, READ_DOMAIN.purchases, READ_DOMAIN.stock] as const;
+
+// The sheet uses the catalogue and stock actions' existing safeguards. One
+// enclosing transaction also covers rates, so a refused count saves no cells.
+export async function saveStockSheet(rows:StockSheetRow[],shared:ProductBatchEditShared):Promise<ActionResult>{
+ return guard("Couldn't save the stock sheet.",async()=>{
+  const session=await getLiveSession();requirePermission(session,"products","edit");
+  if(!session.roleNames.some(role=>/^(super\s*admin|administrator|admin)$/i.test(role.trim())))return {error:"Only an administrator can edit the stock sheet."};
+  const invalid=stockSheetError(rows);if(invalid)return {error:invalid};
+  if(new Set(rows.map(row=>row.companyId)).size!==1)return {error:"Save one company's stock sheet at a time."};
+  if(shared.mode!=="none"&&shared.mode!=="adjust")return {error:"Choose catalogue details or a stock count."};
+  const parent=commandContext.getStore(),afterCommit=parent?.afterCommit??[];
+  await db.transaction(async tx=>{
+   await commandContext.run({database:tx,afterCommit},async()=>{
+    const current=await tx.select({id:items.id,companyId:items.companyId,unitId:items.baseUnitId,revision:sql<string>`${items}.xmin::text`}).from(items).where(and(inArray(items.id,rows.map(row=>row.id)),await companyInPermissionScope(items.companyId,session,"products","edit"))).orderBy(items.id).for("update");
+    const byId=new Map(current.map(row=>[row.id,row]));
+    for(const [index,row]of rows.entries()){
+     const saved=byId.get(row.id);
+     if(!saved||saved.companyId!==row.companyId)throw new RowError(`Row ${index+1}: this product is outside your access or was removed.`);
+     if(saved.revision!==row._revision)throw new RowError(`Row ${index+1} (${row.name}): this product changed in another tab. Reload its latest details before saving.`);
+     if(row.targetQty!==""&&saved.unitId!==(row.unitId||null))throw new RowError(`Row ${index+1}: save the base unit change before entering a stock count.`);
+    }
+    const result=await updateProductsBatch(shared,rows);if(result.error)throw new RowError(result.error);
+    const priceEdits=rows.filter(row=>row.rateChanges?.length).map(row=>({companyId:row.companyId,key:`product_rates:${row.id}`,value:JSON.stringify(Object.fromEntries(row.rateChanges!.map(key=>[key,row[key]||null])))}));
+    if(priceEdits.length)await tx.insert(settings).values(priceEdits).onConflictDoUpdate({target:[settings.companyId,settings.key],set:{value:sql`(coalesce(${settings.value},'{}')::jsonb || excluded.value::jsonb)::text`}});
+    await invalidateLookups(CACHE.settings,CACHE.items);
+    await invalidateReads(...READS);
+    await recordAudit({action:"update",entity:"product",companyId:rows[0].companyId,summary:`Stock sheet: ${rows.length} product(s) saved`,detail:"Catalogue and price defaults updated; historical invoice prices preserved."});
+    revalidatePath("/inventory/stock");
+   });
+  });
+  if(!parent)await Promise.allSettled(afterCommit.map(work=>work()));
+  return {success:true};
+ },{[DUPLICATE]:"A product already uses that SKU. Correct the duplicate cell and save again."});
+}
 
 // Auth, then delegate. The SQL lives in lib/queries/products.ts so a check can
 // import and run the real query — this file is "use server", and nothing in it
@@ -897,7 +934,7 @@ export async function updateProductsBatch(
 
 // Carries a row-specific message out of the batch transaction. The outer guard
 // still guarantees that no mutation exception reaches the form boundary.
-class RowError extends Error {}
+class RowError extends OperationError {}
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 

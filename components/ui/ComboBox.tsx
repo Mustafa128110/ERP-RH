@@ -3,6 +3,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { InputHTMLAttributes, KeyboardEvent } from "react";
 import { filterPickerOptions, pickerWindow, PICKER_ROW_HEIGHT, PICKER_HEIGHT } from "@/lib/picker-window";
+import {productName} from "@/lib/product-name";
+import {ProductName} from "./ProductName";
 
 export type ComboOption = { id: string; name: string };
 
@@ -161,7 +163,7 @@ export function ComboBox({
         aria-controls={listId}
         aria-autocomplete="list"
         autoComplete="off"
-        value={value}
+        value={options.some(option=>option.name===value)?productName(value):value}
         placeholder={placeholder}
         className={className}
         onChange={(e) => {
@@ -212,7 +214,7 @@ export function ComboBox({
                 onMouseEnter={() => setHighlight(i)}
                 className={`block w-full truncate px-3 text-left ${i === highlight ? "bg-navy-800 text-white" : "text-ink hover:bg-ivory"}`}
               >
-                {o.name}
+                <ProductName name={o.name}/>
               </button>
             </li>
           ); })}

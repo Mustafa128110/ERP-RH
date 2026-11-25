@@ -5,6 +5,7 @@ import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { Dialog } from "@/components/ui/Dialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
+import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import type { ColumnDef, Row } from "@/lib/table";
@@ -127,10 +128,10 @@ export function AccountsManager({
   //
   // Nothing here needs warming: a row's detail is already in the props, so
   // opening one has never cost a round trip. The wait was only ever on the write.
-  const bank = useOptimisticRecords(bankAccounts, "id");
-  const cash = useOptimisticRecords(cashAccounts, "id");
-  const cheque = useOptimisticRecords(cheques, "id");
-  const transfer = useOptimisticRecords(transfers, "id");
+  const bank = useOptimisticRecords(bankAccounts, "id", "bank_accounts");
+  const cash = useOptimisticRecords(cashAccounts, "id", "cash_accounts");
+  const cheque = useOptimisticRecords(cheques, "id", "cheque_register");
+  const transfer = useOptimisticRecords(transfers, "id", "documents");
 
   const companyName = (id: string | null) => (id ? (companyOptions.find((c) => c.id === id)?.name ?? "—") : "Global");
   // Bank, branch and account title — the same label the pickers, the payments
@@ -271,7 +272,7 @@ export function AccountsManager({
         </button>
       </PageHeader>
 
-      <div className="flex shrink-0 gap-1 border-b border-sand">
+      <WorkspaceControls label="Account sections" className="flex shrink-0 gap-1 border-b border-sand">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -284,7 +285,7 @@ export function AccountsManager({
             {t.label}
           </button>
         ))}
-      </div>
+      </WorkspaceControls>
 
       {/* Same order as the tabs above: cash, bank, cheques, transfers. */}
       {tab === "cash" && (
@@ -317,10 +318,10 @@ export function AccountsManager({
               with — off the working list, not deleted. The box brings the
               history back, because "what happened to cheque 44215" is a real
               question and the register is where it's answered. */}
-          <label className="flex shrink-0 items-center gap-2 text-sm text-steel">
+          <WorkspaceControls label="Cheque filters"><label className="flex shrink-0 items-center gap-2 text-sm text-steel">
             <input type="checkbox" checked={showSpent} onChange={(e) => setShowSpent(e.target.checked)} className="h-5 w-5 rounded border-sand" />
             Show settled cheques{spentCount > 0 && ` (${spentCount})`}
-          </label>
+          </label></WorkspaceControls>
           <DataTable
             columns={chequeColumns}
             rows={chequeRows}

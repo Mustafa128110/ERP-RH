@@ -19,6 +19,9 @@ const additionalLabels = new Map([
   ["/settings/backups", "Backups"],
   ["/purchases/suppliers", "Suppliers"],
   ["/sales/new", "New Sale"],
+  ["/inventory/units", "Units"],
+  ["/inventory/unit-conversions", "Units"],
+  ["/inventory/warehouses", "Warehouses"],
 ]);
 
 // This is intentionally one name only. The dashboard is the app home; every

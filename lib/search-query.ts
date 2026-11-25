@@ -1,4 +1,5 @@
 import type { SearchKind } from "@/lib/search-constants";
+import {productSearchText} from "./product-name";
 
 export type TableSearchTerm = { field: string | null; value: string };
 
@@ -36,7 +37,7 @@ const GLOBAL_KIND: Record<string, SearchKind> = {
 };
 
 function normalize(value: string) {
-  return value.trim().toLowerCase();
+  return productSearchText(value.trim());
 }
 
 // Space-separated terms retain the existing "all words must match" behavior.
@@ -67,7 +68,7 @@ function fieldValues(row: Record<string, unknown>, field: string): string[] {
 
 export function matchesTableSearch(row: Record<string, unknown>, allText: string, terms: TableSearchTerm[]): boolean {
   return terms.every((term) => {
-    if (!term.field) return allText.includes(term.value);
+    if (!term.field) return productSearchText(allText).includes(term.value);
     const values = fieldValues(row, term.field);
     return values.length > 0 && values.some((value) => value.includes(term.value));
   });

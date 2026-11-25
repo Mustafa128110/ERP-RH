@@ -5,6 +5,7 @@ import type { Row } from "@/lib/table";
 import { getSession } from "@/lib/auth/session";
 import { listStockLevels } from "@/lib/actions/stock";
 import { money, qty } from "@/lib/format";
+import {settingsForCompanies} from "@/lib/queries/settings";
 
 const formatRate = (value: string | null) => (value === null ? null : money(value));
 
@@ -18,6 +19,8 @@ export async function StockCatalogue() {
   ]);
 
   const session = await getSession();
+  const visual = await settingsForCompanies(companyRows.map(company=>company.id),["highlight_negative_stock","highlight_low_stock","low_stock_qty"]);
+  const preference=visual[companyRows[0]?.id]??{};
   const canSeeStock = session && (session.globalPermissions.has("stock.view") || [...session.permissionsByCompany.values()].some((permissions) => permissions.has("stock.view")));
   const stock = canSeeStock ? await listStockLevels() : [];
   const stockByItem = new Map(stock.map((item) => [item.itemId, item]));
@@ -63,6 +66,8 @@ export async function StockCatalogue() {
       brandOptions={brandRows}
       unitOptions={assignmentOptions.units}
       ruleOptions={assignmentOptions.rules}
+      canInlineEdit={Boolean(session?.roleNames.some(name=>/^(super\s*admin|administrator|admin)$/i.test(name.trim()))&&session.globalPermissions.has("products.edit"))}
+      stockHighlight={{negative:preference.highlight_negative_stock==="true",low:preference.highlight_low_stock==="true",threshold:Number(preference.low_stock_qty||10)}}
     />
   );
 }

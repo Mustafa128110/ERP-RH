@@ -1,4 +1,5 @@
 "use client";
+import {ProductName} from "@/components/ui/ProductName";
 import { FormRecovery, RecoveryValue } from "@/components/ui/FormRecovery";
 
 import { useRef, useState, type FormEvent } from "react";
@@ -102,7 +103,7 @@ export function InvoiceManager({
   // cell until the payload lands — nothing is guessed at, least of all money.
   // What it does buy is the fade and the instant delete, and those are what the
   // wait was actually costing.
-  const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id");
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id", "documents");
 
   // Details already fetched, keyed by sale id. Opening a row costs two round
   // trips to a database 170ms away; a pointer resting on the row is enough notice
@@ -395,7 +396,7 @@ export function InvoiceManager({
                     <th className="p-2 text-right">Return now</th>
                   </tr>
                 </thead>
-                <tbody>{returning.lines.map((line) => <tr key={line.sourceLineId} className="border-t border-sand"><td className="p-2 text-ink">{line.itemName ?? "Uncatalogued line"}{line.unitSymbol ? ` · ${line.unitSymbol}` : ""}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 text-right tabular-nums">{line.returnedQuantity}</td><td className="p-2 text-right"><input type="number" min="0" max={line.availableQuantity} step="0.001" disabled={returnMode === "all"} value={returnMode === "all" ? line.availableQuantity : returnQuantities[line.sourceLineId] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [line.sourceLineId]: event.target.value }))} className="w-24 rounded border border-sand px-2 py-1 text-right" aria-label={`Return quantity for ${line.itemName ?? "line"}`} /></td></tr>)}</tbody>
+                <tbody>{returning.lines.map((line) => <tr key={line.sourceLineId} className="border-t border-sand"><td className="p-2 text-ink"><ProductName name={line.itemName ?? "Uncatalogued line"}/>{line.unitSymbol ? ` · ${line.unitSymbol}` : ""}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 text-right tabular-nums">{line.returnedQuantity}</td><td className="p-2 text-right"><input type="number" min="0" max={line.availableQuantity} step="0.001" disabled={returnMode === "all"} value={returnMode === "all" ? line.availableQuantity : returnQuantities[line.sourceLineId] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [line.sourceLineId]: event.target.value }))} className="w-24 rounded border border-sand px-2 py-1 text-right" aria-label={`Return quantity for ${line.itemName ?? "line"}`} /></td></tr>)}</tbody>
               </table>
             </div>
             {returning.returns.length > 0 && <div className="rounded border border-sand p-3 text-sm"><p className="font-medium text-navy-800">Return history</p><ul className="mt-2 divide-y divide-sand">{returning.returns.map((entry) => <li key={entry.id} className="flex items-center justify-between gap-3 py-2"><span>{entry.number} · {entry.documentDate} · {money(entry.grandTotal)} · {entry.status}</span>{entry.status === "posted" && <button type="button" disabled={returnBusy} onClick={() => void cancelReturn(entry.id)} className="rounded border border-sand px-2 py-1 text-xs hover:bg-ivory">Cancel return</button>}</li>)}</ul></div>}

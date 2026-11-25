@@ -2,6 +2,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getChannels, getSelectedChannel } from "@/lib/queries/channels";
 import { ChannelProvider } from "@/components/layout/ChannelProvider";
 import { ColumnSizing } from "@/components/layout/ColumnSizing";
+import { TableWorkspace, WorkspaceControls } from "@/components/layout/TableWorkspace";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { KeyboardShortcuts } from "@/components/layout/KeyboardShortcuts";
@@ -24,7 +25,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // Printing (the invoice's Download PDF) takes the page as it stands, so the
     // chrome drops out and the scroll container is released — otherwise the PDF
     // is one screenful of a scrolled div, framed by the sidebar.
-    <div className="flex h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
+    <TableWorkspace>
       {/* Who this browser is, for the user-scoped local persistence. */}
       <SessionSeed userId={session.userId} />
       <ColumnSizing />
@@ -35,7 +36,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               data after login — renders nothing. */}
           <OfflineReadiness />
           <KeyboardShortcuts />
-          <div className="contents print:hidden">
+          <div className="workspace-sidebar contents print:hidden">
             <Sidebar permissions={[...permissions]} />
           </div>
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:block print:overflow-visible">
@@ -44,17 +45,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
             {/* Sits above the scroll container, not inside it, so the sentence stays
                 put while a long list scrolls under it. Renders nothing when online. */}
-            <OfflineNotice />
+            <WorkspaceControls label="Connection"><OfflineNotice /></WorkspaceControls>
             {/* Gutters are deliberately tight: a 24px frame consumes a sixth of a
                 360px screen. The bottom inset clears the iOS home indicator. */}
-            <main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4 print:overflow-visible print:bg-white print:p-0">
-              <PendingWork />
+            <main data-workspace-main className="flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4 print:overflow-visible print:bg-white print:p-0">
+              <WorkspaceControls label="Pending work"><PendingWork /></WorkspaceControls>
               {children}
             </main>
           </div>
         </ExportShareProvider>
       </SyncProvider>
       </ChannelProvider>
-    </div>
+    </TableWorkspace>
   );
 }

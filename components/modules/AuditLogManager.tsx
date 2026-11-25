@@ -2,6 +2,7 @@
 
 import { DataTable } from "@/components/ui/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
+import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 import { DetailHover } from "@/components/ui/DetailHover";
 import type { ColumnDef, Row } from "@/lib/table";
 import type { AuditRow } from "@/lib/actions/audit";
@@ -76,9 +77,9 @@ export function AuditLogManager({ entries, filters }: { entries: AuditRow[]; fil
         searchPlaceholder="Search the log…"
       />
 
-      <p className="shrink-0 text-xs text-steel">
+      <WorkspaceControls label="Audit history details"><p className="shrink-0 text-xs text-steel">
         Capped at the 200 most recent entries. Narrow the date range to reach further back.
-      </p>
+      </p></WorkspaceControls>
     </div>
   );
 }

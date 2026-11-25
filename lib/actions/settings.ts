@@ -48,7 +48,7 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
     const values: { companyId: string; key: string; value: string }[] = [];
     for (const def of SETTING_DEFS) {
       const raw = def.kind === "boolean" ? (formData.get(def.key) === "on" ? "true" : "false") : String(formData.get(def.key) ?? "").trim();
-      if (def.kind === "number" && raw !== "" && !(Number(raw) >= 0)) {
+      if (def.kind === "number" && raw !== "" && (!Number.isFinite(Number(raw)) || !(Number(raw) >= 0))) {
         return { error: `${def.label} has to be a number of ${def.suffix ?? "units"}, zero or more.` };
       }
       if (def.kind === "date" && raw !== "" && !isValidIsoDate(raw)) {
@@ -71,10 +71,11 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
       .values(values)
       .onConflictDoUpdate({ target: [settings.companyId, settings.key], set: { value: sql`excluded.value` } });
 
-    await invalidateLookups(CACHE.settings);
+    await invalidateLookups(CACHE.settings,CACHE.items);
     // low_stock_qty is read per company by the stock list to mark a row low.
-    await invalidateReads(READ_DOMAIN.stock);
+    await invalidateReads(READ_DOMAIN.stock,READ_DOMAIN.products);
     revalidatePath("/settings");
+    revalidatePath("/inventory/stock");
     await recordAudit({ action: "update", entity: "settings", summary: "Company settings changed", companyId });
     return { success: true };
   });

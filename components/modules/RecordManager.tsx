@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Icon } from "@/components/ui/Icon";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { patchFromFormData } from "@/lib/optimistic-records";
+import {tableForCommand} from "@/lib/command-tables";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 import { RecordEditRecovery } from "@/components/ui/RecordEditRecovery";
@@ -94,7 +95,7 @@ export function RecordManager<T extends { id: string; _revision?: string }>({
 
   // What this list shows: the records the server sent, with whatever the user has
   // just done to them laid over the top — see lib/use-optimistic-records.ts.
-  const { records: shown, pending, insert, patch, remove } = useOptimisticRecords(records, "id");
+  const { records: shown, pending, insert, patch, remove } = useOptimisticRecords(records, "id", commandDomain?tableForCommand(`${commandDomain}.updateRecord`):undefined);
 
   // Every action behind these forms invalidates its route. Next includes that
   // refreshed RSC payload in the action response, so another router.refresh()
@@ -103,7 +104,7 @@ export function RecordManager<T extends { id: string; _revision?: string }>({
     setModal(null);
   }
 
-  const rows = shown.map(toRow);
+  const rows = shown.map(record=>({...toRow(record),...(String(record.id).startsWith("local:")?{_localDraft:true}:{})}));
   const many = plural ?? `${noun}s`;
 
   useNewEntry(() => setModal({ kind: "batch" }));

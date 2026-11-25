@@ -23,6 +23,8 @@ export function isValidIsoDate(value: string): boolean {
 }
 
 export const SETTING_DEFS: SettingDef[] = [
+  {key:"highlight_negative_stock",label:"Highlight negative stock rows",help:"Color the complete stock row red when its quantity is below zero.",kind:"boolean",fallback:"false"},
+  {key:"highlight_low_stock",label:"Highlight below-reorder stock rows",help:"Color the complete stock row amber when its non-negative quantity is at or below the low-stock warning. Negative stock uses red.",kind:"boolean",fallback:"false"},
   {
     key: "dead_stock_days",
     label: "Dead-stock threshold",

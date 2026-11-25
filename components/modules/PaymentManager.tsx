@@ -192,7 +192,7 @@ export function PaymentManager({
   // flight. Applied to the payments themselves rather than to the grouped rows
   // below, so an edited amount re-totals its day line and a deleted payment
   // leaves the group — or takes the whole line with it if it was the only one.
-  const { records: shown, pending, patch, remove } = useOptimisticRecords(payments, "id");
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(payments, "id", "documents");
 
   // Details already fetched, keyed by payment id. Opening one costs two round
   // trips to a database 170ms away; a pointer resting on the row is enough notice

@@ -27,8 +27,8 @@ export type ColumnDef = {
   // Sort against a primitive carried separately on the row. Useful when the
   // displayed cell is formatted text or a multi-line summary.
   sortBy?: string;
-  // Hide on small screens: the column is still in the search index (so the
-  // value is findable) but not rendered on mobile.
+  // Compatibility with older column definitions. DataTable now retains every
+  // column and provides horizontal scrolling on small screens.
   hideOnMobile?: boolean;
   // Escape hatch for a cell that needs more than the stringified value — Row only
   // holds primitives, so anything richer (the sales list's hover panel) comes from

@@ -1,13 +1,17 @@
 "use client";
 
 import { matchesStockSetup } from "@/lib/stock-filters";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useNewEntry } from "@/components/layout/KeyboardShortcuts";
 import { ProductBatchAddDialog, ProductsBatchEditDialog } from "@/components/modules/ProductForm";
 import { MergeProductsDialog } from "@/components/modules/MergeProductsDialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
+import {WorkspaceControls} from "@/components/layout/TableWorkspace";
+import {saveClientCache} from "@/lib/client-cache";
+import {StockSheet} from "./StockSheet";
+import {ProductName} from "@/components/ui/ProductName";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { CsvActions } from "@/components/ui/CsvActions";
 import { exportProductsCsv, importProductsCsv, deleteProducts } from "@/lib/client-actions/products";
@@ -33,7 +37,7 @@ const columns: ColumnDef[] = [
       </span>
     ),
   },
-  { key: "sku", label: "SKU", hideOnMobile: true },
+  { key: "sku", label: "SKU" },
   {
     key: "name",
     label: "Item Name",
@@ -44,7 +48,7 @@ const columns: ColumnDef[] = [
     render: (row) => (
       <div>
         <DetailHover
-          trigger={String(row.name)}
+          trigger={<ProductName name={String(row.name)} />}
           heading={String(row.name)}
           rows={[
             { label: "SKU", value: String(row.sku) },
@@ -56,11 +60,6 @@ const columns: ColumnDef[] = [
           footer={row._missingCategory === true ? "Created from a sale or purchase line — no category yet." : undefined}
           extraHeight={row._missingCategory === true ? 16 : 0}
         />
-        {row.sku ? (
-          <span className="mt-0.5 block font-mono text-xs text-steel md:hidden">
-            SKU: {String(row.sku)}
-          </span>
-        ) : null}
       </div>
     ),
   },
@@ -111,6 +110,8 @@ export function ProductsManager({
   brandOptions,
   unitOptions,
   ruleOptions,
+  canInlineEdit = false,
+  stockHighlight = {negative:false,low:false,threshold:10},
 }: {
   rows: Row[];
   companyOptions: Option[];
@@ -118,7 +119,10 @@ export function ProductsManager({
   brandOptions: Option[];
   unitOptions: Option[];
   ruleOptions: Option[];
+  canInlineEdit?: boolean;
+  stockHighlight?: {negative:boolean;low:boolean;threshold:number};
 }) {
+  useEffect(()=>{saveClientCache("categories",categoryOptions);saveClientCache("brands",brandOptions);saveClientCache("units",unitOptions);},[categoryOptions,brandOptions,unitOptions]);
   const [deleting, startDelete] = useTransition();
   const [deleteError, setDeleteError] = useState("");
   const [setupFilter, setSetupFilter] = useState("");
@@ -129,6 +133,7 @@ export function ProductsManager({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
+  const [sheetOpen,setSheetOpen]=useState(false);
   const [dotHelpOpen, setDotHelpOpen] = useState(false);
   const dots = useMemo(() => setupDots(ruleOptions, unitOptions), [ruleOptions, unitOptions]);
   const dotByKey = useMemo(() => new Map(dots.map((dot) => [`${dot.kind}:${dot.id}`, dot])), [dots]);
@@ -182,7 +187,7 @@ export function ProductsManager({
   // row takes its typed name, code, category and brand on the press and fades
   // until the payload lands. The rate columns are derived server-side and the
   // grid can't edit them, so they are left alone rather than guessed at.
-  const { records: shown, pending, patch } = useOptimisticRecords(rows, "id");
+  const { records: shown, pending, patch } = useOptimisticRecords(rows, "id", "items");
 
   function closeBatch() {
     setBatchOpen(false);
@@ -199,7 +204,7 @@ export function ProductsManager({
     setSelected([]);
   }
 
-  useNewEntry(() => setBatchOpen(true));
+  useNewEntry(() => {if(!sheetOpen)setBatchOpen(true);});
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -207,6 +212,7 @@ export function ProductsManager({
         title="Stock & Products"
         subtitle={selected.length > 0 ? `${selected.length} of ${shown.length} item(s) selected` : `${shown.length} item(s)`}
       >
+        {canInlineEdit&&<button type="button" onClick={()=>setSheetOpen(value=>!value)} className="h-11 rounded bg-navy-800 px-4 text-sm text-white">{sheetOpen?"Close stock editor":"Edit stock in table"}</button>}
         <button
           type="button"
           onClick={() => setDotHelpOpen(true)}
@@ -248,14 +254,16 @@ export function ProductsManager({
         </button>
       </PageHeader>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {sheetOpen?<StockSheet source={rows} categoryOptions={categoryOptions} brandOptions={brandOptions} onClose={()=>setSheetOpen(false)}/>:<>
+      <WorkspaceControls label="Stock filters" className="flex flex-wrap items-center gap-2">
         <select aria-label="Filter product setup" value={setupFilter} onChange={(event) => setSetupFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All setup</option><option value="complete">Complete setup</option><option value="incomplete">Incomplete setup</option><option value="category">Missing category</option></select>
         <select aria-label="Filter base quantity unit" value={baseFilter} onChange={(event) => setBaseFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All base quantities</option><option value="missing">No base unit</option>{unitOptions.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
         <select aria-label="Filter unit rules" value={ruleFilter} onChange={(event) => setRuleFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All unit rules</option><option value="missing">No unit rules</option>{ruleOptions.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}</select>
         <select aria-label="Filter base stock quantity" value={quantityFilter} onChange={(event) => setQuantityFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All stock quantities</option><option value="zero">Zero quantity</option><option value="positive">In stock</option><option value="negative">Negative quantity</option></select>
         <button type="button" disabled={!selected.length || deleting} onClick={() => { if (!confirm(`Delete ${selected.length} product(s)? Only products with zero references can be deleted.`)) return; startDelete(async () => { const result = await deleteProducts(selected); setDeleteError(result.error ?? ""); if (!result.error) { setSelected([]); } }); }} className="ml-auto rounded border border-error/30 px-3 py-2 text-sm text-error disabled:opacity-40">{deleting ? "Deleting…" : "Delete selected"}</button>
-      </div>
+      </WorkspaceControls>
       {deleteError && <p role="alert" className="text-sm text-error">{deleteError}</p>}
+      {shown.some(row=>row._localDraft===true)&&<WorkspaceControls label="Local stock drafts"><p role="status" className="text-xs text-steel">New rows marked as pending are saved locally and await server confirmation.</p></WorkspaceControls>}
       {/* Ctrl+Enter on a ticked set is the same button as Edit Selected — the
           keyboard route through the list ends where the mouse route does. */}
       <DataTable
@@ -267,8 +275,10 @@ export function ProductsManager({
         onBatchEdit={() => setEditOpen(true)}
         pendingIds={pending}
         searchPlaceholder="Search products…"
+        rowTone={row=>stockHighlight.negative&&Number(row._stockQuantity)<0?"negative":stockHighlight.low&&Number(row._stockQuantity)>=0&&Number(row._stockQuantity)<=stockHighlight.threshold?"low":undefined}
       />
 
+      </>}
       {editOpen && (
         // Hidden rather than closed while the batch is in the air. The grid holds
         // a screenful of typed cells across however many products were ticked, so

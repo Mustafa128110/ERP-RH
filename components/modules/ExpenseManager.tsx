@@ -177,7 +177,7 @@ export function ExpenseManager({
   // below, so an edited amount re-totals its day line, a new date moves the entry
   // to the day it now belongs to, and a cancelled expense leaves the group — or
   // takes the whole line with it if it was the only one.
-  const { records: shown, pending, patch, remove } = useOptimisticRecords(expenses, "id");
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(expenses, "id", "expenses");
 
   // Cheques already fetched, keyed by expense id. Opening an expense shows the
   // popup at once and then fills its cheque picker a round trip later, so until

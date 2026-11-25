@@ -19,6 +19,12 @@ import {InvoiceManager} from './components/modules/InvoiceManager';
 import {ExportShareProvider} from './components/ui/ExportShareSheet';
 import {ContactLedgerPicker} from './components/modules/ContactLedgerPicker';
 import {StockConversionManager} from './components/modules/StockConversionManager';
+import {StockSheet} from './components/modules/StockSheet';
+import {ProductName} from './components/ui/ProductName';
+import {setClientUserId} from './lib/client-user';
+import {clearDraft} from './lib/draft';
+window.clearConversionRecovery=()=>clearDraft('create:fixture-user:documents:stock-conversion');
+setClientUserId('fixture-user');
 import {ProfitCalendar} from './components/modules/ProfitCalendar';
 import {paginateExport} from './lib/export-pages';
 import {downloadNodeAsPng,downloadNodeAsPdf} from './lib/node-download';
@@ -29,6 +35,8 @@ window.showRole=()=>root.render(<RoleCreateForm catalog={{modules:[{module:'sale
 const wrap=child=><ChannelProvider channels={channels} selected='new-channel'><ExportShareProvider>{child}</ExportShareProvider></ChannelProvider>;
 window.showInvoices=()=>root.render(wrap(<InvoiceManager rows={[{id:'sale',number:'SI-100',customer:'Fixture contact',date:'01-01-2024',status:'Unpaid',total:'100.00',paid:'0.00',balance:'100.00'}]} count={1} outstanding={100} filtered={false}/>));
 window.showLedgers=()=>root.render(wrap(<ContactLedgerPicker companyId='company' contactId='contact' contactName='Fixture contact' onClose={()=>{}} onExport={()=>{}}/>));
+window.showSheet=()=>root.render(wrap(<StockSheet source={[{id:'00000000-0000-0000-0000-000000000001',name:'Bolt',rate1:'100.00',rate2:'90.00',rate3:'80.00',salesRate:'110.00',onHand:'-5 Each'},{id:'00000000-0000-0000-0000-000000000002',name:'Nut',rate1:'10',salesRate:'12',onHand:'3 Each'}]} categoryOptions={[]} brandOptions={[]} onClose={()=>{window.sheetClosed=true;root.render(<p>Sheet saved</p>);}}/>));
+window.showFractions=()=>root.render(<ProductName name='Bolt 1 1/2x5/8'/>);
 window.showConversion=()=>root.render(wrap(<StockConversionManager rows={[]} options={{companyOptions:[{id:'company',name:'Royal Hardware'}],locationOptions:[{id:'warehouse',name:'Warehouse'}],canUseUnassigned:true,itemOptions:[{id:'sack',name:'Nail sack',baseUnitId:'sack-unit',salesRate:'300'}],unitOptions:[{id:'sack-unit',name:'Sack'},{id:'packet-unit',name:'Packet'}]}}/>));
 const profitRow={period:'2024-01',revenue:'1000',cost:'500',grossProfit:'500',expenses:'100',adjustments:'0',netProfit:'400',documents:2};
 window.showProfit=month=>root.render(<ProfitCalendar data={{month,canExport:true,months:[profitRow],days:[{...profitRow,period:'2024-01-01'}]}}/>);
@@ -56,6 +64,7 @@ const bundle=await build({stdin:{contents:entry,loader:'tsx',resolveDir:process.
   const source=readFileSync(file,'utf8');
   const names=[...source.matchAll(/export (?:const|async function) (\w+)/g)].map(match=>match[1]);
   const fixtures={
+   getProductsForEdit:"{rows:[{id:'00000000-0000-0000-0000-000000000001',_revision:'1',companyId:'company',name:'Bolt',sku:'B1',urduName:null,categoryId:null,categoryName:null,brandId:null,brandName:null,baseUnitId:'each',taxable:false,isActive:true,ruleIds:[],stock:[{locationId:'warehouse',location:'Warehouse',unitId:'each',unit:'Each',onHand:-5}]},{id:'00000000-0000-0000-0000-000000000002',_revision:'2',companyId:'company',name:'Nut',sku:'N1',urduName:null,categoryId:null,categoryName:null,brandId:null,brandName:null,baseUnitId:'each',taxable:false,isActive:true,ruleIds:[],stock:[]}],unitOptions:[{id:'each',name:'Each'}],ruleOptions:[],supplierOptions:[],locationOptions:[{id:'warehouse',name:'Warehouse'}]}",
    getReturnableSale:"{id:'sale',number:'SI-100',_revision:'1',lines:[{sourceLineId:'line-a',itemName:'Nail sack',quantity:3,returnedQuantity:1,availableQuantity:2},{sourceLineId:'line-b',itemName:'Bolt',quantity:10,returnedQuantity:0,availableQuantity:10}],returns:[]}",
    listContactLedgers:"[{channelId:'counter',name:'Counter Sales',isActive:true,closedAt:null,balance:'300',entries:2},{channelId:'new-channel',name:'Editable fixture channel',isActive:true,closedAt:null,balance:'400',entries:1}]",
    getPartyLedgerPage:"{contactId:'contact',displayName:'Fixture contact',companyName:'Royal Hardware',phone:null,email:null,address:null,city:null,entries:[],openingBalance:0,openingBalanceDocumentId:null,advanceReceived:0,advancePaid:0,history:{page:1,pageSize:100,total:0,query:'',sort:'date',direction:'asc'},summary:{opening:0,totalDebit:0,totalCredit:0,closing:0}}"
@@ -91,30 +100,31 @@ try{
  await page.evaluate(()=>window.showRole());await page.getByRole('combobox',{name:'sales access'}).selectOption('work');
  const keys=JSON.parse(await page.locator('input[name=permissionKeys]').inputValue());
  assert.ok(keys.includes('sales.view')&&keys.includes('sales.create')&&!keys.includes('sales.delete'));
- await page.evaluate(()=>window.showTables());await page.waitForFunction(()=>document.querySelector('#first th:nth-child(2)')?.getBoundingClientRect().width>500);
+ await page.evaluate(()=>window.showTables());await page.waitForFunction(()=>{const table=document.querySelector('#first table');return table&&Math.abs(table.getBoundingClientRect().width-table.parentElement.clientWidth)<2;});
  const widths=await page.evaluate(()=>['first','second'].map(id=>Array.from(document.querySelectorAll('#'+id+' thead th')).map(cell=>Math.round(cell.getBoundingClientRect().width))));
  assert.deepEqual(widths[0],widths[1],'semantic column widths must match across equally sized tables');assert.equal(widths[0][0],64);
  await page.evaluate(()=>window.showFluidTables());
- const fluid=()=>page.evaluate(()=>['fluid-a','fluid-b','native-fluid'].map(id=>{const table=document.querySelector('#'+id+' table');return {id,width:table.getBoundingClientRect().width,available:table.parentElement.clientWidth,columns:Array.from(table.querySelectorAll('thead th')).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>({width:cell.getBoundingClientRect().width,left:getComputedStyle(cell).paddingLeft,right:getComputedStyle(cell).paddingRight})),minimum:parseFloat(table.style.minWidth)};}));
+ const fluid=()=>page.evaluate(()=>['fluid-a','fluid-b','native-fluid'].map(id=>{const table=document.querySelector('#'+id+' table');return {id,width:table.getBoundingClientRect().width,available:table.parentElement.clientWidth,columns:Array.from(table.querySelectorAll('thead th')).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>({width:cell.getBoundingClientRect().width,left:getComputedStyle(cell).paddingLeft,right:getComputedStyle(cell).paddingRight})),minimum:parseFloat(getComputedStyle(table).getPropertyValue('--table-min-width'))||parseFloat(table.style.minWidth)};}));
  await page.waitForFunction(()=>document.querySelector('#native-fluid table')?.dataset.columnLayout==='auto');
  await page.setViewportSize({width:1600,height:1100});
  await page.waitForFunction(()=>Math.abs(document.querySelector('#fluid-a table').getBoundingClientRect().width-document.querySelector('#fluid-a [data-list]').clientWidth)<2);
  const medium=await fluid();
  await page.setViewportSize({width:2400,height:1100});
  await page.waitForFunction(()=>document.querySelector('#fluid-a table').getBoundingClientRect().width>2300);
+ await page.waitForFunction(()=>['fluid-a','fluid-b','native-fluid'].every(id=>Math.round(document.querySelector('#'+id+' th').getBoundingClientRect().width)===64));
  const wide=await fluid();
  for(const table of wide){assert.ok(Math.abs(table.width-table.available)<2,'every table fills its large container: '+JSON.stringify(table));assert.equal(Math.round(table.columns[0].width),64);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
  assert.deepEqual(wide[0].columns,wide[1].columns,'global semantic minima and growth ratios stay uniform across lists');
  const nameGrowth=wide[0].columns[1].width-medium[0].columns[1].width,totalGrowth=wide[0].columns[2].width-medium[0].columns[2].width;
- assert.ok(Math.abs(nameGrowth/totalGrowth-5)<0.1,'name columns receive a useful share of spare width: '+JSON.stringify({medium,wide,nameGrowth,totalGrowth}));
+ assert.ok(nameGrowth>0,'names receive spare screen width');assert.equal(totalGrowth,0,'figures keep their fixed width');
  assert.ok(wide[0].columns[1].width>wide[0].columns[0].width*4);
  const gutters=()=>page.evaluate(()=>Array.from(document.querySelectorAll('#fluid-a tbody tr:first-child td,#native-fluid tbody tr:first-child td')).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>{const style=getComputedStyle(cell),child=cell.firstElementChild,inner=child?.matches('a.block,span.block')?getComputedStyle(child):null;return [parseFloat(style.paddingLeft)+(inner?parseFloat(inner.paddingLeft):0),parseFloat(style.paddingRight)+(inner?parseFloat(inner.paddingRight):0)];}));
  assert.ok((await gutters()).every(pair=>pair[0]===12&&pair[1]===12),'clickable and ordinary body cells share the same fixed gutter: '+JSON.stringify(await gutters()));
- assert.ok(await page.getByLabel('Native product name').evaluate(input=>input.scrollWidth<=input.clientWidth+1),'editable values fit without cropping');
+ assert.ok(await page.getByLabel('Native product name').evaluate(input=>input.getBoundingClientRect().right<=input.closest('td').getBoundingClientRect().right),'editable controls stay within their fixed column');
  const storedMinima=await page.evaluate(()=>localStorage.getItem('erp:global-column-widths:v2'));
  await page.screenshot({path:join(out,'fluid-wide.png'),fullPage:true});
  await page.setViewportSize({width:390,height:900});
- await page.waitForFunction(()=>document.querySelector('#fluid-a th[data-column-key=code]')&&getComputedStyle(document.querySelector('#fluid-a th[data-column-key=code]')).display==='none');
+ await page.waitForFunction(()=>document.querySelector('#fluid-a th[data-column-key=code]')&&getComputedStyle(document.querySelector('#fluid-a th[data-column-key=code]')).display!=='none');
  const narrow=await fluid();
  for(const table of narrow){assert.ok(table.width>=table.minimum-2);assert.ok(table.width>table.available,'narrow screens scroll instead of compressing content');assert.equal(Math.round(table.columns[0].width),64);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
  assert.ok((await gutters()).every(pair=>pair[0]===12&&pair[1]===12),'scrolling layouts retain the same body gutters');
@@ -132,7 +142,7 @@ try{
  await page.waitForFunction(()=>{const table=document.querySelector('#empty-transition table');return table&&Math.abs(table.getBoundingClientRect().width-table.parentElement.clientWidth)<2;});
  await page.evaluate(()=>window.showControlGroup());
  await page.waitForFunction(()=>document.querySelector('#control-group table')?.dataset.columnLayout==='auto');
- assert.ok(await page.getByLabel('Grouped product name').evaluate(input=>input.scrollWidth<=input.clientWidth+1),'side-by-side controls receive their combined content minimum');
+ assert.ok(await page.getByLabel('Grouped product name').evaluate(input=>input.getBoundingClientRect().right<=input.closest('td').getBoundingClientRect().right),'side-by-side controls fit their fixed name column');
  assert.ok(await page.locator('#control-group').evaluate(element=>element.scrollWidth>element.clientWidth),'combined controls retain their minimum and scroll within a narrow container');
  await page.evaluate(()=>window.showSort());
  await page.getByRole('columnheader',{name:'Date',exact:true}).click();
@@ -151,17 +161,37 @@ try{
  await page.waitForFunction(()=>window.actionLog.some(action=>action.name==='createSalesReturn'));
  assert.equal(await page.evaluate(()=>window.actionLog.findLast(action=>action.name==='createSalesReturn').args[1].returnMode),'partial');
  await page.evaluate(()=>window.showConversion());await page.getByRole('button',{name:'New conversion',exact:true}).click();
- await page.getByLabel('Product',{exact:true}).selectOption('sack');
- assert.equal(await page.getByLabel('Stock unit').first().inputValue(),'sack-unit');
+ await page.getByLabel('Input product 1',{exact:true}).fill('Nail sack');await page.getByRole('option',{name:'Nail sack',exact:true}).click();
+ assert.equal(await page.getByLabel('Input stock unit 1').inputValue(),'Sack');
  await page.getByLabel('Input quantity 1',{exact:true}).fill('1');
  await page.getByLabel('New product name 1',{exact:true}).fill('Nail packets');
- await page.getByLabel('Stock unit').nth(1).selectOption('packet-unit');
+ await page.getByLabel('Output stock unit 1').fill('Packet');await page.getByRole('option',{name:'Packet',exact:true}).click();
  await page.getByLabel('Output quantity 1',{exact:true}).fill('50');
  await page.getByLabel('Output selling rate 1',{exact:true}).fill('5');
+ await page.screenshot({path:join(out,'conversion-grid.png'),fullPage:true});
  await page.getByRole('button',{name:'Post conversion',exact:true}).click();
  await page.waitForFunction(()=>window.actionLog.some(action=>action.name==='createStockConversion'));
  const conversion=await page.evaluate(()=>window.actionLog.findLast(action=>action.name==='createStockConversion').args[0]);
  assert.equal(conversion.channelId,'new-channel');assert.equal(conversion.inputs[0].quantity,1);assert.equal(conversion.outputs[0].quantity,50);assert.equal(conversion.outputs[0].salesRate,5);assert.equal(conversion.outputs[0].costShare,100);
+ // The isolated action returns success without the production queue's recovery handoff.
+ await page.evaluate(()=>window.clearConversionRecovery());
+ await page.getByRole('button',{name:'New conversion',exact:true}).click();
+ await page.getByLabel('Recent conversions').selectOption('0');
+ assert.equal(await page.getByLabel('Input quantity 1',{exact:true}).inputValue(),'1');
+ assert.equal(await page.getByLabel('Output quantity 1',{exact:true}).inputValue(),'50');
+ assert.equal(await page.getByLabel('Input product 2',{exact:true}).inputValue(),'','a trailing input row remains available');
+ assert.equal(await page.getByLabel('New product name 2',{exact:true}).inputValue(),'','a trailing output row remains available');
+ await page.getByLabel('Input quantity 1',{exact:true}).focus();await page.keyboard.press('ArrowDown');assert.equal(await page.getByLabel('Input quantity 2',{exact:true}).evaluate(input=>input===document.activeElement),true);
+ await page.evaluate(()=>window.showFractions());await page.getByText('Bolt 1½×⅝',{exact:true}).waitFor();
+ const fractions=await page.locator('.product-fraction').first().evaluate(span=>({font:getComputedStyle(span).fontFamily,parentFont:getComputedStyle(span.parentElement).fontFamily,size:parseFloat(getComputedStyle(span).fontSize),parentSize:parseFloat(getComputedStyle(span.parentElement).fontSize)}));assert.equal(fractions.font,fractions.parentFont);assert.ok(fractions.size>=fractions.parentSize,'fraction glyphs must be readable at normal font size');
+ await page.evaluate(()=>window.showSheet());await page.getByLabel('Product name: Bolt',{exact:true}).waitFor();assert.equal(await page.getByRole('dialog').count(),0,'stock editing stays directly in the table');
+ await page.getByLabel('Sales rate: Bolt',{exact:true}).fill('123.45');
+ await page.getByLabel('Product name: Bolt',{exact:true}).focus();await page.keyboard.press('ArrowDown');assert.equal(await page.getByLabel('Product name: Nut',{exact:true}).evaluate(input=>input===document.activeElement),true);
+ await page.getByLabel('Product name: Bolt',{exact:true}).fill('Bolt corrected');await page.getByLabel('Count warehouse').selectOption('warehouse');await page.getByLabel('Counted stock: Bolt corrected',{exact:true}).fill('0');
+ await page.screenshot({path:join(out,'inline-stock-grid.png'),fullPage:true});
+ await page.getByRole('button',{name:'Save page (1)',exact:true}).click();await page.getByText('Sheet saved',{exact:true}).waitFor();
+ const sheet=await page.evaluate(()=>window.actionLog.findLast(action=>action.name==='saveStockSheet'));assert.equal(sheet.args[0].length,1);assert.equal(sheet.args[0][0].salesRate,'123.45');assert.equal(sheet.args[0][0].targetQty,'0');assert.equal(sheet.args[1].mode,'adjust');assert.equal(sheet.args[1].locationId,'warehouse');
+
  await page.evaluate(()=>window.showProfit(null));await page.getByText('2024-01',{exact:true}).click();
  assert.equal(await page.evaluate(()=>window.navigationLog),'/reports/profit?month=2024-01');
  await page.evaluate(()=>window.showProfit('2024-01'));await page.getByText('Daily Profit · 2024-01',{exact:true}).waitFor();

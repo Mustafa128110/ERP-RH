@@ -78,7 +78,7 @@ export function GlobalSearch() {
   }
 
   return (
-    <div className="relative min-w-0 flex-1">
+    <div data-global-search className="relative min-w-0 flex-1">
       <input
         ref={inputRef}
         type="search"

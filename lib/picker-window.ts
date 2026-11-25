@@ -1,13 +1,14 @@
+import {productSearchText} from "./product-name";
 const labels = new WeakMap<{ name: string }, { name: string; normalized: string }>();
 export function filterPickerOptions<T extends { name: string }>(options: T[], query: string): T[] {
   if (!query) return options;
   return options.filter(option => {
     let label = labels.get(option);
     if (!label || label.name !== option.name) {
-      label = { name: option.name, normalized: option.name.toLowerCase() };
+      label = { name: option.name, normalized: productSearchText(option.name) };
       labels.set(option, label);
     }
-    return label.normalized.includes(query);
+    return label.normalized.includes(productSearchText(query));
   });
 }
 export const PICKER_ROW_HEIGHT = 36;

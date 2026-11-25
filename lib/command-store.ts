@@ -35,6 +35,8 @@ async function transaction<T>(mode: IDBTransactionMode, run: (store: IDBObjectSt
 let channel: BroadcastChannel | undefined;
 function changed() {
   window.dispatchEvent(new Event(COMMAND_EVENT));
+  // Storage events cover browsers where BroadcastChannel is unavailable.
+  try{localStorage.setItem("erp:work-changed",`${Date.now()}:${crypto.randomUUID()}`);}catch{/* IndexedDB remains authoritative. */}
   if (typeof BroadcastChannel !== "undefined") {
     channel ??= new BroadcastChannel("erp-work");
     channel.postMessage("changed");
@@ -42,9 +44,11 @@ function changed() {
 }
 export function subscribeCommands(listener: () => void): () => void {
   window.addEventListener(COMMAND_EVENT, listener);
+  const storage=(event:StorageEvent)=>{if(event.key==="erp:work-changed")listener();};
+  window.addEventListener("storage",storage);
   const otherTabs = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("erp-work") : null;
   if (otherTabs) otherTabs.onmessage = listener;
-  return () => { window.removeEventListener(COMMAND_EVENT, listener); otherTabs?.close(); };
+  return () => { window.removeEventListener(COMMAND_EVENT, listener); window.removeEventListener("storage",storage); otherTabs?.close(); };
 }
 export function listCommands(userId: string): Promise<SavedCommand[]> {
   return transaction("readonly", (store, done) => {

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import {ProductName} from "./ProductName";
+import {gridKeyDown,gridSelectionProps} from "./grid-keys";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -11,8 +13,10 @@ import { Icon } from "./Icon";
 import { iconButtonClass } from "./form-styles";
 import { matchesTableSearch, parseTableSearch } from "@/lib/search-query";
 import { compareSortedRows, parseTableSorts, promoteTableSort, tableColumnSortKey, type TableSort } from "@/lib/table-sort";
-import { useTableColumnLayout } from "./useGlobalColumnWidths";
+import { useTableColumnLayout } from "./useTableColumnLayout";
 import { useHistory } from "./HistoryProvider";
+import {columnContentKind} from "@/lib/column-widths";
+import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 
 // Every list gets a row number in front, so a row can be pointed at out loud
 // ("line 14") without reading its contents back. It's synthesised rather than a
@@ -76,9 +80,15 @@ export function DataTable({
   onRowIntent,
   globalShortcuts = true,
   history = false,
+  rowTone,
+  editable = false,
+  onSave,
 }: {
   columns: ColumnDef[];
   history?: boolean;
+  rowTone?: (row:Row)=>"negative"|"low"|undefined;
+  editable?: boolean;
+  onSave?:()=>void;
   rows: Row[];
   idKey: string;
   // Row link target: `${hrefBase}/${row[idKey]}`.
@@ -122,7 +132,7 @@ export function DataTable({
   const allColumns = useMemo(() => [snoColumn, ...columns.filter((column) => column.key !== "company")], [columns]);
   const selectable = selected !== undefined && onSelectedChange !== undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { getWidth: getColWidth, minimumWidth: totalTableWidth, tableWidth } = useTableColumnLayout(allColumns, rows, scrollRef, selectable);
+  const { getWidth: getColWidth, minimumWidth: totalTableWidth, tableWidth, selectionWidth } = useTableColumnLayout(allColumns, rows, scrollRef, selectable);
   // Which row the highlight is on, and where a Shift-extended range started.
   // -1 until the list is actually used: an untouched page shouldn't already be
   // pointing at its first row.
@@ -179,7 +189,7 @@ export function DataTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, index, query, sorts, remote]);
 
-  const virtualized = visible.length > 150 && !showAllRows && !printing;
+  const virtualized = !editable && visible.length > 150 && !showAllRows && !printing;
   // Search, selection and keyboard navigation still use the full filtered set.
   // Scrolling mounts every row when reached; no records are truncated.
   // This component explicitly opts out of compiler memoization above.
@@ -229,9 +239,12 @@ export function DataTable({
   // Ids of what's on screen. Select-all ticks the filtered set, which is what
   // "search for the ones that need fixing, then tick them all" needs it to mean.
   const allIds = visible.map((row) => String(row[idKey]));
-  const allSelected = selectable && allIds.length > 0 && allIds.every((id) => selectedSet.has(id));
+  const savedIds=visible.filter(row=>row._localDraft!==true).map(row=>String(row[idKey]));
+  const savedIdSet=new Set(savedIds);
+  const allSelected = selectable && savedIds.length > 0 && savedIds.every((id) => selectedSet.has(id));
 
   function toggle(id: string) {
+    if(!savedIdSet.has(id))return;
     const next = new Set(selectedSet);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -242,7 +255,7 @@ export function DataTable({
   // ticked — the same rule a file manager follows.
   function selectRange(to: number, additive: boolean) {
     const [lo, hi] = anchor.current <= to ? [anchor.current, to] : [to, anchor.current];
-    const range = allIds.slice(lo, hi + 1);
+    const range = allIds.slice(lo, hi + 1).filter(id=>savedIdSet.has(id));
     onSelectedChange!(additive ? [...new Set([...(selected ?? []), ...range])] : range);
   }
 
@@ -262,6 +275,7 @@ export function DataTable({
   }, [focused]);
 
   function open(row: Row) {
+    if(row._localDraft===true)return;
     if (onRowClick) onRowClick(row);
     else if (hrefBase) router.push(`${hrefBase}/${row[idKey]}`);
   }
@@ -337,6 +351,7 @@ export function DataTable({
   //     would move on one press
   useEffect(() => {
     function handler(e: globalThis.KeyboardEvent) {
+      if(editable)return;
       const target = e.target as HTMLElement | null;
       if (target?.isContentEditable) return;
       const tag = target?.tagName;
@@ -445,8 +460,10 @@ export function DataTable({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-      {search}
-      {visible.length > 150 && <div className="flex shrink-0 items-center justify-between text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
+      <WorkspaceControls label="Table controls" className="flex flex-wrap items-center justify-between gap-2">
+        {search}
+        {!editable && visible.length > 150 && <div className="flex shrink-0 items-center justify-between gap-3 text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
+      </WorkspaceControls>
       {/* tabIndex makes the list itself focusable, which is what gives the arrow
           keys somewhere to arrive. Clicking any row focuses it as a side effect. */}
       {/* Still focusable, so clicking the list is still a way to put the caret
@@ -467,28 +484,27 @@ export function DataTable({
             data-column-layout="managed"
             data-responsive
             aria-rowcount={visible.length + 1}
-            className="table-fixed border-collapse text-sm md:min-w-max"
-            style={{ width: `${tableWidth}px`, minWidth: `${totalTableWidth}px`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
+            className="table-fixed border-collapse text-sm"
+            style={{ width: `${tableWidth}px`, minWidth: `max(100%, ${totalTableWidth}px)`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
           >
             <colgroup>
-              {selectable && <col style={{ width: `${SELECT_COL_WIDTH}px` }} className="w-11" />}
+              {selectable && <col style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }} />}
               {allColumns.map((col) => (
                 <col
                   key={col.key}
                   style={{ width: getColWidth(col) }}
-                  className={col.hideOnMobile ? "hidden md:table-column" : ""}
                 />
               ))}
             </colgroup>
             <thead>
               <tr className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
                 {selectable && (
-                  <th className="w-11 px-4 py-2.5" style={{ width: `${SELECT_COL_WIDTH}px` }}>
+                  <th className="px-4 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
                     <input
                       type="checkbox"
                       aria-label={allSelected ? "Clear selection" : remote && !remote.info.all ? "Select rows on this page" : "Select all rows"}
                       checked={allSelected}
-                      onChange={() => onSelectedChange!(allSelected ? [] : allIds)}
+                      onChange={() => onSelectedChange!(allSelected ? [] : savedIds)}
                       className="h-4 w-4 rounded border-sand align-middle"
                     />
                   </th>
@@ -501,13 +517,14 @@ export function DataTable({
                   return (
                     <th
                       data-column-key={col.key}
+                      data-cell-kind={columnContentKind(col.key, col.align)}
                       data-sortable={sortable || undefined}
                       style={{ width: getColWidth(col), ...getColPadding(col) }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
-                      className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
+                      className={`whitespace-normal break-words px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
                         col.align === "right" ? "text-right" : "text-left"
-                      }${col.hideOnMobile ? " hidden md:table-cell" : ""}${
+                      }${
                         sortable ? " cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200" : ""
                       }`}
                     >
@@ -525,7 +542,7 @@ export function DataTable({
                 })}
               </tr>
             </thead>
-            <tbody ref={bodyRef}>
+            <tbody ref={bodyRef} data-editable-grid={editable || undefined} {...(editable?gridSelectionProps:{})} onKeyDown={editable?event=>gridKeyDown(event,bodyRef,onSave):undefined}>
               {paddingTop > 0 && <tr data-virtual-spacer aria-hidden="true"><td colSpan={allColumns.length + (selectable ? 1 : 0)} style={{ height: paddingTop }} /></tr>}
               {rendered.map(({ row, rowIndex }) => {
                 const id = String(row[idKey]);
@@ -548,13 +565,13 @@ export function DataTable({
                         ? col.render(row)
                         : col.badge
                           ? <StatusPill value={row[col.key]} />
-                          : String(row[col.key] ?? "—")}
+                          : /^(name|item|itemName|product|inputs|outputs)$/.test(col.key) ? <ProductName name={String(row[col.key] ?? "—")}/> : String(row[col.key] ?? "—")}
                   </>
                 );
                 const cellClass = (col: ColumnDef) =>
-                  `whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                  `${columnContentKind(col.key, col.align) === "text" ? "table-cell-text whitespace-normal break-words" : "table-cell-fact whitespace-nowrap"} px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
                     col.align === "right" ? "text-right tabular-nums" : "text-left"
-                  }${col.hideOnMobile ? " hidden md:table-cell" : ""}`;
+                  }`;
 
                 return (
                   // Every row keeps its rule, including the last — the separators used
@@ -571,12 +588,14 @@ export function DataTable({
                     ref={virtualized ? virtualizer.measureElement : undefined}
                     data-index={rowIndex}
                     data-row-index={rowIndex}
+                    data-stock-tone={rowTone?.(row)}
                     aria-rowindex={rowIndex + 2}
                     data-focused={rowIndex === focused}
                     // Absent rather than "false" when the row is settled: the
                     // style keys off the attribute being there at all.
                     data-pending={pendingIds?.includes(id) ? "" : undefined}
-                    onMouseDown={() => onRowMouseDown(rowIndex)}
+                    title={row._localDraft===true?"Saved locally · awaiting confirmation":undefined}
+                    onMouseDown={editable?undefined:() => onRowMouseDown(rowIndex)}
                     onPointerEnter={() => onRowIntent?.(row)}
                     onTouchStart={() => onRowIntent?.(row)}
                     className={`border-b border-sand hover:bg-brass-100 dark:border-zinc-800/60 dark:hover:bg-zinc-900/40 ${
@@ -584,10 +603,11 @@ export function DataTable({
                     }`}
                   >
                     {selectable && (
-                      <td data-label="Select" className="w-11 px-4 py-2.5" style={{ width: `${SELECT_COL_WIDTH}px` }}>
+                      <td data-label="Select" className="px-4 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
                         <input
                           type="checkbox"
                           aria-label={`Select ${String(row[columns[0]?.key ?? idKey] ?? "row")}`}
+                          disabled={row._localDraft===true}
                           checked={selectedSet.has(id)}
                           onChange={() => toggle(id)}
                           className="h-4 w-4 rounded border-sand align-middle"
@@ -596,7 +616,7 @@ export function DataTable({
                     )}
                     {href
                       ? allColumns.map((col) => (
-                          <td key={col.key} data-label={col.label} style={{ width: getColWidth(col) }} className={`p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}>
+                          <td key={col.key} data-label={col.label} data-cell-kind={columnContentKind(col.key, col.align)} style={{ width: getColWidth(col) }} className="p-0">
                             <Link href={href} className={`block ${cellClass(col)}`} style={getColPadding(col)}>
                               {body(col)}
                             </Link>
@@ -607,16 +627,17 @@ export function DataTable({
                             <td
                               key={col.key}
                               data-label={col.label}
+                              data-cell-kind={columnContentKind(col.key, col.align)}
                               style={{ width: getColWidth(col) }}
-                              className={`${col.label ? "cursor-pointer " : ""}p-0${col.hideOnMobile ? " hidden md:table-cell" : ""}`}
+                              className={`${col.label ? "cursor-pointer " : ""}p-0`}
                               onMouseDown={col.label ? undefined : (event) => event.stopPropagation()}
-                              onClick={col.label ? () => onRowClick(row) : (event) => event.stopPropagation()}
+                              onClick={col.label ? () => {if(row._localDraft!==true)onRowClick(row);} : (event) => event.stopPropagation()}
                             >
                               <span className={`block ${cellClass(col)}`} style={getColPadding(col)}>{body(col)}</span>
                             </td>
                           ))
                         : allColumns.map((col) => (
-                            <td key={col.key} data-label={col.label} style={{ width: getColWidth(col), ...getColPadding(col) }} className={cellClass(col)}>
+                            <td key={col.key} data-label={col.label} data-cell-kind={columnContentKind(col.key, col.align)} style={{ width: getColWidth(col), ...getColPadding(col) }} className={cellClass(col)}>
                               {body(col)}
                             </td>
                           ))}

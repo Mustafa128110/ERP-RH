@@ -5,6 +5,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
 import { iconButtonClass } from "@/components/ui/form-styles";
 import { csvToObjects, objectsToCsv, templateCsv, type CsvColumn } from "@/lib/csv";
+import {announceServerChange} from "@/lib/live-change";
 
 // The Import / Export / Template trio that sits in a list page's header. The
 // column list is the whole of the difference between one page's and another's
@@ -77,6 +78,7 @@ export function CsvActions({
       if (error) return setMessage({ title: "Import failed", body: error });
       const result = await onImport(rows);
       if (result.error) return setMessage({ title: "Import failed", body: result.error });
+      announceServerChange();
       setMessage({ title: "Imported", body: `${result.created ?? 0} row(s) imported. Nothing else in the file was changed.` });
       onDone?.();
     } catch {

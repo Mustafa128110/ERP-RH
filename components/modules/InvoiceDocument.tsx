@@ -1,5 +1,6 @@
 "use client";
 
+import {ProductName} from "@/components/ui/ProductName";
 import { useEffect, useRef, useState } from "react";
 import { formatDate, money, qty } from "@/lib/format";
 import { downloadInvoicePdf, type Invoice } from "@/lib/invoice-pdf";
@@ -188,7 +189,7 @@ export function InvoiceDocument({ invoice, companyName }: { invoice: Invoice; co
           {invoice.lines.map((l, i) => (
             <tr key={i} className="border-b border-sand">
               <td data-label="#" className="py-2 text-center tabular-nums">{i + 1}</td>
-              <td data-label="Item" className="safe-wrap py-2">{l.itemName ?? "—"}</td>
+              <td data-label="Item" className="safe-wrap py-2"><ProductName name={l.itemName ?? "—"}/></td>
               <td data-label="Qty" className="py-2 text-right tabular-nums">
                 {qty(l.quantity)} {l.unitSymbol ?? ""}
               </td>

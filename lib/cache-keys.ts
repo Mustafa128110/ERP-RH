@@ -87,7 +87,7 @@ export const READ_DEPENDS_ON: Record<ReadDomain, readonly string[]> = {
   // Product rates come through the rate_list view (purchase lines) with the last
   // sales price and on-hand joined on, so anything that moves stock or prices
   // changes them.
-  products: ["items", "categories", "brands", "companies", "documents", "documentLines", "inventoryTransactions", "itemUnitConversionRules"],
+  products: ["settings", "items", "categories", "brands", "companies", "documents", "documentLines", "inventoryTransactions", "itemUnitConversionRules"],
   // Three plain selects, no joins.
   accounts: ["bankAccounts", "cashAccounts", "chequeRegister"],
   // The contacts and companies list pages — companies writes already touch every

@@ -11,8 +11,10 @@ const share = read("components/ui/ExportShareSheet.tsx");
 
 assert.match(table, /mobile-data-list/, "DataTable must retain the mobile list hook");
 assert.match(table, /data-label="Select"/, "selected DataTable rows need a mobile label");
-assert.match(table, /p-0\$\{col\.hideOnMobile/, "linked and clickable DataTable cells must hide at the cell level");
-assert.match(css, /table\[data-responsive\][\s\S]*min-width: 0/, "mobile DataTable must not force a wide table");
+assert.ok(!table.includes("col.hideOnMobile"), "small screens must retain every column for horizontal scrolling");
+assert.match(css, /min-width: max\(100%, var\(--table-min-width/, "tables must fill the available screen while retaining fixed column minima");
+assert.match(css, /td\[data-cell-kind="text"\][\s\S]*white-space: normal/, "names and other strings must wrap");
+assert.match(css, /data-cell-kind="number"[\s\S]*white-space: nowrap/, "dates and figures must stay on one line");
 assert.match(css, /\.sale-items-grid/, "SaleForm mobile line grid needs its responsive CSS contract");
 assert.match(sale, /sale-line-item/, "SaleForm item needs the full-row mobile hook");
 assert.match(sale, /sale-line-total/, "SaleForm total needs the mobile fact hook");

@@ -9,7 +9,7 @@ const lookupTables: Record<string, string[]> = {
   units: ["units"], taxes: ["taxes"], settings: ["settings"], document_types: ["document_types"],
   expense_categories: ["expense_categories"], roles: ["roles", "role_permissions", "permissions"],
   contacts: ["contacts"], bank_accounts: ["bank_accounts"], cash_accounts: ["cash_accounts"],
-  items: ["items", "document_lines", "documents", "document_types", "inventory_transactions", "unit_conversions", "item_unit_conversion_rules", "units"],
+  items: ["settings", "items", "document_lines", "documents", "document_types", "inventory_transactions", "unit_conversions", "item_unit_conversion_rules", "units"],
   cheques: ["cheque_register", "documents", "expenses", "bank_accounts", "cash_accounts"],
 };
 const snake = (value: string) => value.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);

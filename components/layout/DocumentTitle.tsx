@@ -10,7 +10,12 @@ export function DocumentTitle() {
   const pathname = usePathname();
 
   useEffect(() => {
-    document.title = pageLabel(pathname);
+    const apply = () => {const expected=pageLabel(pathname);if(document.title!==expected)document.title=expected;};
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head,{childList:true,subtree:true,characterData:true});
+    window.addEventListener("pageshow",apply);
+    return()=>{observer.disconnect();window.removeEventListener("pageshow",apply);};
   }, [pathname]);
 
   return null;

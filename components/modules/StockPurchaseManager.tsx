@@ -106,7 +106,7 @@ export function StockPurchaseManager({
   // saved edit changes no cell until the payload lands — nothing is guessed at,
   // least of all money. What it does buy is the fade and the instant delete, and
   // those are what the wait was actually costing.
-  const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id");
+  const { records: shown, pending, patch, remove } = useOptimisticRecords(rows, "id", "documents");
 
   // Details already fetched, keyed by purchase id. A click here costs two round
   // trips to a database 170ms away with nothing on screen to say so; a pointer

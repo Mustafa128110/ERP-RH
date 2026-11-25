@@ -9,6 +9,7 @@ import { useSync } from "@/components/layout/SyncProvider";
 import { setClientUserId } from "@/lib/client-user";
 import { openShortcuts } from "@/components/layout/KeyboardShortcuts";
 import { openNav } from "@/components/layout/Sidebar";
+import {WorkspaceControls, useTableWorkspace} from "@/components/layout/TableWorkspace";
 
 // The company selector is the scope control for the whole app: choosing a
 // company filters every list to that company plus global data; "All" shows
@@ -80,6 +81,7 @@ export function Topbar({
   const [scopeError, setScopeError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const focused = useTableWorkspace()?.focused ?? false;
 
   function onScopeChange(value: string) {
     startTransition(async () => {
@@ -123,13 +125,13 @@ export function Topbar({
   );
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-sand bg-white px-3 sm:gap-3 sm:px-4">
+    <WorkspaceControls label="Application" className="workspace-topbar-controls"><header className="workspace-topbar flex h-14 shrink-0 items-center gap-2 border-b border-sand bg-white px-3 sm:gap-3 sm:px-4">
       {/* The only way to the sidebar below md, where the rail is hidden. */}
       <button
         type="button"
         onClick={openNav}
         aria-label="Open navigation"
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-steel hover:bg-ivory hover:text-navy-800 md:hidden"
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-steel hover:bg-ivory hover:text-navy-800 ${focused ? "" : "md:hidden"}`}
       >
         {/* Three rules rather than an icon font — no dependency, scales cleanly. */}
         <span className="flex flex-col gap-[3px]" aria-hidden>
@@ -143,7 +145,7 @@ export function Topbar({
           there's more than one. Hidden on a phone; it moves into the menu. */}
       {channels.length > 1 &&
         scopeSelect(
-          "hidden shrink-0 rounded-md border border-sand bg-transparent px-2 py-1.5 text-sm text-ink disabled:opacity-60 sm:block",
+          `${focused ? "block" : "hidden sm:block"} shrink-0 rounded-md border border-sand bg-transparent px-2 py-1.5 text-sm text-ink disabled:opacity-60`,
         )}
 
       <GlobalSearch />
@@ -153,7 +155,7 @@ export function Topbar({
       <SyncStatus />
 
       {/* Everything from here right is desktop-only; the phone gets the menu. */}
-      <div className="hidden items-center gap-3 whitespace-nowrap sm:flex">
+      <div className={`${focused ? "flex flex-wrap" : "hidden sm:flex"} items-center gap-3 whitespace-nowrap`}>
         {/* The app is keyboard-first — arrow navigation in every list, an Excel
             grid in every batch dialog — and none of that was discoverable. */}
         <button
@@ -169,7 +171,7 @@ export function Topbar({
         <LogoutButton className="rounded-md border border-sand px-3 py-1.5 text-sm font-medium text-steel hover:bg-ivory" />
       </div>
 
-      <div ref={menuRef} className="relative shrink-0 sm:hidden">
+      <div ref={menuRef} className={`relative shrink-0 ${focused ? "hidden" : "sm:hidden"}`}>
         <button
           type="button"
           onClick={() => setMenuOpen((open) => !open)}
@@ -209,6 +211,6 @@ export function Topbar({
           </div>
         )}
       </div>
-    </header>
+    </header></WorkspaceControls>
   );
 }

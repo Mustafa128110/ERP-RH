@@ -3,6 +3,8 @@
 import { useOptimistic, useState } from "react";
 
 import { applyChange, type OptimisticState, type RecordChange } from "@/lib/optimistic-records";
+import {useLocalCommands} from "./local-record-store";
+import {projectLocalRecords} from "./local-records";
 
 // The one place a list keeps track of changes the server hasn't confirmed yet.
 //
@@ -46,7 +48,9 @@ export type OptimisticRecords<T> = {
   remove: (id: string) => void;
 };
 
-export function useOptimisticRecords<T>(records: T[], idKey: keyof T & string): OptimisticRecords<T> {
+export function useOptimisticRecords<T>(records: T[], idKey: keyof T & string, table?:string): OptimisticRecords<T> {
+  const commands=useLocalCommands();
+  const [servedAt,setServedAt]=useState(Date.now);
   const [inserted, setInserted] = useState<readonly T[]>(NOTHING_INSERTED);
 
   // Reconciliation, the render-time way: a new `records` array means the server
@@ -55,13 +59,15 @@ export function useOptimisticRecords<T>(records: T[], idKey: keyof T & string): 
   const [lastServed, setLastServed] = useState(records);
   if (records !== lastServed) {
     setLastServed(records);
+    setServedAt(Math.max(servedAt,...commands.filter(command=>command.status==="confirmed").map(command=>command.updatedAt)));
     if (inserted.length > 0) setInserted(NOTHING_INSERTED);
   }
 
-  const base = inserted.length === 0 ? records : [...inserted, ...records];
+  const projected=projectLocalRecords(inserted.length===0?records:[...inserted,...records],idKey,table,commands,servedAt);
+  const base = projected.records;
 
   const [state, change] = useOptimistic<OptimisticState<T>, RecordChange<T>>(
-    { records: base, pending: NOTHING_PENDING },
+    { records: base, pending: projected.pending.length?projected.pending:NOTHING_PENDING },
     (current, next) => applyChange(current, next, idKey),
   );
 
