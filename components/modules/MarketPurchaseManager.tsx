@@ -139,7 +139,7 @@ function MarketPurchaseManagerBody({
   return (
     <div className="flex h-full flex-col gap-4">
       <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) on this page waiting for confirmation`} />
-      <WorkspaceControls label="Market purchase filters"><HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/></WorkspaceControls>
+      <WorkspaceControls label="Market purchase filters" mobileRail><HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/></WorkspaceControls>
       <div ref={listRef} data-list="global" tabIndex={0} className="mobile-data-list min-h-0 flex-1 overflow-auto rounded border border-sand bg-white outline-none">
         <table className="w-full min-w-[60rem] table-fixed border-collapse text-sm">
           <colgroup>

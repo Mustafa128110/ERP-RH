@@ -12,7 +12,7 @@ const entry=`
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';
 import{DateField}from'./components/ui/DateField';import{DataTable}from'./components/ui/DataTable';import{PageHeader}from'./components/ui/PageHeader';
 import{ColumnSizing}from'./components/layout/ColumnSizing';import{Topbar}from'./components/layout/Topbar';
-import{Sidebar}from'./components/layout/Sidebar';import{TableWorkspace,WorkspaceControls}from'./components/layout/TableWorkspace';
+import{Sidebar}from'./components/layout/Sidebar';import{MobileWorkspaceRail,TableWorkspace,WorkspaceControls}from'./components/layout/TableWorkspace';
 window.actionLog=[];
 const columns=[{key:'name',label:'Name',render:row=><span className='truncate'>{row.name}</span>},
  {key:'code',label:'Reference',hideOnMobile:true},{key:'date',label:'Date'},{key:'createdAt',label:'Created at'},
@@ -25,14 +25,14 @@ function App(){const[selected,setSelected]=useState([]),[rows,setRows]=useState(
  window.changeName=()=>setRows(previous=>previous.map((row,index)=>index?row:{...row,name:row.name+' EXTRA'.repeat(160)}));
  return <TableWorkspace><ColumnSizing/><div className='workspace-sidebar contents'><Sidebar permissions={['sales.view','products.view']}/></div>
  <div className='flex min-w-0 flex-1 flex-col overflow-hidden'><Topbar username='Browser fixture' channels={[{id:'counter',name:'Counter Sales'},{id:'m52',name:'M52'}]} selected='counter'/>
- <main data-workspace-main className='flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-4'>
+ <div className='relative flex min-h-0 min-w-0 flex-1 overflow-hidden'><main data-workspace-main className='min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-ivory p-4'>
  <div className='flex h-full min-h-0 flex-col gap-2'><PageHeader title='Fixed table fixture' subtitle='Isolated browser check'>
  <button type='button' onClick={()=>window.actionLog.push('add')} className='rounded border border-sand px-3 py-2'>Add record</button>
  <button type='button' disabled={!selected.length} className='rounded border border-sand px-3 py-2'>Edit selected ({selected.length})</button>
- </PageHeader><WorkspaceControls label='Fixture filters' className='flex flex-wrap gap-2'><input aria-label='Fixture filter' defaultValue='Keep this value' className='rounded border border-sand px-3 py-2'/>
+ </PageHeader><WorkspaceControls label='Fixture filters' mobileRail className='flex flex-wrap gap-2'><input aria-label='Fixture filter' defaultValue='Keep this value' className='rounded border border-sand px-3 py-2'/>
  <select aria-label='Fixture status' defaultValue='posted' className='rounded border border-sand px-3 py-2'><option value='posted'>Posted records</option><option value='all'>All records</option></select></WorkspaceControls>
  <DataTable columns={columns} rows={rows} idKey='id' selected={selected} onSelectedChange={setSelected} onRowClick={()=>{}} searchPlaceholder='Find fixture records'/></div>
- </main></div>{local&&<div role='dialog' aria-label='Fixture local dialog' className='fixed inset-8 z-50 flex flex-col gap-2 border border-sand bg-white p-4'><PageHeader title='Local dialog heading'><button type='button' onClick={()=>window.actionLog.push('local')}>Local action</button></PageHeader><div className='overflow-auto'><table data-native-fixture><thead><tr><th>Date</th><th className='text-right'>Amount</th><th>Name</th></tr></thead><tbody><tr><td><DateField aria-label='Native date input' defaultValue='2026-11-25' className='px-2 py-1 text-sm'/></td><td><input type='number' aria-label='Native amount input' readOnly value='-9999999999999999.99' className='w-full px-2 py-1 text-sm'/></td><td>A native wrapped name</td></tr></tbody></table></div><DataTable columns={columns} rows={original.slice(1,4)} idKey='id' globalShortcuts={false} searchPlaceholder='Find local records'/></div>}</TableWorkspace>;
+ </main><MobileWorkspaceRail/></div></div>{local&&<div role='dialog' aria-label='Fixture local dialog' className='fixed inset-8 z-50 flex flex-col gap-2 border border-sand bg-white p-4'><PageHeader title='Local dialog heading'><button type='button' onClick={()=>window.actionLog.push('local')}>Local action</button></PageHeader><div className='overflow-auto'><table data-native-fixture><thead><tr><th>Date</th><th className='text-right'>Amount</th><th>Name</th></tr></thead><tbody><tr><td><DateField aria-label='Native date input' defaultValue='2026-11-25' className='px-2 py-1 text-sm'/></td><td><input type='number' aria-label='Native amount input' readOnly value='-9999999999999999.99' className='w-full px-2 py-1 text-sm'/></td><td>A native wrapped name</td></tr></tbody></table></div><DataTable columns={columns} rows={original.slice(1,4)} idKey='id' globalShortcuts={false} searchPlaceholder='Find local records'/></div>}</TableWorkspace>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
 `;

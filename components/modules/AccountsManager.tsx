@@ -272,7 +272,7 @@ export function AccountsManager({
         </button>
       </PageHeader>
 
-      <WorkspaceControls label="Account sections" className="flex shrink-0 gap-1 border-b border-sand">
+      <WorkspaceControls label="Account sections" mobileRail className="flex shrink-0 gap-1 border-b border-sand">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -318,7 +318,7 @@ export function AccountsManager({
               with — off the working list, not deleted. The box brings the
               history back, because "what happened to cheque 44215" is a real
               question and the register is where it's answered. */}
-          <WorkspaceControls label="Cheque filters"><label className="flex shrink-0 items-center gap-2 text-sm text-steel">
+          <WorkspaceControls label="Cheque filters" mobileRail><label className="flex shrink-0 items-center gap-2 text-sm text-steel">
             <input type="checkbox" checked={showSpent} onChange={(e) => setShowSpent(e.target.checked)} className="h-5 w-5 rounded border-sand" />
             Show settled cheques{spentCount > 0 && ` (${spentCount})`}
           </label></WorkspaceControls>

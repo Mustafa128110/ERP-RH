@@ -9,7 +9,7 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { getScopeCompanyIds } from "@/lib/auth/scope";
 import { guard, type ActionResult } from "@/lib/actions/guard";
 import { recordAudit } from "@/lib/actions/audit";
-import { isValidIsoDate, SETTING_DEFS } from "@/lib/setting-constants";
+import { isValidIsoDate, SETTING_DEFS, STOCK_COLUMN_SETTINGS, type StockColumnVisibility } from "@/lib/setting-constants";
 import { CACHE, invalidateLookups, invalidateReads, READ_DOMAIN } from "@/lib/queries/lookups";
 
 // The settings table has existed since the first migration and nothing had ever
@@ -77,6 +77,34 @@ export async function saveSettings(companyId: string, _prevState: ActionResult |
     revalidatePath("/settings");
     revalidatePath("/inventory/stock");
     await recordAudit({ action: "update", entity: "settings", summary: "Company settings changed", companyId });
+    return { success: true };
+  });
+}
+
+export async function saveStockColumnVisibility(companyId: string, visibility: StockColumnVisibility): Promise<ActionResult> {
+  return guard("Couldn't save stock column visibility.", async () => {
+    const session = await getLiveSession();
+    requirePermission(session, "settings", "edit", { companyId });
+
+    const accessible = await getScopeCompanyIds();
+    if (!accessible.includes(companyId)) return { error: "You don't have access to that company." };
+
+    const values = STOCK_COLUMN_SETTINGS.map((col) => ({
+      companyId,
+      key: col.settingKey,
+      value: visibility[col.columnKey] ? "true" : "false",
+    }));
+
+    await db
+      .insert(settings)
+      .values(values)
+      .onConflictDoUpdate({ target: [settings.companyId, settings.key], set: { value: sql`excluded.value` } });
+
+    await invalidateLookups(CACHE.settings, CACHE.items);
+    await invalidateReads(READ_DOMAIN.stock, READ_DOMAIN.products);
+    revalidatePath("/settings");
+    revalidatePath("/inventory/stock");
+    await recordAudit({ action: "update", entity: "settings", summary: "Stock column visibility changed", companyId });
     return { success: true };
   });
 }

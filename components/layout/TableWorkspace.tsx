@@ -5,14 +5,36 @@ import { createPortal, flushSync } from "react-dom";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 
-type Workspace = { focused: boolean; open: boolean; target: HTMLDivElement | null };
+type Workspace = {
+  focused: boolean;
+  open: boolean;
+  mobile: boolean;
+  target: HTMLDivElement | null;
+  mobileRailTarget: HTMLDivElement | null;
+  setMobileRailTarget: (element: HTMLDivElement | null) => void;
+  mobileRailExpanded: boolean;
+  setMobileRailExpanded: (expanded: boolean | ((current: boolean) => boolean)) => void;
+};
+
 const WorkspaceContext = createContext<Workspace | null>(null);
 export const useTableWorkspace = () => useContext(WorkspaceContext);
 
-// Keep one mounted copy of every control. Controls stay inline during the
-// smooth scroll-collapse animation and move into the popup portal when opened,
-// preserving typed filters, selection state, focus, and in-flight operations.
-export function WorkspaceControls({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+// Keep one mounted copy of every control. On desktop, controls stay inline
+// during the smooth scroll-collapse animation and move into the popup portal
+// when opened. On mobile (< 768px), page actions, search, and filters portal
+// into the persistent right side panel so only the page title sits at the top
+// and controls stay visible while scrolling.
+export function WorkspaceControls({
+  label,
+  className,
+  mobileRail = false,
+  children,
+}: {
+  label: string;
+  className?: string;
+  mobileRail?: boolean;
+  children: ReactNode;
+}) {
   const workspace = useTableWorkspace();
   const inline = useRef<HTMLDivElement>(null);
   const slot = useRef<HTMLDivElement>(null);
@@ -43,18 +65,119 @@ export function WorkspaceControls({ label, className, children }: { label: strin
     const active = focusedControl.current;
     const local = Boolean(slot.current?.closest('[role="dialog"]'));
     slot.current?.toggleAttribute("data-workspace-local", local);
-    const parent = workspace?.focused && workspace.open && workspace.target && !local ? workspace.target : inline.current;
-    parent?.appendChild(host);
+    let parent: HTMLDivElement | null = inline.current;
+    if (!local && workspace) {
+      if (workspace.mobile) {
+        parent = mobileRail && workspace.mobileRailTarget ? workspace.mobileRailTarget : inline.current;
+      } else if (workspace.focused && workspace.open && workspace.target) {
+        parent = workspace.target;
+      }
+    }
+    if (parent && host.parentElement !== parent) {
+      parent.appendChild(host);
+    }
     if (active?.isConnected && host.contains(active)) active.focus({ preventScroll: true });
-  }, [host, workspace?.focused, workspace?.open, workspace?.target]);
+  }, [host, mobileRail, workspace, workspace?.focused, workspace?.open, workspace?.mobile, workspace?.target, workspace?.mobileRailTarget]);
 
   if (!workspace) return <div className={className}>{children}</div>;
   return (
-    <div ref={slot} className="workspace-control-slot">
+    <div ref={slot} className="workspace-control-slot" data-mobile-rail-slot={mobileRail ? "true" : undefined}>
       <div ref={inline} className="workspace-collapse-inner">
         {host ? createPortal(children, host) : children}
       </div>
     </div>
+  );
+}
+
+// Persistent right side panel on mobile viewports (< 768px) holding page action
+// buttons, table search, and page filters. Never hides when the table scrolls.
+export function MobileWorkspaceRail() {
+  const workspace = useTableWorkspace();
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
+  const [hasControls, setHasControls] = useState(false);
+
+  const mobile = workspace?.mobile ?? false;
+  const expanded = workspace?.mobileRailExpanded ?? false;
+  const setExpanded = workspace?.setMobileRailExpanded;
+  const setMobileRailTarget = workspace?.setMobileRailTarget;
+
+  const setBodyNode = (node: HTMLDivElement | null) => {
+    bodyRef.current = node;
+    setMobileRailTarget?.(node);
+  };
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const sync = () => setHasControls(body.childElementCount > 0);
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(body, { childList: true });
+    return () => observer.disconnect();
+  }, [mobile]);
+
+  useEffect(() => {
+    if (!mobile || !expanded || !setExpanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        setExpanded(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mobile, expanded, setExpanded]);
+
+  const visible = mobile && hasControls;
+
+  return (
+    <>
+      {visible && expanded && (
+        <>
+          <div aria-hidden className="w-[4.5rem] shrink-0 md:hidden print:hidden" />
+          <button
+            type="button"
+            aria-label="Collapse side panel"
+            onClick={() => setExpanded?.(false)}
+            className="fixed inset-0 top-14 z-20 bg-scrim/25 md:hidden print:hidden"
+          />
+        </>
+      )}
+      <aside
+        ref={railRef}
+        aria-label="Page actions and search"
+        data-mobile-rail
+        data-expanded={expanded ? "true" : "false"}
+        onFocusCapture={(event) => {
+          if (!mobile || !setExpanded) return;
+          const target = event.target as HTMLElement | null;
+          if (!target) return;
+          if (
+            (target instanceof HTMLInputElement && target.type !== "checkbox" && target.type !== "radio") ||
+            target instanceof HTMLSelectElement ||
+            target instanceof HTMLTextAreaElement
+          ) {
+            setExpanded(true);
+          }
+        }}
+        className={`workspace-mobile-rail print:hidden md:hidden ${visible ? "flex" : "hidden"}`}
+      >
+        <div className="flex shrink-0 items-center justify-center border-b border-sand p-1.5">
+          <button
+            type="button"
+            onClick={() => setExpanded?.((value) => !value)}
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse controls panel" : "Expand controls panel"}
+            title={expanded ? "Collapse panel" : "Expand panel"}
+            className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-sand bg-ivory px-2 text-xs font-medium text-navy-800 hover:bg-navy-100"
+          >
+            <Icon name={expanded ? "chevronRight" : "chevronLeft"} className="h-4 w-4 shrink-0" />
+            {expanded && <span>Collapse</span>}
+          </button>
+        </div>
+        <div ref={setBodyNode} className="workspace-mobile-rail-body scroll-thin" />
+      </aside>
+    </>
   );
 }
 
@@ -66,7 +189,10 @@ export function TableWorkspace({ children }: { children: ReactNode }) {
   const [focused, setFocused] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [open, setOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const [mobileRailExpanded, setMobileRailExpanded] = useState(false);
   const [target, setTarget] = useState<HTMLDivElement | null>(null);
+  const [mobileRailTarget, setMobileRailTarget] = useState<HTMLDivElement | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
@@ -79,7 +205,20 @@ export function TableWorkspace({ children }: { children: ReactNode }) {
     setSeenPath(route);
     setFocused(false);
     setOpen(false);
+    setMobileRailExpanded(false);
   }
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const sync = () => {
+      setMobile(media.matches);
+      if (media.matches) setOpen(false);
+      else setMobileRailExpanded(false);
+    };
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   useLayoutEffect(() => {
     suppressReflow.current = performance.now() + 360;
@@ -221,7 +360,18 @@ export function TableWorkspace({ children }: { children: ReactNode }) {
   }, [open, focused]);
 
   return (
-    <WorkspaceContext.Provider value={{ focused, open, target }}>
+    <WorkspaceContext.Provider
+      value={{
+        focused,
+        open,
+        mobile,
+        target,
+        mobileRailTarget,
+        setMobileRailTarget,
+        mobileRailExpanded,
+        setMobileRailExpanded,
+      }}
+    >
       <div
         ref={root}
         data-table-workspace
@@ -230,7 +380,7 @@ export function TableWorkspace({ children }: { children: ReactNode }) {
         className="flex h-dvh min-h-0 overflow-hidden print:block print:h-auto print:overflow-visible"
       >
         {children}
-        {focused && (
+        {focused && !mobile && (
           <button
             ref={toggle}
             type="button"
@@ -248,9 +398,9 @@ export function TableWorkspace({ children }: { children: ReactNode }) {
         <div
           ref={popup}
           id="workspace-options"
-          role={focused && open ? "dialog" : undefined}
+          role={focused && open && !mobile ? "dialog" : undefined}
           aria-label="Table options"
-          hidden={!focused || !open}
+          hidden={!focused || !open || mobile}
           className="workspace-options print:hidden"
         >
           <div className="workspace-options-content scroll-thin">

@@ -5,4 +5,5 @@ import { backgroundAction, backgroundRead } from "@/lib/background-client";
 export type * from "@/lib/actions/settings";
 export const getSettings: typeof server.getSettings = backgroundRead("settings.getSettings", server.getSettings);
 export const saveSettings: typeof server.saveSettings = backgroundAction("settings.saveSettings", server.saveSettings);
+export const saveStockColumnVisibility: typeof server.saveStockColumnVisibility = backgroundAction("settings.saveStockColumnVisibility", server.saveStockColumnVisibility);
 export const settingsOverview = server.settingsOverview;

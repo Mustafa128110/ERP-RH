@@ -161,7 +161,11 @@ export async function getProductAssignmentOptions() {
       .orderBy(unitConversions.name),
   ]);
   return {
-    units: unitRows.map((unit) => ({ id: unit.id, name: unit.symbol ? `${unit.name} (${unit.symbol})` : unit.name })),
+    units: unitRows.map((unit) => ({
+      id: unit.id,
+      name: unit.symbol ? `${unit.name} (${unit.symbol})` : unit.name,
+      symbol: unit.symbol ?? null,
+    })),
     rules: ruleRows,
   };
 }

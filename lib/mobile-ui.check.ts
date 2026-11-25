@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 const read = (path: string) => readFileSync(path, "utf8");
 const css = read("app/globals.css");
 const layout = read("app/layout.tsx");
+const dashboardLayout = read("app/(dashboard)/layout.tsx");
 const workspace = read("components/layout/TableWorkspace.tsx");
+const pageHeader = read("components/ui/PageHeader.tsx");
+const stockCatalogue = read("components/modules/StockCatalogue.tsx");
+const productsManager = read("components/modules/ProductsManager.tsx");
 const table = read("components/ui/DataTable.tsx");
 const sale = read("components/modules/SaleForm.tsx");
 const quotation = read("components/modules/QuotationForm.tsx");
@@ -33,7 +37,25 @@ assert.match(share, /Download again/, "export fallback must keep a second downlo
 assert.ok(!layout.includes("@fontsource/fraunces") && !layout.includes("@fontsource/source-code-pro"), "typography must use one uniform font across text and figures");
 assert.match(css, /grid-template-rows 260ms/, "table scroll collapse must use a smooth CSS transition");
 assert.match(css, /overflow: hidden/, "table cells must prevent text collision across column boundaries");
-assert.match(workspace, /role=\{focused && open \? "dialog" : undefined\}/, "closed table options popup must not block table keyboard navigation");
+assert.match(workspace, /role=\{focused && open && !mobile \? "dialog" : undefined\}/, "closed table options popup must not block table keyboard navigation");
 assert.match(table, /visibleDialogs/, "DataTable arrow-key navigation must ignore hidden dialogs");
+assert.ok(!css.includes("border-color: transparent"), "scrolling a table must keep its container border visible");
+assert.match(table, /mobile-data-list[\s\S]*bg-white/, "table container must keep an explicit surface background");
+assert.match(dashboardLayout, /MobileWorkspaceRail/, "dashboard layout must render the mobile right side panel");
+assert.match(pageHeader, /mobileRail/, "PageHeader actions must move into the mobile right side panel");
+assert.match(table, /label="Table controls" mobileRail/, "DataTable search must move into the mobile right side panel");
+assert.match(css, /@media \(max-width: 767px\)[\s\S]*\[data-workspace-controls="Application"\][\s\S]*grid-template-rows: 1fr/, "mobile global search bar must stay visible when the table scrolls");
+assert.match(stockCatalogue, /baseUnit\?\.symbol\?\.trim\(\)/, "Stock page On Hand must display the unit symbol");
+assert.match(stockCatalogue, /_stockPlaces/, "Stock page must serialize multi-location breakdown for inline row rendering");
+assert.ok(
+  productsManager.indexOf('key: "onHand"') < productsManager.indexOf('key: "location"') &&
+    productsManager.indexOf('key: "location"') < productsManager.indexOf('key: "valuation"'),
+  "Location column must sit between On Hand and Valuation",
+);
+assert.ok(
+  !productsManager.slice(productsManager.indexOf('key: "onHand"'), productsManager.indexOf('key: "location"')).includes("DetailHover"),
+  "On Hand cell must not use DetailHover",
+);
+assert.match(productsManager, /saveStockColumnVisibility/, "Stock column visibility toggles must persist to Settings");
 
 console.log("ok   mobile UI contracts are present");

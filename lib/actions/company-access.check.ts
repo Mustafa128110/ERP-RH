@@ -141,6 +141,8 @@ const REQUIRED = [
   ["products.ts", "export async function mergeProducts", "await getLiveSession()"],
   ["products.ts", "export async function importProductsCsv", "await getLiveSession()"],
   ["settings.ts", "export async function saveSettings", "await getLiveSession()"],
+  ["settings.ts", "export async function saveStockColumnVisibility", "await getLiveSession()"],
+  ["settings.ts", "export async function saveStockColumnVisibility", 'requirePermission(session, "settings", "edit", { companyId })'],
   ["users.ts", "export async function createUsersBatch", "await getLiveSession()"],
   ["users.ts", "export async function updateUser", "await getLiveSession()"],
   ["users.ts", "export async function addUserRole", "await getLiveSession()"],

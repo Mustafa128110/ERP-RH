@@ -81,7 +81,8 @@ export function Topbar({
   const [scopeError, setScopeError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const focused = useTableWorkspace()?.focused ?? false;
+  const workspace = useTableWorkspace();
+  const focused = Boolean(workspace?.focused && !workspace.mobile);
 
   function onScopeChange(value: string) {
     startTransition(async () => {

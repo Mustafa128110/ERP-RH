@@ -22,7 +22,7 @@ export function PageHeader({
             {subtitle && <p className="text-sm text-steel">{subtitle}</p>}
           </div>
           {children && (
-            <WorkspaceControls label={`${title} actions`} className="flex flex-wrap items-center gap-2 sm:shrink-0">
+            <WorkspaceControls label={`${title} actions`} mobileRail className="flex flex-wrap items-center gap-2 sm:shrink-0">
               {children}
             </WorkspaceControls>
           )}

@@ -34,7 +34,19 @@ function getColPadding(col: ColumnDef): React.CSSProperties {
 
 // Keys that exist to drive rendering rather than to be read — searching them
 // would match "true" against a typed "tru".
-const HIDDEN_KEYS = new Set(["id", "_incomplete", "_ruleIds", "_baseUnitId"]);
+const HIDDEN_KEYS = new Set([
+  "id",
+  "_incomplete",
+  "_ruleIds",
+  "_baseUnitId",
+  "_stockPlaces",
+  "_stockBreakdown",
+  "_stockQuantity",
+  "_missingCategory",
+  "_hasUnitRule",
+  "_hasBaseUnit",
+  "_localDraft",
+]);
 
 // What a row matches against: every value on it that a human could read. Built
 // once per row per render of the list, not once per keystroke per row.
@@ -481,7 +493,7 @@ export function DataTable({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       {showTableControls && (
-        <WorkspaceControls label="Table controls" className="flex flex-wrap items-center justify-between gap-2">
+        <WorkspaceControls label="Table controls" mobileRail className="flex flex-wrap items-center justify-between gap-2">
           {search}
           {!editable && visible.length > 150 && <div className="flex shrink-0 items-center justify-between gap-3 text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
         </WorkspaceControls>
@@ -495,7 +507,7 @@ export function DataTable({
         data-list={globalShortcuts ? "global" : "local"}
         ref={scrollRef}
         tabIndex={0}
-        className="scroll-thin mobile-data-list min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200 outline-none dark:border-zinc-800"
+        className="scroll-thin mobile-data-list min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200 bg-white outline-none dark:border-zinc-800"
       >
         {visible.length === 0 ? (
           <p className="p-10 text-center text-sm text-steel">

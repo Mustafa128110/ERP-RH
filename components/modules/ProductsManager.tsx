@@ -8,20 +8,39 @@ import { MergeProductsDialog } from "@/components/modules/MergeProductsDialog";
 import { DataTable } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
 import { PageHeader } from "@/components/ui/PageHeader";
-import {WorkspaceControls} from "@/components/layout/TableWorkspace";
-import {saveClientCache} from "@/lib/client-cache";
-import {StockSheet} from "./StockSheet";
-import {ProductName} from "@/components/ui/ProductName";
+import { WorkspaceControls } from "@/components/layout/TableWorkspace";
+import { saveClientCache } from "@/lib/client-cache";
+import { StockSheet } from "./StockSheet";
+import { ProductName } from "@/components/ui/ProductName";
 import { DetailHover } from "@/components/ui/DetailHover";
 import { CsvActions } from "@/components/ui/CsvActions";
 import { exportProductsCsv, importProductsCsv, deleteProducts } from "@/lib/client-actions/products";
+import { saveStockColumnVisibility } from "@/lib/client-actions/settings";
 import { PRODUCT_CSV_COLUMNS } from "@/lib/csv-columns";
 import { primaryIconButtonClass } from "@/components/ui/form-styles";
 import { Icon } from "@/components/ui/Icon";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
+import {
+  DEFAULT_STOCK_COLUMN_VISIBILITY,
+  STOCK_COLUMN_SETTINGS,
+  type StockColumnVisibility,
+  type StockToggleableColumnKey,
+} from "@/lib/setting-constants";
 import type { ColumnDef, Row } from "@/lib/table";
 
 const SETUP_COL_WIDTH = 84;
+
+type StockPlace = { location: string; onHand: string; valuation: string };
+
+function parseStockPlaces(raw: unknown): StockPlace[] {
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as StockPlace[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 // No S.No column here — DataTable numbers every row itself.
 const columns: ColumnDef[] = [
@@ -43,7 +62,7 @@ const columns: ColumnDef[] = [
     label: "Item Name",
     sortable: true,
     width: 220,
-    // Product names remain plain database values.  Setup state is intentionally
+    // Product names remain plain database values. Setup state is intentionally
     // kept in its own column so a red marker never becomes part of the name.
     render: (row) => (
       <div>
@@ -63,9 +82,65 @@ const columns: ColumnDef[] = [
       </div>
     ),
   },
-  { key: "onHand", label: "On Hand", align: "right", render: (row) => <DetailHover trigger={String(row.onHand)} heading="Stock by location and unit" rows={JSON.parse(String(row._stockBreakdown ?? "[]"))} /> },
-  { key: "valuation", label: "Valuation", align: "right" },
-  { key: "location", label: "Location" },
+  {
+    key: "onHand",
+    label: "On Hand",
+    align: "right",
+    render: (row) => {
+      const places = parseStockPlaces(row._stockPlaces);
+      return (
+        <div className="flex flex-col items-end">
+          <span>{String(row.onHand ?? "—")}</span>
+          {places.length > 1 && (
+            <div className="mt-1 flex flex-col items-end gap-0.5 text-[11px] leading-4 text-steel">
+              {places.map((place, index) => (
+                <span key={`${place.location}:${place.onHand}:${index}`}>{place.onHand}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    key: "location",
+    label: "Location",
+    render: (row) => {
+      const places = parseStockPlaces(row._stockPlaces);
+      return (
+        <div className="flex flex-col items-start">
+          <span>{String(row.location ?? "—")}</span>
+          {places.length > 1 && (
+            <div className="mt-1 flex flex-col items-start gap-0.5 text-[11px] leading-4 text-steel">
+              {places.map((place, index) => (
+                <span key={`${place.location}:${index}`}>{place.location}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    key: "valuation",
+    label: "Valuation",
+    align: "right",
+    render: (row) => {
+      const places = parseStockPlaces(row._stockPlaces);
+      return (
+        <div className="flex flex-col items-end">
+          <span>{String(row.valuation ?? "—")}</span>
+          {places.length > 1 && (
+            <div className="mt-1 flex flex-col items-end gap-0.5 text-[11px] leading-4 text-steel">
+              {places.map((place, index) => (
+                <span key={`${place.location}:${place.valuation}:${index}`}>{place.valuation}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
   { key: "salesRate", label: "Sales Rate", align: "right" },
   { key: "rate1", label: "Purchase Rate 1", align: "right" },
   { key: "rate2", label: "Purchase Rate 2", align: "right" },
@@ -111,7 +186,10 @@ export function ProductsManager({
   unitOptions,
   ruleOptions,
   canInlineEdit = false,
-  stockHighlight = {negative:false,low:false,threshold:10},
+  stockHighlight = { negative: false, low: false, threshold: 10 },
+  columnVisibility = DEFAULT_STOCK_COLUMN_VISIBILITY,
+  settingsCompanyId = "",
+  canSaveColumnSettings = false,
 }: {
   rows: Row[];
   companyOptions: Option[];
@@ -120,11 +198,27 @@ export function ProductsManager({
   unitOptions: Option[];
   ruleOptions: Option[];
   canInlineEdit?: boolean;
-  stockHighlight?: {negative:boolean;low:boolean;threshold:number};
+  stockHighlight?: { negative: boolean; low: boolean; threshold: number };
+  columnVisibility?: StockColumnVisibility;
+  settingsCompanyId?: string;
+  canSaveColumnSettings?: boolean;
 }) {
-  useEffect(()=>{saveClientCache("categories",categoryOptions);saveClientCache("brands",brandOptions);saveClientCache("units",unitOptions);},[categoryOptions,brandOptions,unitOptions]);
+  useEffect(() => {
+    saveClientCache("categories", categoryOptions);
+    saveClientCache("brands", brandOptions);
+    saveClientCache("units", unitOptions);
+  }, [categoryOptions, brandOptions, unitOptions]);
   const [deleting, startDelete] = useTransition();
+  const [savingColumns, startSavingColumns] = useTransition();
   const [deleteError, setDeleteError] = useState("");
+  const [columnStatus, setColumnStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
+  const [visibleColumns, setVisibleColumns] = useState<StockColumnVisibility>(columnVisibility);
+  const visibilityKey = `${columnVisibility.setup}:${columnVisibility.baseQuantity}:${columnVisibility.unitRules}:${columnVisibility.rate3}`;
+  const [seenVisibilityKey, setSeenVisibilityKey] = useState(visibilityKey);
+  if (seenVisibilityKey !== visibilityKey) {
+    setSeenVisibilityKey(visibilityKey);
+    setVisibleColumns(columnVisibility);
+  }
   const [setupFilter, setSetupFilter] = useState("");
   const [baseFilter, setBaseFilter] = useState("");
   const [ruleFilter, setRuleFilter] = useState("");
@@ -133,53 +227,76 @@ export function ProductsManager({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
-  const [sheetOpen,setSheetOpen]=useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [dotHelpOpen, setDotHelpOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const dots = useMemo(() => setupDots(ruleOptions, unitOptions), [ruleOptions, unitOptions]);
   const dotByKey = useMemo(() => new Map(dots.map((dot) => [`${dot.kind}:${dot.id}`, dot])), [dots]);
-  const tableColumns = useMemo<ColumnDef[]>(() => [
-    columns[0],
-    {
-      key: "unitRules",
-      label: "Unit Rules",
-      width: SETUP_COL_WIDTH,
-      render: (row) => {
-        const ruleIds = String(row._ruleIds ?? "").split(",").filter(Boolean);
-        const assigned = ruleIds
-          .map((id) => dotByKey.get(`rule:${id}`))
-          .filter((dot): dot is SetupDot => Boolean(dot));
-        if (assigned.length === 0) return <span className="text-steel">—</span>;
-        return (
-          <span className="inline-flex max-w-32 flex-wrap items-center gap-1.5" aria-label={assigned.map((dot) => `Rule: ${dot.name}`).join(", ")}>
-            {assigned.map((dot) => (
-              <span
-                key={`${dot.kind}:${dot.id}`}
-                title={`Rule: ${dot.name}`}
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: dot.color }}
-              />
-            ))}
-          </span>
-        );
+
+  function toggleColumn(key: StockToggleableColumnKey) {
+    const next: StockColumnVisibility = { ...visibleColumns, [key]: !visibleColumns[key] };
+    setVisibleColumns(next);
+    setColumnStatus(null);
+    if (!canSaveColumnSettings || !settingsCompanyId) return;
+    startSavingColumns(async () => {
+      const result = await saveStockColumnVisibility(settingsCompanyId, next);
+      if (result.error) setColumnStatus({ kind: "error", text: result.error });
+      else setColumnStatus({ kind: "saved", text: "Saved in Settings." });
+    });
+  }
+
+  const tableColumns = useMemo<ColumnDef[]>(() => {
+    const all: ColumnDef[] = [
+      columns[0],
+      {
+        key: "unitRules",
+        label: "Unit Rules",
+        width: SETUP_COL_WIDTH,
+        render: (row) => {
+          const ruleIds = String(row._ruleIds ?? "").split(",").filter(Boolean);
+          const assigned = ruleIds
+            .map((id) => dotByKey.get(`rule:${id}`))
+            .filter((dot): dot is SetupDot => Boolean(dot));
+          if (assigned.length === 0) return <span className="text-steel">—</span>;
+          return (
+            <span className="inline-flex max-w-32 flex-wrap items-center gap-1.5" aria-label={assigned.map((dot) => `Rule: ${dot.name}`).join(", ")}>
+              {assigned.map((dot) => (
+                <span
+                  key={`${dot.kind}:${dot.id}`}
+                  title={`Rule: ${dot.name}`}
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: dot.color }}
+                />
+              ))}
+            </span>
+          );
+        },
       },
-    },
-    {
-      key: "baseQuantity",
-      label: "Base Quantity",
-      width: SETUP_COL_WIDTH,
-      render: (row) => {
-        const baseUnitId = String(row._baseUnitId ?? "");
-        const dot = baseUnitId ? dotByKey.get(`base-unit:${baseUnitId}`) : undefined;
-        if (!dot) return <span className="text-steel">—</span>;
-        return (
-          <span className="inline-flex items-center" aria-label={`Base unit: ${dot.name}`}>
-            <span title={`Base unit: ${dot.name}`} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dot.color }} />
-          </span>
-        );
+      {
+        key: "baseQuantity",
+        label: "Base Quantity",
+        width: SETUP_COL_WIDTH,
+        render: (row) => {
+          const baseUnitId = String(row._baseUnitId ?? "");
+          const dot = baseUnitId ? dotByKey.get(`base-unit:${baseUnitId}`) : undefined;
+          if (!dot) return <span className="text-steel">—</span>;
+          return (
+            <span className="inline-flex items-center" aria-label={`Base unit: ${dot.name}`}>
+              <span title={`Base unit: ${dot.name}`} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dot.color }} />
+            </span>
+          );
+        },
       },
-    },
-    ...columns.slice(1),
-  ], [dotByKey]);
+      ...columns.slice(1),
+    ];
+    return all.filter((col) => {
+      if (col.key === "setup") return visibleColumns.setup;
+      if (col.key === "baseQuantity") return visibleColumns.baseQuantity;
+      if (col.key === "unitRules") return visibleColumns.unitRules;
+      if (col.key === "rate3") return visibleColumns.rate3;
+      return true;
+    });
+  }, [dotByKey, visibleColumns]);
 
   // Rows the list shows, which is the server's list plus whatever is in flight.
   // The edit grid changes several products at once, so this is where the batch
@@ -204,7 +321,9 @@ export function ProductsManager({
     setSelected([]);
   }
 
-  useNewEntry(() => {if(!sheetOpen)setBatchOpen(true);});
+  useNewEntry(() => {
+    if (!sheetOpen) setBatchOpen(true);
+  });
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -212,7 +331,21 @@ export function ProductsManager({
         title="Stock & Products"
         subtitle={selected.length > 0 ? `${selected.length} of ${shown.length} item(s) selected` : `${shown.length} item(s)`}
       >
-        {canInlineEdit&&<button type="button" onClick={()=>setSheetOpen(value=>!value)} className="h-11 rounded bg-navy-800 px-4 text-sm text-white">{sheetOpen?"Close stock editor":"Edit stock in table"}</button>}
+        {canInlineEdit && (
+          <button type="button" onClick={() => setSheetOpen((value) => !value)} className="h-11 rounded bg-navy-800 px-4 text-sm text-white">
+            {sheetOpen ? "Close stock editor" : "Edit stock in table"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setColumnStatus(null);
+            setColumnsOpen(true);
+          }}
+          className="h-11 rounded border border-sand px-4 text-sm font-medium text-steel hover:bg-ivory"
+        >
+          Columns
+        </button>
         <button
           type="button"
           onClick={() => setDotHelpOpen(true)}
@@ -254,31 +387,88 @@ export function ProductsManager({
         </button>
       </PageHeader>
 
-      {sheetOpen?<StockSheet source={rows} categoryOptions={categoryOptions} brandOptions={brandOptions} onClose={()=>setSheetOpen(false)}/>:<>
-      <WorkspaceControls label="Stock filters" className="flex flex-wrap items-center gap-2">
-        <select aria-label="Filter product setup" value={setupFilter} onChange={(event) => setSetupFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All setup</option><option value="complete">Complete setup</option><option value="incomplete">Incomplete setup</option><option value="category">Missing category</option></select>
-        <select aria-label="Filter base quantity unit" value={baseFilter} onChange={(event) => setBaseFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All base quantities</option><option value="missing">No base unit</option>{unitOptions.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
-        <select aria-label="Filter unit rules" value={ruleFilter} onChange={(event) => setRuleFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All unit rules</option><option value="missing">No unit rules</option>{ruleOptions.map((rule) => <option key={rule.id} value={rule.id}>{rule.name}</option>)}</select>
-        <select aria-label="Filter base stock quantity" value={quantityFilter} onChange={(event) => setQuantityFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm"><option value="">All stock quantities</option><option value="zero">Zero quantity</option><option value="positive">In stock</option><option value="negative">Negative quantity</option></select>
-        <button type="button" disabled={!selected.length || deleting} onClick={() => { if (!confirm(`Delete ${selected.length} product(s)? Only products with zero references can be deleted.`)) return; startDelete(async () => { const result = await deleteProducts(selected); setDeleteError(result.error ?? ""); if (!result.error) { setSelected([]); } }); }} className="ml-auto rounded border border-error/30 px-3 py-2 text-sm text-error disabled:opacity-40">{deleting ? "Deleting…" : "Delete selected"}</button>
-      </WorkspaceControls>
-      {deleteError && <p role="alert" className="text-sm text-error">{deleteError}</p>}
-      {shown.some(row=>row._localDraft===true)&&<WorkspaceControls label="Local stock drafts"><p role="status" className="text-xs text-steel">New rows marked as pending are saved locally and await server confirmation.</p></WorkspaceControls>}
-      {/* Ctrl+Enter on a ticked set is the same button as Edit Selected — the
-          keyboard route through the list ends where the mouse route does. */}
-      <DataTable
-        columns={tableColumns}
-        rows={shown.filter((row) => matchesStockSetup(row, setupFilter, baseFilter, ruleFilter, quantityFilter))}
-        idKey="id"
-        selected={selected}
-        onSelectedChange={setSelected}
-        onBatchEdit={() => setEditOpen(true)}
-        pendingIds={pending}
-        searchPlaceholder="Search products…"
-        rowTone={row=>stockHighlight.negative&&Number(row._stockQuantity)<0?"negative":stockHighlight.low&&Number(row._stockQuantity)>=0&&Number(row._stockQuantity)<=stockHighlight.threshold?"low":undefined}
-      />
-
-      </>}
+      {sheetOpen ? (
+        <StockSheet source={rows} categoryOptions={categoryOptions} brandOptions={brandOptions} onClose={() => setSheetOpen(false)} />
+      ) : (
+        <>
+          <WorkspaceControls label="Stock filters" mobileRail className="flex flex-wrap items-center gap-2">
+            <select aria-label="Filter product setup" value={setupFilter} onChange={(event) => setSetupFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm">
+              <option value="">All setup</option>
+              <option value="complete">Complete setup</option>
+              <option value="incomplete">Incomplete setup</option>
+              <option value="category">Missing category</option>
+            </select>
+            <select aria-label="Filter base quantity unit" value={baseFilter} onChange={(event) => setBaseFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm">
+              <option value="">All base quantities</option>
+              <option value="missing">No base unit</option>
+              {unitOptions.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name}
+                </option>
+              ))}
+            </select>
+            <select aria-label="Filter unit rules" value={ruleFilter} onChange={(event) => setRuleFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm">
+              <option value="">All unit rules</option>
+              <option value="missing">No unit rules</option>
+              {ruleOptions.map((rule) => (
+                <option key={rule.id} value={rule.id}>
+                  {rule.name}
+                </option>
+              ))}
+            </select>
+            <select aria-label="Filter base stock quantity" value={quantityFilter} onChange={(event) => setQuantityFilter(event.target.value)} className="rounded border border-sand px-3 py-2 text-sm">
+              <option value="">All stock quantities</option>
+              <option value="zero">Zero quantity</option>
+              <option value="positive">In stock</option>
+              <option value="negative">Negative quantity</option>
+            </select>
+            <button
+              type="button"
+              disabled={!selected.length || deleting}
+              onClick={() => {
+                if (!confirm(`Delete ${selected.length} product(s)? Only products with zero references can be deleted.`)) return;
+                startDelete(async () => {
+                  const result = await deleteProducts(selected);
+                  setDeleteError(result.error ?? "");
+                  if (!result.error) {
+                    setSelected([]);
+                  }
+                });
+              }}
+              className="ml-auto rounded border border-error/30 px-3 py-2 text-sm text-error disabled:opacity-40"
+            >
+              {deleting ? "Deleting…" : "Delete selected"}
+            </button>
+          </WorkspaceControls>
+          {deleteError && <p role="alert" className="text-sm text-error">{deleteError}</p>}
+          {shown.some((row) => row._localDraft === true) && (
+            <WorkspaceControls label="Local stock drafts">
+              <p role="status" className="text-xs text-steel">
+                New rows marked as pending are saved locally and await server confirmation.
+              </p>
+            </WorkspaceControls>
+          )}
+          {/* Ctrl+Enter on a ticked set is the same button as Edit Selected — the
+              keyboard route through the list ends where the mouse route does. */}
+          <DataTable
+            columns={tableColumns}
+            rows={shown.filter((row) => matchesStockSetup(row, setupFilter, baseFilter, ruleFilter, quantityFilter))}
+            idKey="id"
+            selected={selected}
+            onSelectedChange={setSelected}
+            onBatchEdit={() => setEditOpen(true)}
+            pendingIds={pending}
+            searchPlaceholder="Search products…"
+            rowTone={(row) =>
+              stockHighlight.negative && Number(row._stockQuantity) < 0
+                ? "negative"
+                : stockHighlight.low && Number(row._stockQuantity) >= 0 && Number(row._stockQuantity) <= stockHighlight.threshold
+                  ? "low"
+                  : undefined
+            }
+          />
+        </>
+      )}
       {editOpen && (
         // Hidden rather than closed while the batch is in the air. The grid holds
         // a screenful of typed cells across however many products were ticked, so
@@ -311,6 +501,43 @@ export function ProductsManager({
       )}
 
       {mergeOpen && <MergeProductsDialog onClose={() => setMergeOpen(false)} onDone={closeMerge} />}
+
+      {columnsOpen && (
+        <Dialog title="Stock Columns" onClose={() => setColumnsOpen(false)}>
+          <div className="flex flex-col gap-4 text-sm">
+            <p className="text-steel">
+              {canSaveColumnSettings
+                ? "Show or hide optional columns on the Stock & Products table. Changes are saved in Settings."
+                : "Show or hide optional columns for this view. Settings edit permission is required to save changes."}
+            </p>
+            <div className="flex flex-col gap-2">
+              {STOCK_COLUMN_SETTINGS.map((col) => (
+                <label
+                  key={col.columnKey}
+                  className="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-sand px-3 py-2.5 hover:bg-ivory"
+                >
+                  <span className="font-medium text-ink">{col.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns[col.columnKey]}
+                    onChange={() => toggleColumn(col.columnKey)}
+                    className="h-5 w-5 rounded border-sand"
+                  />
+                </label>
+              ))}
+            </div>
+            {savingColumns && <p className="text-xs text-steel">Saving to Settings…</p>}
+            {!savingColumns && columnStatus && (
+              <p
+                role={columnStatus.kind === "error" ? "alert" : "status"}
+                className={`text-xs ${columnStatus.kind === "error" ? "text-error" : "text-success"}`}
+              >
+                {columnStatus.text}
+              </p>
+            )}
+          </div>
+        </Dialog>
+      )}
 
       {dotHelpOpen && (
         <Dialog title="Product Setup Dot Guide" size="wide" onClose={() => setDotHelpOpen(false)}>

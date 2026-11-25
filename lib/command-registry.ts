@@ -95,6 +95,7 @@ export const commandActions = {
   "sales.updateSale": sales.updateSale,
   "sales.deleteSale": sales.deleteSale,
   "settings.saveSettings": settings.saveSettings,
+  "settings.saveStockColumnVisibility": settings.saveStockColumnVisibility,
   "stock-adjustments.createStockAdjustment": stock_adjustments.createStockAdjustment,
   "stock-adjustments.approveStockAdjustment": stock_adjustments.approveStockAdjustment,
   "stock-adjustments.deleteStockAdjustment": stock_adjustments.deleteStockAdjustment,
