@@ -1,5 +1,6 @@
-// Proportional semantic column widths. Record contents never distort column geometry.
-export const TABLE_COLUMN_GUTTER = 12;
+// Proportional semantic column widths with a fixed breathable gutter so
+// neighbouring columns and texts never collide.
+export const TABLE_COLUMN_GUTTER = 16;
 
 export function columnWidthKey(key: string): string {
   if (key.trim() === "#") return "serial";
@@ -39,33 +40,33 @@ export function columnContentKind(key: string, align?: "left" | "right"): "text"
 
 export function minimumColumnWidth(key: string, align?: "left" | "right"): number {
   const canonical = columnWidthKey(key);
-  if (canonical === "select") return 44;
-  if (canonical === "serial") return 52;
-  if (canonical === "remove") return 44;
-  if (["pdf", "png", "download"].includes(canonical)) return 64;
-  if (["actions", "action", "return"].includes(canonical)) return 84;
-  if (canonical === "setup") return 76;
-  if (canonical === "age") return 68;
-  if (canonical === "count") return 88;
-  if (["taxable", "isactive", "active", "marketbuy", "marketpurchase"].includes(canonical)) return 88;
-  if (canonical === "quantity" || canonical === "net" || canonical === "basequantity" || canonical === "targetqty" || canonical === "costshare" || canonical === "multiplier") return 88;
-  if (canonical === "unit") return 92;
-  if (canonical === "onhand" || canonical === "available") return 108;
-  if (canonical === "unitprice" || canonical === "ratelist") return 112;
-  if (columnContentKind(key, align) === "number") return 132;
-  if (columnContentKind(key, align) === "date") return /time|created|updated|^when$/.test(canonical) ? 164 : 108;
-  if (canonical === "status" || canonical === "type") return 104;
-  if (["company", "channel", "number", "sku", "code", "mode"].includes(canonical)) return 112;
-  if (canonical === "item" || canonical === "contact") return 200;
-  if (canonical === "description") return 220;
-  if (/accountnumber|iban/.test(canonical)) return 192;
-  if (canonical === "email" || canonical === "bankaccount" || canonical === "companyname") return 168;
-  return 132;
+  if (canonical === "select") return 48;
+  if (canonical === "serial") return 64;
+  if (canonical === "remove") return 52;
+  if (["pdf", "png", "download"].includes(canonical)) return 80;
+  if (["actions", "action", "return"].includes(canonical)) return 96;
+  if (canonical === "setup") return 84;
+  if (canonical === "age") return 80;
+  if (canonical === "count") return 104;
+  if (["taxable", "isactive", "active", "marketbuy", "marketpurchase"].includes(canonical)) return 96;
+  if (canonical === "quantity" || canonical === "net" || canonical === "basequantity" || canonical === "targetqty" || canonical === "costshare" || canonical === "multiplier") return 104;
+  if (canonical === "unit") return 104;
+  if (canonical === "onhand" || canonical === "available") return 132;
+  if (canonical === "unitprice" || canonical === "ratelist") return 132;
+  if (columnContentKind(key, align) === "number") return 152;
+  if (columnContentKind(key, align) === "date") return /time|created|updated|^when$/.test(canonical) ? 184 : 124;
+  if (canonical === "status" || canonical === "type") return 136;
+  if (["company", "channel", "number", "sku", "code", "mode"].includes(canonical)) return 128;
+  if (canonical === "item" || canonical === "contact") return 220;
+  if (canonical === "description") return 240;
+  if (/accountnumber|iban/.test(canonical)) return 208;
+  if (canonical === "email" || canonical === "bankaccount" || canonical === "companyname") return 184;
+  return 148;
 }
 
 export function fixedColumnMinimum(column: { key: string; align?: "left" | "right"; width?: string | number }): number {
   if (typeof column.width === "number" && column.width > 0) {
-    return Math.max(44, column.width);
+    return Math.max(48, column.width);
   }
   return minimumColumnWidth(column.key, column.align);
 }

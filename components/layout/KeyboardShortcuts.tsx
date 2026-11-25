@@ -88,10 +88,16 @@ export const NEW_ENTRY_EVENT = "erp:new";
 // popup saves and starts the next one. `inDialog` is which of the two this is —
 // with a popup on screen the list behind it must stay quiet, or Alt+N would open
 // a second one on top of the first.
+function hasVisibleDialog(): boolean {
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).some(
+    (dialog) => !dialog.hidden && !dialog.closest(".hidden,[hidden]"),
+  );
+}
+
 export function useNewEntry(handler: () => void, inDialog = false) {
   useEffect(() => {
     function onNew() {
-      if (!!document.querySelector('[role="dialog"]') !== inDialog) return;
+      if (hasVisibleDialog() !== inDialog) return;
       handler();
     }
     window.addEventListener(NEW_ENTRY_EVENT, onNew);
@@ -237,7 +243,7 @@ export function KeyboardShortcuts() {
       // whatever is half-typed in it without so much as a question. Asked of the
       // DOM rather than through an export from Dialog, because "is a modal on
       // screen" is a fact the DOM already holds.
-      if (document.querySelector('[role="dialog"]')) return;
+      if (hasVisibleDialog()) return;
 
       if (e.key === "?") {
         e.preventDefault();

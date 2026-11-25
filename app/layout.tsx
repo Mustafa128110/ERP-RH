@@ -4,19 +4,14 @@ import { DEFAULT_SCALE, nearestStep } from "@/lib/preference-constants";
 import { ServiceWorkerRegister } from "@/components/layout/ServiceWorkerRegister";
 import { DocumentTitle } from "@/components/layout/DocumentTitle";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import "@fontsource/fraunces/600.css";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
-import "@fontsource/source-code-pro/400.css";
-import "@fontsource/source-code-pro/500.css";
-import "@fontsource/source-code-pro/600.css";
 import "./globals.css";
 
-// Brand pairing (docs/OS/02-brand/typography.md): Fraunces 600 for
-// display/headings, Inter 400/500/600 for body/UI. The font files are bundled
-// from @fontsource so production builds never depend on Google Fonts being up
-// or reachable from a restricted deployment network.
+// Uniform typography across headings, body copy, and tabular figures (Inter
+// 400/500/600). Bundled from @fontsource so production builds never depend on
+// Google Fonts being up or reachable from a restricted deployment network.
 
 export const metadata: Metadata = {
   title: "ERP RH",

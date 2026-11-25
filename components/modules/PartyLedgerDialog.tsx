@@ -768,29 +768,29 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, channelId
             </div>
           ) : (
             <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
-              <table className="w-full min-w-[46rem] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[52rem] table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col style={{ width: "7rem" }} />
-                  <col />
-                  <col style={{ width: "6.5rem" }} />
-                  <col style={{ width: "7.5rem" }} />
-                  <col style={{ width: "7.5rem" }} />
                   <col style={{ width: "8rem" }} />
-                  <col style={{ width: "6.5rem" }} />
-                  <col style={{ width: "2.75rem" }} />
+                  <col />
+                  <col style={{ width: "7.5rem" }} />
+                  <col style={{ width: "8.5rem" }} />
+                  <col style={{ width: "8.5rem" }} />
+                  <col style={{ width: "9rem" }} />
+                  <col style={{ width: "7.5rem" }} />
+                  <col style={{ width: "3rem" }} />
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">
-                    <th className="cursor-pointer select-none py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => toggleLedgerSort("date")}>
+                    <th className="cursor-pointer select-none px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel hover:text-navy-800" onClick={() => toggleLedgerSort("date")}>
                       Date {sortMarker("date")}
                     </th>
-                    <th onClick={() => toggleLedgerSort("description")} className="cursor-pointer select-none py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description {sortMarker("description")}</th>
-                    <th onClick={() => toggleLedgerSort("reference")} className="cursor-pointer select-none py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Ref {sortMarker("reference")}</th>
-                    <th onClick={() => toggleLedgerSort("debit")} className="cursor-pointer select-none py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Debit {sortMarker("debit")}</th>
-                    <th onClick={() => toggleLedgerSort("credit")} className="cursor-pointer select-none py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Credit {sortMarker("credit")}</th>
-                    <th onClick={() => toggleLedgerSort("balance")} className="cursor-pointer select-none py-2.5 px-3 text-right text-xs font-semibold uppercase tracking-wide text-steel">Balance {sortMarker("balance")}</th>
-                    <th className="py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-steel">Status</th>
-                    <th className="py-2.5 px-1"></th>
+                    <th onClick={() => toggleLedgerSort("description")} className="cursor-pointer select-none px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-steel">Description {sortMarker("description")}</th>
+                    <th onClick={() => toggleLedgerSort("reference")} className="cursor-pointer select-none px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Ref {sortMarker("reference")}</th>
+                    <th onClick={() => toggleLedgerSort("debit")} className="cursor-pointer select-none px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-steel">Debit {sortMarker("debit")}</th>
+                    <th onClick={() => toggleLedgerSort("credit")} className="cursor-pointer select-none px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-steel">Credit {sortMarker("credit")}</th>
+                    <th onClick={() => toggleLedgerSort("balance")} className="cursor-pointer select-none px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-steel">Balance {sortMarker("balance")}</th>
+                    <th className="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-steel">Status</th>
+                    <th className="px-2 py-2.5"></th>
                   </tr>
                 </thead>
                 <tbody
@@ -803,19 +803,19 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, channelId
                 >
                   {entriesWithBalance.map((e, i) => (
                     <tr key={`${e.id}-${i}`} className={`border-b border-sand/50 ${i % 2 === 1 ? "bg-ivory/30" : ""}`}>
-                      <td className="whitespace-nowrap py-2.5 px-3 text-center tabular-nums text-steel">
+                      <td className="min-w-0 overflow-hidden whitespace-nowrap px-4 py-2.5 text-center tabular-nums text-steel">
                         {formatDate(e.date)}
                       </td>
-                      <td className="py-2 px-3"><DescriptionCell entry={e} /></td>
-                      <td className="py-2 px-3 text-center text-xs tabular-nums text-steel">
+                      <td className="min-w-0 overflow-hidden break-words px-4 py-2.5"><DescriptionCell entry={e} /></td>
+                      <td className="min-w-0 overflow-hidden whitespace-nowrap px-4 py-2.5 text-center text-xs tabular-nums text-steel">
                         <RefCell entry={e} ctx={refCellContext} />
                       </td>
-                      <td className="py-2.5 px-3 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{e.debit > 0 ? money(e.debit) : ""}</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums text-success" data-cell tabIndex={-1}>{e.credit > 0 ? money(e.credit) : ""}</td>
-                      <td className={`py-2.5 px-3 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`} data-cell tabIndex={-1}>
+                      <td className="min-w-0 overflow-hidden whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{e.debit > 0 ? money(e.debit) : ""}</td>
+                      <td className="min-w-0 overflow-hidden whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-success" data-cell tabIndex={-1}>{e.credit > 0 ? money(e.credit) : ""}</td>
+                      <td className={`min-w-0 overflow-hidden whitespace-nowrap px-4 py-2.5 text-right font-medium tabular-nums ${e.balance > 0 ? "text-error" : e.balance < 0 ? "text-success" : "text-ink"}`} data-cell tabIndex={-1}>
                         {money(e.balance)}
                       </td>
-                      <td className="py-2 px-3 text-center">
+                      <td className="min-w-0 overflow-hidden px-4 py-2.5 text-center">
                         {e.documentStatus === "cancelled" ? (
                           <span className="rounded border border-steel/30 bg-ivory px-1.5 py-0.5 text-[10px] font-medium text-steel">Cancelled</span>
                         ) : e.isLedgerClosed ? (
@@ -840,10 +840,10 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, channelId
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-sand bg-ivory/50 font-semibold">
-                    <td colSpan={3} className="py-2 px-3 text-xs uppercase tracking-wide text-steel">Totals</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{money(summary.totalDebit)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-success" data-cell tabIndex={-1}>{money(summary.totalCredit)}</td>
-                    <td className={`py-2 px-3 text-right tabular-nums ${summary.closing > 0 ? "text-error" : summary.closing < 0 ? "text-success" : "text-ink"}`}>
+                    <td colSpan={3} className="px-4 py-2 text-xs uppercase tracking-wide text-steel">Totals</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-ink" data-cell tabIndex={-1}>{money(summary.totalDebit)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-success" data-cell tabIndex={-1}>{money(summary.totalCredit)}</td>
+                    <td className={`px-4 py-2 text-right tabular-nums ${summary.closing > 0 ? "text-error" : summary.closing < 0 ? "text-success" : "text-ink"}`}>
                       {money(summary.closing)}
                     </td>
                     <td colSpan={2}></td>

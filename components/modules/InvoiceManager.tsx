@@ -250,7 +250,7 @@ export function InvoiceManager({
   const downloadColumn = (format: "pdf" | "png", pendingId: string | null): ColumnDef => ({
     key: format,
     label: "",
-    width: 64,
+    width: 80,
     render: (row) => (
       <button
         type="button"
@@ -274,7 +274,7 @@ export function InvoiceManager({
   const returnColumn: ColumnDef = {
     key: "return",
     label: "",
-    width: 80,
+    width: 96,
     render: (row) => String(row.status) === "Cancelled" ? "—" : (
       <button
         type="button"

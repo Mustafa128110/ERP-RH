@@ -34,7 +34,7 @@ export function useTableColumnLayout(
   }, [container, hasRows]);
 
   const layoutColumns = [
-    ...(selectable ? [{ key: "__select", minimum: 44 * viewport.scale, grow: 0 }] : []),
+    ...(selectable ? [{ key: "__select", minimum: 48 * viewport.scale, grow: 0 }] : []),
     ...columns.map((column) => ({
       key: column.key,
       minimum: fixedColumnMinimum(column) * viewport.scale,

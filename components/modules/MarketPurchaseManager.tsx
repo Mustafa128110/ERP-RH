@@ -3,7 +3,7 @@ import {HistoryControls} from "@/components/ui/HistoryProvider";
 import { FormRecovery, useRecoveryState } from "@/components/ui/FormRecovery";
 import { isQueuedSave, saveStatus } from "@/lib/save-status";
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cancelMarketPurchase, confirmMarketPurchases } from "@/lib/client-actions/market-purchases";
 import { DateField } from "@/components/ui/DateField";
@@ -51,6 +51,50 @@ function MarketPurchaseManagerBody({
   const [costs, setCosts] = useRecoveryState<Record<string, string>>("costs", {});
   const [settlementType, setSettlementType] = useRecoveryState<"account" | "cash" | "cheque">("settlementType", "cash");
   const [operationId, setOperationId] = useState(() => crypto.randomUUID());
+  const [focused, setFocused] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+
+  useEffect(() => {
+    if (focused < 0 || pendingRows.length === 0) return;
+    const container = listRef.current;
+    const rowEl = tbodyRef.current?.querySelector<HTMLElement>(`[data-row-index="${focused}"]`);
+    if (!container || !rowEl) return;
+    const headerHeight = container.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+    const cRect = container.getBoundingClientRect();
+    const rRect = rowEl.getBoundingClientRect();
+    if (rRect.top < cRect.top + headerHeight) container.scrollTop -= cRect.top + headerHeight - rRect.top;
+    else if (rRect.bottom > cRect.bottom) container.scrollTop += rRect.bottom - cRect.bottom;
+  }, [focused, pendingRows.length]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.isContentEditable) return;
+      const tag = target?.tagName;
+      if (tag === "TEXTAREA" || tag === "SELECT") return;
+      if (tag === "INPUT" && (target as HTMLInputElement).type !== "checkbox") return;
+      const hasDialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).some(
+        (dialog) => !dialog.hidden && !dialog.closest(".hidden,[hidden]"),
+      );
+      if (hasDialog || pendingRows.length === 0) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        const at = focused < 0 ? 0 : Math.min(focused, pendingRows.length - 1);
+        const next =
+          e.key === "ArrowDown" ? (focused < 0 ? 0 : Math.min(pendingRows.length - 1, at + 1))
+          : e.key === "ArrowUp" ? (focused < 0 ? 0 : Math.max(0, at - 1))
+          : e.key === "Home" ? 0
+          : pendingRows.length - 1;
+        setFocused(next);
+      } else if (e.key === "Enter" && focused >= 0 && focused < pendingRows.length && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        toggle(pendingRows[focused]);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  });
   const selectedCompany = pendingRows.find((row) => selected.includes(row.id))?.companyId ?? "";
   const selectedRows = pendingRows.filter((row) => selected.includes(row.id));
   const total = selectedRows.reduce((sum, row) => sum + Number(row.quantity) * Number(costs[row.id] || 0), 0);
@@ -96,41 +140,41 @@ function MarketPurchaseManagerBody({
     <div className="flex h-full flex-col gap-4">
       <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) on this page waiting for confirmation`} />
       <WorkspaceControls label="Market purchase filters"><HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/></WorkspaceControls>
-      <div data-list="global" tabIndex={0} className="min-h-0 flex-1 overflow-auto rounded border border-sand bg-white">
-        <table className="w-full min-w-[56rem] table-fixed border-collapse text-sm">
+      <div ref={listRef} data-list="global" tabIndex={0} className="mobile-data-list min-h-0 flex-1 overflow-auto rounded border border-sand bg-white outline-none">
+        <table className="w-full min-w-[60rem] table-fixed border-collapse text-sm">
           <colgroup>
-            <col style={{ width: "2.75rem" }} />
-            <col style={{ width: "7.5rem" }} />
-            <col style={{ width: "12rem" }} />
+            <col style={{ width: "3rem" }} />
+            <col style={{ width: "8.5rem" }} />
+            <col style={{ width: "13rem" }} />
             <col style={{ width: "16rem" }} />
-            <col style={{ width: "7.5rem" }} />
+            <col style={{ width: "8.5rem" }} />
+            <col style={{ width: "10rem" }} />
             <col style={{ width: "9rem" }} />
-            <col style={{ width: "8rem" }} />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-ivory text-left text-xs uppercase tracking-wide text-steel">
             <tr>
-              <th className="w-10 border-b border-sand p-2" />
-              <th className="w-32 border-b border-sand p-2">Sale</th>
-              <th className="w-56 border-b border-sand p-2">Company / Customer</th>
-              <th className="w-64 border-b border-sand p-2">Item</th>
-              <th className="w-32 border-b border-sand p-2 text-right">Quantity</th>
-              <th className="w-40 border-b border-sand p-2 text-right">Market Unit Cost</th>
-              <th className="w-36 border-b border-sand p-2 text-right">Cost</th>
+              <th className="border-b border-sand px-4 py-2.5" />
+              <th className="border-b border-sand px-4 py-2.5">Sale</th>
+              <th className="border-b border-sand px-4 py-2.5">Company / Customer</th>
+              <th className="border-b border-sand px-4 py-2.5">Item</th>
+              <th className="border-b border-sand px-4 py-2.5 text-right">Quantity</th>
+              <th className="border-b border-sand px-4 py-2.5 text-right">Market Unit Cost</th>
+              <th className="border-b border-sand px-4 py-2.5 text-right">Cost</th>
             </tr>
           </thead>
-          <tbody>
-            {pendingRows.map((row) => {
+          <tbody ref={tbodyRef}>
+            {pendingRows.map((row, rowIndex) => {
               const checked = selected.includes(row.id);
               const companyLocked = Boolean(selectedCompany && selectedCompany !== row.companyId);
               return (
-                <tr key={row.id} className={checked ? "bg-brass-50" : "hover:bg-ivory/60"}>
-                  <td className="w-10 border-b border-sand p-2 text-center"><input type="checkbox" checked={checked} disabled={companyLocked} onChange={() => toggle(row)} className="h-4 w-4 accent-navy-800" /></td>
-                  <td className="w-32 border-b border-sand p-2 truncate"><span className="font-medium text-navy-800">{row.saleNumber}</span><br /><span className="text-xs text-steel">{formatDate(row.saleDate)}</span></td>
-                  <td className="w-56 border-b border-sand p-2 truncate">{row.company}<br /><span className="text-xs text-steel">{row.customer ?? "Counter"}</span></td>
-                  <td className="w-64 border-b border-sand p-2 truncate">{row.item}</td>
-                  <td className="w-32 border-b border-sand p-2 text-right tabular-nums">{qty(row.quantity)} {row.unit ?? ""}</td>
-                  <td className="w-40 border-b border-sand p-2"><input type="number" min="0.01" step="0.01" value={costs[row.id] ?? ""} onFocus={() => !checked && toggle(row)} onChange={(event) => setCosts((current) => ({ ...current, [row.id]: event.target.value }))} className={`${fieldClass} ml-auto w-32 text-right`} placeholder="Actual cost" /></td>
-                  <td className="w-36 border-b border-sand p-2 text-right tabular-nums">{costs[row.id] ? money(Number(row.quantity) * Number(costs[row.id])) : "—"}</td>
+                <tr key={row.id} data-row-index={rowIndex} data-focused={rowIndex === focused} onMouseDown={() => setFocused(rowIndex)} className={checked ? "bg-brass-50" : "hover:bg-ivory/60"}>
+                  <td className="border-b border-sand px-4 py-2.5 text-center"><input type="checkbox" checked={checked} disabled={companyLocked} onChange={() => toggle(row)} className="h-4 w-4 accent-navy-800" /></td>
+                  <td className="min-w-0 overflow-hidden border-b border-sand px-4 py-2.5"><span className="block truncate font-medium text-navy-800">{row.saleNumber}</span><span className="block truncate text-xs text-steel">{formatDate(row.saleDate)}</span></td>
+                  <td className="min-w-0 overflow-hidden border-b border-sand px-4 py-2.5"><span className="block truncate">{row.company}</span><span className="block truncate text-xs text-steel">{row.customer ?? "Counter"}</span></td>
+                  <td className="min-w-0 overflow-hidden break-words border-b border-sand px-4 py-2.5">{row.item}</td>
+                  <td className="min-w-0 overflow-hidden whitespace-nowrap border-b border-sand px-4 py-2.5 text-right tabular-nums">{qty(row.quantity)} {row.unit ?? ""}</td>
+                  <td className="min-w-0 overflow-hidden border-b border-sand px-4 py-2.5"><input type="number" min="0.01" step="0.01" value={costs[row.id] ?? ""} onFocus={() => !checked && toggle(row)} onChange={(event) => setCosts((current) => ({ ...current, [row.id]: event.target.value }))} className={`${fieldClass} ml-auto w-full text-right`} placeholder="Actual cost" /></td>
+                  <td className="min-w-0 overflow-hidden whitespace-nowrap border-b border-sand px-4 py-2.5 text-right tabular-nums">{costs[row.id] ? money(Number(row.quantity) * Number(costs[row.id])) : "—"}</td>
                 </tr>
               );
             })}

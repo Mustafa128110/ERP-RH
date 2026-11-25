@@ -79,12 +79,11 @@ const buildColumns = (): ColumnDef[] => [
     ),
   },
   { key: "contact", label: "Contact" },
-  { key: "amount", label: "Amount", align: "right", width: 132, paddingRight: 20 },
+  { key: "amount", label: "Amount", align: "right", width: 152 },
   {
     key: "method",
     label: "Method",
-    width: 140,
-    paddingLeft: 16,
+    width: 148,
     // A grouped row folded several payments together; when they paid by different
     // means the cell says "Mixed" and hovering lists which — naming one would
     // claim the others went the same way. The raw methods ride on the row as

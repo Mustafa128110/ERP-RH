@@ -23,7 +23,7 @@ import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 // real column — the count is the row's position on screen, not data anyone stores.
 const SNO_KEY = "__sno";
 const snoColumn: ColumnDef = { key: SNO_KEY, label: "#", align: "right" };
-const SELECT_COL_WIDTH = 44;
+const SELECT_COL_WIDTH = 48;
 
 function getColPadding(col: ColumnDef): React.CSSProperties {
   const style: React.CSSProperties = {};
@@ -268,10 +268,21 @@ export function DataTable({
     return clamped;
   }
 
-  // Scrolling happens after the focused row has rendered.
+  // Keep the highlighted row visible inside the table's own scroll container
+  // without scrolling outer ancestors or letting the sticky <thead> cover it.
   useEffect(() => {
     if (focused < 0) return;
-    bodyRef.current?.querySelector(`[data-row-index="${focused}"]`)?.scrollIntoView({ block: "nearest" });
+    const container = scrollRef.current;
+    const rowEl = bodyRef.current?.querySelector<HTMLElement>(`[data-row-index="${focused}"]`);
+    if (!container || !rowEl) return;
+    const headerHeight = container.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+    const containerRect = container.getBoundingClientRect();
+    const rowRect = rowEl.getBoundingClientRect();
+    if (rowRect.top < containerRect.top + headerHeight) {
+      container.scrollTop -= containerRect.top + headerHeight - rowRect.top;
+    } else if (rowRect.bottom > containerRect.bottom) {
+      container.scrollTop += rowRect.bottom - containerRect.bottom;
+    }
   }, [focused]);
 
   function open(row: Row) {
@@ -361,9 +372,16 @@ export function DataTable({
         // the input's own handler deals with.
         return;
       }
-      if (document.querySelector('[role="dialog"]')) return;
-      if (!globalShortcuts && !scrollRef.current?.contains(target)) return;
-      if (globalShortcuts && document.querySelector('[data-list="global"]') !== scrollRef.current) return;
+      const visibleDialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).filter(
+        (dialog) => !dialog.hidden && !dialog.closest(".hidden,[hidden]"),
+      );
+      if (visibleDialogs.length > 0) {
+        const topDialog = visibleDialogs[visibleDialogs.length - 1];
+        if (!scrollRef.current || !topDialog.contains(scrollRef.current)) return;
+      } else {
+        if (!globalShortcuts && !scrollRef.current?.contains(target)) return;
+        if (globalShortcuts && document.querySelector('[data-list="global"]') !== scrollRef.current) return;
+      }
       onKeyDown(e);
     }
     document.addEventListener("keydown", handler);
@@ -458,12 +476,16 @@ export function DataTable({
   }
 
 
+  const showTableControls = Boolean(search) || (!editable && visible.length > 150);
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-      <WorkspaceControls label="Table controls" className="flex flex-wrap items-center justify-between gap-2">
-        {search}
-        {!editable && visible.length > 150 && <div className="flex shrink-0 items-center justify-between gap-3 text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
-      </WorkspaceControls>
+      {showTableControls && (
+        <WorkspaceControls label="Table controls" className="flex flex-wrap items-center justify-between gap-2">
+          {search}
+          {!editable && visible.length > 150 && <div className="flex shrink-0 items-center justify-between gap-3 text-xs text-steel print:hidden"><span>{visible.length.toLocaleString()} records</span><button type="button" className="text-navy-800 hover:underline" onClick={() => setShowAllRows(value => !value)}>{showAllRows ? "Use fast scrolling" : "Show all rows at once"}</button></div>}
+        </WorkspaceControls>
+      )}
       {/* tabIndex makes the list itself focusable, which is what gives the arrow
           keys somewhere to arrive. Clicking any row focuses it as a side effect. */}
       {/* Still focusable, so clicking the list is still a way to put the caret
@@ -499,7 +521,7 @@ export function DataTable({
             <thead>
               <tr className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
                 {selectable && (
-                  <th className="px-3 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
+                  <th className="px-4 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
                     <input
                       type="checkbox"
                       aria-label={allSelected ? "Clear selection" : remote && !remote.info.all ? "Select rows on this page" : "Select all rows"}
@@ -522,7 +544,7 @@ export function DataTable({
                       style={{ width: getColWidth(col), ...getColPadding(col) }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
-                      className={`whitespace-normal break-words px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
+                      className={`whitespace-normal break-words px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
                         col.align === "right" ? "text-right" : "text-left"
                       }${
                         sortable ? " cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200" : ""
@@ -569,7 +591,7 @@ export function DataTable({
                   </>
                 );
                 const cellClass = (col: ColumnDef) =>
-                  `${columnContentKind(col.key, col.align) === "text" ? "table-cell-text whitespace-normal break-words" : "table-cell-fact whitespace-nowrap"} px-3 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                  `${columnContentKind(col.key, col.align) === "text" ? "table-cell-text whitespace-normal break-words" : "table-cell-fact whitespace-nowrap"} min-w-0 overflow-hidden px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
                     col.align === "right" ? "text-right tabular-nums" : "text-left"
                   }`;
 
@@ -603,7 +625,7 @@ export function DataTable({
                     }`}
                   >
                     {selectable && (
-                      <td data-label="Select" className="px-3 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
+                      <td data-label="Select" className="px-4 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
                         <input
                           type="checkbox"
                           aria-label={`Select ${String(row[columns[0]?.key ?? idKey] ?? "row")}`}

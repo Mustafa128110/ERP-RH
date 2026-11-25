@@ -21,7 +21,7 @@ import { Icon } from "@/components/ui/Icon";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 
-const SETUP_COL_WIDTH = 76;
+const SETUP_COL_WIDTH = 84;
 
 // No S.No column here — DataTable numbers every row itself.
 const columns: ColumnDef[] = [

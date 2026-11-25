@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(path, "utf8");
 const css = read("app/globals.css");
+const layout = read("app/layout.tsx");
+const workspace = read("components/layout/TableWorkspace.tsx");
 const table = read("components/ui/DataTable.tsx");
 const sale = read("components/modules/SaleForm.tsx");
 const quotation = read("components/modules/QuotationForm.tsx");
@@ -28,5 +30,10 @@ assert.match(conversion, /conversion-items-grid/, "conversion lines must adopt t
 assert.match(css, /\.matrix-scroll/, "dense accounting matrices need bounded mobile scrolling");
 assert.match(share, /navigator\.canShare/, "Export sharing must capability-check native file sharing");
 assert.match(share, /Download again/, "export fallback must keep a second download available");
+assert.ok(!layout.includes("@fontsource/fraunces") && !layout.includes("@fontsource/source-code-pro"), "typography must use one uniform font across text and figures");
+assert.match(css, /grid-template-rows 260ms/, "table scroll collapse must use a smooth CSS transition");
+assert.match(css, /overflow: hidden/, "table cells must prevent text collision across column boundaries");
+assert.match(workspace, /role=\{focused && open \? "dialog" : undefined\}/, "closed table options popup must not block table keyboard navigation");
+assert.match(table, /visibleDialogs/, "DataTable arrow-key navigation must ignore hidden dialogs");
 
 console.log("ok   mobile UI contracts are present");

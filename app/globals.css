@@ -22,8 +22,8 @@
 
 @theme inline {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", ui-serif, Georgia, serif;
-  --font-mono: "Source Code Pro", ui-monospace, monospace;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 @theme {
@@ -382,7 +382,7 @@ body {
 }
 
 h1, h2, h3 {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-weight: 600;
 }
 
@@ -407,16 +407,14 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 
-/* All numbers — display cells, stat cards, form values, inputs — use Source
- * Code Pro for a monospaced, tabular look. The .num class covers explicit
- * number spans; tabular-nums already used in 100+ places inherits via the
- * font-feature-settings rule on td/th. */
+/* Uniform typography across figures and prose: same Inter family and size,
+ * with tabular numerals so columns of numbers align vertically cleanly. */
 .num,
 .tabular-nums,
 input[type="number"],
 input[data-type="number"] {
-  font-family: var(--font-mono);
-  font-size: 0.95em;
+  font-family: inherit;
+  font-size: inherit;
   font-variant-numeric: tabular-nums;
 }
 
@@ -459,6 +457,7 @@ tr[data-stock-tone="low"]:hover { background-color: var(--color-brass-100); }
 .mobile-data-list {
   max-width: 100%;
   overflow: auto;
+  scroll-padding-top: 3rem;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-inline: contain;
 }
@@ -481,25 +480,37 @@ table[data-responsive] tr[data-virtual-spacer] td::before {
   content: none;
 }
 
-table[data-column-layout] > thead > tr > th {
-  white-space: normal;
-  overflow-wrap: break-word;
+/* Breathable fixed minimum gap (16px each side = 32px between adjacent columns)
+ * and strict cell containment so text and figures never collide across columns. */
+table[data-column-layout] > thead > tr > th,
+table[data-column-layout] > tbody > tr:not([data-virtual-spacer]) > td,
+table[data-column-layout] > tfoot > tr > td {
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
   vertical-align: middle;
 }
 
-table[data-column-layout] > tbody > tr:not([data-virtual-spacer]) > td {
-  vertical-align: middle;
+table[data-column-layout="auto"] > thead > tr > th,
+table[data-column-layout="auto"] > tbody > tr:not([data-virtual-spacer]) > td,
+table[data-column-layout="auto"] > tfoot > tr > td {
+  padding-inline: 16px;
+}
+
+table[data-column-layout] > thead > tr > th {
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 table[data-column-layout] td[data-cell-kind="text"] {
   white-space: normal;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   word-break: normal;
 }
 
 table[data-column-layout] td[data-cell-kind="text"].truncate,
 table[data-column-layout] td[data-cell-kind="text"] :is(.truncate, [class*="line-clamp"]) {
-  overflow: visible;
+  overflow: hidden;
   text-overflow: clip;
   white-space: normal;
   -webkit-line-clamp: unset;
@@ -508,24 +519,89 @@ table[data-column-layout] td[data-cell-kind="text"] :is(.truncate, [class*="line
 table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date"]),
 table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date"]) :is(a, span, div, p) {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   overflow-wrap: normal;
   word-break: normal;
   font-variant-numeric: tabular-nums;
 }
 
-/* A scroll gives the table the full content area beside the sidebar. Controls move
- * into one circular popup and return, with their state intact, at the top. */
-.workspace-control-slot { display: contents; }
+/* Smooth scroll-driven collapse: scrolling a table smoothly glides the heading,
+ * top bar, and toolbar buttons out of the way so the table expands to fill the
+ * viewport beside the sidebar; returning to the top smoothly brings them back. */
+[data-page-header],
+.workspace-control-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.workspace-collapse-inner {
+  min-height: 0;
+  overflow: visible;
+}
+[data-page-header] .workspace-control-slot {
+  display: contents;
+}
+[data-page-header] .workspace-control-slot > .workspace-collapse-inner {
+  display: contents;
+}
+.workspace-control-slot:has(> .workspace-collapse-inner > [data-workspace-controls]:empty) {
+  display: none;
+}
+[data-workspace-focused] .workspace-collapse-inner,
+[data-workspace-transitioning] .workspace-collapse-inner {
+  overflow: hidden;
+}
 [data-workspace-focused] [data-page-header],
 [data-workspace-focused] .workspace-control-slot {
-  display: none !important;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
 }
-[data-workspace-focused] .workspace-control-slot[data-workspace-local] { display: contents !important; }
-[data-workspace-focused] [role="dialog"] [data-page-header] { display: block !important; }
-[data-workspace-focused] [data-workspace-main] { padding: 0 !important; }
+[data-workspace-focused] .workspace-control-slot[data-workspace-local],
+[data-workspace-focused] [role="dialog"] [data-page-header] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+[data-workspace-focused] [role="dialog"] .workspace-collapse-inner,
+[data-workspace-focused] .workspace-control-slot[data-workspace-local] > .workspace-collapse-inner {
+  overflow: visible;
+}
+[data-workspace-main] {
+  transition: padding 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-workspace-main] :has(> [data-list="global"]),
+[data-workspace-main] :has(> [data-page-header]) {
+  transition: gap 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-workspace-focused] [data-workspace-main] {
+  padding: 0 !important;
+}
+[data-workspace-focused] [data-workspace-main] :has(> [data-list="global"]),
+[data-workspace-focused] [data-workspace-main] :has(> [data-page-header]) {
+  gap: 0 !important;
+}
 [data-workspace-focused] [data-list="global"] {
-  border: 0;
+  border-color: transparent;
   border-radius: 0;
+}
+@keyframes workspace-toggle-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .workspace-options-toggle {
   position: fixed;
@@ -542,6 +618,7 @@ table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date
   background: var(--color-white);
   color: var(--color-navy-800);
   box-shadow: 0 3px 12px #0002;
+  animation: workspace-toggle-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .workspace-options {
   position: fixed;
@@ -589,6 +666,11 @@ table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date
 @media print {
   [data-table-workspace] { height: auto !important; }
   [data-list] { overflow: visible !important; }
+  [data-page-header],
+  .workspace-control-slot,
+  [data-workspace-main] {
+    transition: none !important;
+  }
 }
 
 /* Compact fact containers used outside DataTable must carry the same containment
@@ -855,11 +937,17 @@ table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date
 /* Someone who has asked the OS to stop moving things gets the end state
    immediately, not a slower version of the movement. */
 @media (prefers-reduced-motion: reduce) {
-  .reveal-right {
+  .reveal-right,
+  .route-transition,
+  .workspace-options-toggle {
     animation: none;
   }
-  .route-transition {
-    animation: none;
+  [data-page-header],
+  .workspace-control-slot,
+  [data-workspace-main],
+  [data-workspace-main] :has(> [data-list="global"]),
+  [data-workspace-main] :has(> [data-page-header]) {
+    transition: none;
   }
   html {
     scroll-behavior: auto;
