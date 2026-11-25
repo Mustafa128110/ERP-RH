@@ -9,4 +9,6 @@ assert.equal(end.last, options.length);
 assert.ok(end.first < options.length - 1);
 options[0].name = "Renamed";
 assert.equal(filterPickerOptions(options, "renamed")[0], options[0]);
+const metaOptions = [{ id: "1", name: "Cement 50kg", meta: "1,250.00" }];
+assert.equal(filterPickerOptions(metaOptions, "cement")[0]?.meta, "1,250.00", "picker filtering must preserve option metadata such as selling price");
 console.log("Picker full-dataset filtering and virtual window checks passed");

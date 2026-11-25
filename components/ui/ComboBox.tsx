@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { InputHTMLAttributes, KeyboardEvent } from "react";
 import { filterPickerOptions, pickerWindow, PICKER_ROW_HEIGHT, PICKER_HEIGHT } from "@/lib/picker-window";
 import {productName} from "@/lib/product-name";
 import {ProductName} from "./ProductName";
 
-export type ComboOption = { id: string; name: string };
+export type ComboOption = { id: string; name: string; meta?: string };
 
 // InputHTMLAttributes plus data-* passthrough (used for the grid's data-cell).
 type ComboInputProps = InputHTMLAttributes<HTMLInputElement> & { [dataAttr: `data-${string}`]: string | number };
@@ -43,10 +43,12 @@ export function ComboBox({
   const filtered = useMemo(() => !open ? [] : filterPickerOptions(options, q), [open, q, options]);
   const visibleWindow = pickerWindow(filtered.length, scrollTop);
 
-  function place() {
+  const hasMeta = useMemo(() => options.some((o) => Boolean(o.meta)), [options]);
+
+  const place = useCallback(() => {
     const r = inputRef.current?.getBoundingClientRect();
     if (!r) return;
-    const minWidth = Math.min(window.innerWidth - 16, Math.max(r.width, 240));
+    const minWidth = Math.min(window.innerWidth - 16, Math.max(r.width, hasMeta ? 320 : 240));
     let left = r.left;
     if (left + minWidth > window.innerWidth - 8) {
       left = Math.max(8, window.innerWidth - 8 - minWidth);
@@ -60,7 +62,7 @@ export function ComboBox({
       left,
       width: minWidth,
     });
-  }
+  }, [hasMeta]);
   function openList() {
     place();
     setHighlight(0);
@@ -91,7 +93,7 @@ export function ComboBox({
       window.removeEventListener("scroll", onScrollOrResize, true);
       window.removeEventListener("resize", onScrollOrResize);
     };
-  }, [open]);
+  }, [open, place]);
 
   // Arrowing through the options moves the highlight, which can walk past the
   // bottom of the 14rem window — bring it along.
@@ -204,7 +206,7 @@ export function ComboBox({
                 aria-selected={i === highlight}
                 aria-posinset={i + 1}
                 aria-setsize={filtered.length}
-                title={o.name}
+                title={o.meta ? `${o.name} — ${o.meta}` : o.name}
                 style={{ height: PICKER_ROW_HEIGHT }}
                 data-idx={i}
                 onMouseDown={(e) => {
@@ -212,9 +214,16 @@ export function ComboBox({
                   select(o);
                 }}
                 onMouseEnter={() => setHighlight(i)}
-                className={`block w-full truncate px-3 text-left ${i === highlight ? "bg-navy-800 text-white" : "text-ink hover:bg-ivory"}`}
+                className={`flex w-full items-center justify-between gap-3 px-3 text-left ${i === highlight ? "bg-navy-800 text-white" : "text-ink hover:bg-ivory"}`}
               >
-                <ProductName name={o.name}/>
+                <span className="min-w-0 truncate">
+                  <ProductName name={o.name} />
+                </span>
+                {o.meta && (
+                  <span className={`shrink-0 tabular-nums ${i === highlight ? "text-white/90" : "text-steel"}`}>
+                    {o.meta}
+                  </span>
+                )}
               </button>
             </li>
           ); })}

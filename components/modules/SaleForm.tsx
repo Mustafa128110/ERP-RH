@@ -425,6 +425,14 @@ export function SaleFormPage({
   // the dropdowns show only the selected company's rows, not the whole scope.
   const visibleCustomers = useMemo(() => customerOpts.filter(inCompany(companyId)), [customerOpts, companyId]);
   const visibleItems = useMemo(() => itemOpts.filter((it) => it.companyId === companyId), [itemOpts, companyId]);
+  const visibleItemOptions = useMemo(
+    () =>
+      visibleItems.map((it) => ({
+        ...it,
+        meta: it.salesRate !== null && it.salesRate !== "" && Number.isFinite(Number(it.salesRate)) ? money(it.salesRate) : undefined,
+      })),
+    [visibleItems],
+  );
 
   // Switching company drops any customer/line item from the old one so a stale id
   // can't be submitted against the new company — the customer falls back to the
@@ -636,7 +644,7 @@ export function SaleFormPage({
                     <td className={`${tdClass} sale-line-item`}>
                       <ComboBox
                         value={line.itemText}
-                        options={visibleItems}
+                        options={visibleItemOptions}
                         placeholder="Item"
                         className={cellInput}
                         // data-shortcut="i" marks the first line's item box so
