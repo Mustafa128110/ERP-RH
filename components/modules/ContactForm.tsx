@@ -368,6 +368,7 @@ export function ContactsBatchEditDialog({
               {rows.map((row, i) => (
                 <tr key={row.id}>
                   <td className={batchCellClass}>
+                    <input type="hidden" value={row.companyId ?? ""} />
                     <input
                       value={row.displayName}
                       onChange={(e) => update(i, { displayName: e.target.value })}
@@ -375,7 +376,6 @@ export function ContactsBatchEditDialog({
                       placeholder="Name"
                     />
                   </td>
-                  <td className="hidden"><input type="hidden" value={row.companyId ?? ""} /></td>
                   <td className={missingCell(row.companyName)}>
                     <input value={row.companyName ?? ""} onChange={(e) => update(i, { companyName: e.target.value })} className={batchInputClass} />
                   </td>

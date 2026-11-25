@@ -416,7 +416,7 @@ input[type="number"]::-webkit-inner-spin-button {
 input[type="number"],
 input[data-type="number"] {
   font-family: var(--font-mono);
-  font-size: 1.125em;
+  font-size: 0.95em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -455,9 +455,17 @@ tr[data-stock-tone="low"] { background-color: var(--color-amber-50); box-shadow:
 tr[data-stock-tone="negative"]:hover { background-color: color-mix(in srgb, var(--color-error) 20%, var(--color-white)); }
 tr[data-stock-tone="low"]:hover { background-color: var(--color-brass-100); }
 
-/* Fixed columns fill their viewport. Narrow screens scroll the complete table. */
+/* ── Tables & scrollable lists ─────────────────────────────────────────────── */
+.mobile-data-list {
+  max-width: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+}
+
 table[data-responsive] {
   table-layout: fixed;
+  width: 100%;
   min-width: max(100%, var(--table-min-width, 100%));
 }
 
@@ -469,43 +477,41 @@ table[data-responsive] tr[data-virtual-spacer] td {
   min-height: 0;
   background: transparent;
 }
-table[data-responsive] tr[data-virtual-spacer] td::before { content: none; }
-
-.mobile-data-list {
-  max-width: 100%;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-inline: contain;
+table[data-responsive] tr[data-virtual-spacer] td::before {
+  content: none;
 }
+
 table[data-column-layout] > thead > tr > th {
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   vertical-align: middle;
 }
+
 table[data-column-layout] > tbody > tr:not([data-virtual-spacer]) > td {
   vertical-align: middle;
 }
-table[data-column-layout] td[data-cell-kind="text"],
-table[data-column-layout] td[data-cell-kind="text"] :is(a, span, div, p) {
-  white-space: normal !important;
-  overflow-wrap: anywhere;
+
+table[data-column-layout] td[data-cell-kind="text"] {
+  white-space: normal;
+  overflow-wrap: break-word;
   word-break: normal;
 }
+
 table[data-column-layout] td[data-cell-kind="text"].truncate,
 table[data-column-layout] td[data-cell-kind="text"] :is(.truncate, [class*="line-clamp"]) {
   overflow: visible;
   text-overflow: clip;
+  white-space: normal;
   -webkit-line-clamp: unset;
 }
+
 table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date"]),
 table[data-column-layout] td:is([data-cell-kind="number"], [data-cell-kind="date"]) :is(a, span, div, p) {
-  white-space: nowrap !important;
+  white-space: nowrap;
   overflow-wrap: normal;
   word-break: normal;
   font-variant-numeric: tabular-nums;
 }
-table[data-responsive] td.p-0 { padding: 0 !important; }
-table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
 
 /* A scroll gives the table the full content area beside the sidebar. Controls move
  * into one circular popup and return, with their state intact, at the top. */
@@ -588,7 +594,7 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
 /* Compact fact containers used outside DataTable must carry the same containment
  * promise. They are intentionally small utilities, not a second card system. */
 .safe-wrap {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: break-word;
 }
 .product-name, .product-fraction { font-family: inherit; font-variant-numeric: normal; }
@@ -599,6 +605,7 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
+
 @media (max-width: 639px) {
   .document-form [class~="w-40"],
   .document-form [class~="w-44"],
@@ -618,274 +625,153 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
   }
 }
 
-/* Sale lines are a fast desktop grid. On phones the exact same inputs become a
- * two-level card: item owns the full first row; its commercial facts sit below.
- * The source order remains logical for screen readers and keyboard grid keys. */
+/* ── Mobile responsive line-item entry grids ─────────────────────────────────
+ * On desktop (md+) these are fast spreadsheet grids. On phones (<768px) each
+ * line becomes a clean two-column card: the item spans the top row beside its
+ * line number, and commercial/quantity facts sit in readable two-column pairs. */
 @media (max-width: 767px) {
-  .sale-items-grid colgroup,
-  .document-lines-grid colgroup {
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) colgroup {
     display: none;
   }
-  .sale-items-grid,
-  .sale-items-grid tbody,
-  .sale-items-grid tr {
-    display: block;
-    width: 100%;
-  }
-  .sale-items-grid thead {
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) thead {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
   }
-  .sale-items-grid tbody {
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
     padding: 0.5rem;
   }
-  .sale-items-grid {
-    min-width: 0 !important;
-    width: 100% !important;
-  }
-  .sale-items-grid tr {
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) tbody tr {
     display: grid;
-    grid-template-columns: 1.05fr 0.8fr 0.95fr 0.95fr 1.85fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     position: relative;
-    margin-bottom: 0.625rem;
     overflow: hidden;
     border: 1px solid var(--color-sand);
     border-radius: var(--radius-md);
     background: var(--color-white);
   }
-  .sale-items-grid td {
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) tbody td {
     min-width: 0;
-    border: 0 !important;
-    border-bottom: 1px solid var(--color-sand) !important;
+    border: 0;
+    border-bottom: 1px solid var(--color-sand);
   }
-  .sale-items-grid .sale-line-number {
+
+  /* Line number badge pinned top-left inside the item row */
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) :is(.sale-line-number, .document-line-number, .conversion-line-number) {
     position: absolute;
     z-index: 1;
-    top: 0.75rem;
-    left: 0.75rem;
+    top: 0.625rem;
+    left: 0.625rem;
     width: auto;
-    border: 0 !important;
+    padding: 0.125rem 0.375rem;
+    border: 0;
+    border-radius: 0.25rem;
+    background: var(--color-ivory);
     pointer-events: none;
   }
-  .sale-items-grid .sale-line-item {
+
+  /* Primary item/product field takes full top row */
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) :is(.sale-line-item, .document-line-item, .conversion-line-item) {
     grid-column: 1 / -1;
-    padding-left: 2.5rem;
+    padding: 0.375rem 0.5rem 0.375rem 2.75rem;
   }
-  .sale-items-grid .sale-line-unit,
-  .sale-items-grid .sale-line-quantity,
-  .sale-items-grid .sale-line-rate,
-  .sale-items-grid .sale-line-price,
-  .sale-items-grid .sale-line-total {
+
+  /* Two-column labelled fact cells */
+  .sale-items-grid :is(.sale-line-unit, .sale-line-quantity, .sale-line-rate, .sale-line-price, .sale-line-total),
+  .document-lines-grid .document-line-fact,
+  .conversion-items-grid .conversion-line-fact {
     display: flex;
-    min-width: 0;
-    min-height: 4.5rem;
     flex-direction: column;
-    align-items: stretch;
     justify-content: flex-end;
-    gap: 0.2rem;
-    padding: 0.4rem 0.2rem;
+    gap: 0.25rem;
+    min-width: 0;
+    min-height: 4rem;
+    padding: 0.5rem 0.625rem;
+    overflow-wrap: break-word;
   }
-  .sale-items-grid .sale-line-total {
-    justify-content: flex-end;
-    font-size: 0.66rem;
-    line-height: 1.2;
-    text-align: right;
-    font-weight: 600;
-  }
-  .sale-items-grid .sale-line-total::before {
-    content: "Total";
+
+  .sale-items-grid :is(.sale-line-unit, .sale-line-quantity, .sale-line-rate, .sale-line-price, .sale-line-total, .sale-line-market)::before,
+  .document-lines-grid :is(.document-line-fact, .document-line-action)::before,
+  .conversion-items-grid :is(.conversion-line-fact, .conversion-line-action)::before {
+    content: attr(data-label);
     color: var(--color-steel);
-    font-size: 0.75rem;
+    font-size: 0.6875rem;
     font-weight: 600;
+    line-height: 1;
     letter-spacing: 0.025em;
     text-transform: uppercase;
   }
-  .sale-items-grid .sale-line-market,
-  .sale-items-grid .sale-line-remove {
-    display: flex;
-    min-height: 2.75rem;
-    align-items: center;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 0 !important;
-  }
-  .sale-items-grid .sale-line-market { grid-column: 1 / span 2; }
-  .sale-items-grid .sale-line-remove { grid-column: 3 / -1; }
-  .sale-items-grid .sale-line-remove {
-    justify-content: flex-end;
-  }
-  .sale-items-grid .sale-line-remove button {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-  }
-  .sale-items-grid .sale-line-unit::before,
-  .sale-items-grid .sale-line-quantity::before,
-  .sale-items-grid .sale-line-rate::before,
-  .sale-items-grid .sale-line-price::before,
-  .sale-items-grid .sale-line-market::before {
-    content: attr(data-label);
-    color: var(--color-steel);
-    font-size: 0.625rem;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: uppercase;
-  }
   .sale-items-grid .sale-line-quantity::before { content: "Qty"; }
-  .sale-items-grid .sale-line-rate::before { content: "Rate"; }
-  .sale-items-grid .sale-line-price::before { content: "Price"; }
-  .sale-items-grid .sale-line-total::before {
-    align-self: flex-start;
-    font-size: 0.625rem;
-    letter-spacing: 0;
-  }
-  .sale-items-grid input,
-  .sale-items-grid [role="combobox"] {
-    min-width: 0;
-  }
-  .sale-items-grid .sale-line-unit input,
-  .sale-items-grid .sale-line-quantity input,
-  .sale-items-grid .sale-line-rate input,
-  .sale-items-grid .sale-line-price input {
-    padding-inline: 0.15rem;
-    font-size: 0.75rem;
-  }
+  .sale-items-grid .sale-line-price::before { content: "Unit Price"; }
+  .sale-items-grid .sale-line-rate::before { content: "Rate List"; }
+  .sale-items-grid .sale-line-total::before { content: "Total"; align-self: flex-start; }
 
-  .invoice-lines {
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  .invoice-lines table {
-    min-width: 28rem;
-    display: table !important;
-    border-collapse: collapse;
-  }
-  .invoice-lines thead {
-    display: table-header-group !important;
-    position: static;
-    width: auto;
-    height: auto;
-    clip: auto;
-    overflow: visible;
-  }
-  .invoice-lines thead tr {
-    display: table-row !important;
-  }
-  .invoice-lines thead th {
-    display: table-cell !important;
-  }
-  .invoice-lines tbody {
-    display: table-row-group !important;
-  }
-  .invoice-lines tbody tr {
-    display: table-row !important;
-    border-bottom: 1px solid var(--color-sand) !important;
-    background: transparent;
-    border-radius: 0;
-    margin-bottom: 0;
-  }
-  .invoice-lines td {
-    display: table-cell !important;
-    padding: 0.5rem 0.5rem !important;
-    border-bottom: 1px solid var(--color-sand) !important;
-    vertical-align: middle !important;
-  }
-  .invoice-lines td::before {
-    display: none !important;
-    content: none !important;
-  }
-
-  /* Other document editors share the sale principle without pretending every
-   * document has the same financial columns. Their item is the first full row;
-   * labelled facts wrap in a compact three-column grid and actions stay below. */
-  .document-lines-grid,
-  .document-lines-grid tbody,
-  .document-lines-grid tr {
-    display: block;
-    width: 100%;
-  }
-  .document-lines-grid {
-    min-width: 0 !important;
-    width: 100% !important;
-  }
-  .document-lines-grid thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-  }
-  .document-lines-grid tbody { padding: 0.5rem; }
-  .document-lines-grid tr {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    position: relative;
-    margin-bottom: 0.625rem;
-    overflow: hidden;
-    border: 1px solid var(--color-sand);
-    border-radius: var(--radius-md);
-    background: var(--color-white);
-  }
-  .document-lines-grid td {
-    min-width: 0;
-    border: 0 !important;
-    border-bottom: 1px solid var(--color-sand) !important;
-  }
-  .document-lines-grid .document-line-number {
-    position: absolute;
-    z-index: 1;
-    top: 0.75rem;
-    left: 0.75rem;
-    width: auto;
-    border: 0 !important;
-    pointer-events: none;
-  }
-  .document-lines-grid .document-line-item {
+  .sale-items-grid .sale-line-total {
     grid-column: 1 / -1;
-    min-height: 3.25rem;
-    padding-left: 2.5rem;
-  }
-  .document-lines-grid .document-line-fact {
-    display: flex;
-    min-width: 0;
-    min-height: 4.25rem;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: 0.2rem;
-    padding: 0.4rem;
-    overflow-wrap: anywhere;
-  }
-  .document-lines-grid .document-line-fact::before,
-  .document-lines-grid .document-line-action::before {
-    content: attr(data-label);
-    color: var(--color-steel);
-    font-size: 0.625rem;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 2.5rem;
+    background: var(--color-ivory);
+    font-size: 0.875rem;
     font-weight: 600;
-    letter-spacing: 0;
-    text-transform: uppercase;
+    text-align: right;
   }
-  .document-lines-grid .document-line-action {
-    grid-column: 1 / -1;
+
+  /* Bottom action strip: market checkbox + remove button */
+  .sale-items-grid .sale-line-market {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
     min-height: 2.75rem;
+    padding: 0.5rem 0.625rem;
+    border-bottom: 0;
+  }
+  .sale-items-grid .sale-line-remove {
+    display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 0 !important;
-  }
-  .document-lines-grid .document-line-action button {
-    min-width: 2.75rem;
     min-height: 2.75rem;
+    padding: 0.375rem 0.625rem;
+    border-bottom: 0;
   }
-  .document-lines-grid input,
-  .document-lines-grid select,
-  .document-lines-grid [role="combobox"] {
+  .document-lines-grid .document-line-action,
+  .conversion-items-grid .conversion-line-action {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 2.75rem;
+    padding: 0.375rem 0.625rem;
+    border-bottom: 0;
+  }
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) :is(.sale-line-remove, .document-line-action, .conversion-line-action) button {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+
+  :is(.sale-items-grid, .document-lines-grid, .conversion-items-grid) :is(input:not([type="checkbox"]):not([type="radio"]), select, [role="combobox"]) {
+    width: 100%;
     min-width: 0;
     max-width: 100%;
+    height: 2.5rem;
+    font-size: 0.875rem;
   }
+}
 
+@media (max-width: 639px) {
   .detail-lines-grid,
   .detail-lines-grid tbody,
   .detail-lines-grid tr,
@@ -907,6 +793,7 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
     overflow: hidden;
     border: 1px solid var(--color-sand);
     border-radius: var(--radius-md);
+    background: var(--color-white);
   }
   .detail-lines-grid td {
     display: grid;
@@ -916,8 +803,9 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
     padding: 0.625rem 0.75rem;
     border: 0;
     border-bottom: 1px solid var(--color-sand);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
+  .detail-lines-grid tr td:last-child { border-bottom: 0; }
   .detail-lines-grid td::before {
     content: attr(data-label);
     color: var(--color-steel);
@@ -927,36 +815,13 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
   }
 }
 
-/* Wide comparative ledgers, role matrices and paste grids keep their columns;
- * they must be contained, visibly swipeable, and never widen the page itself. */
+/* Bounded horizontal scroll for dense grids and matrices without widening the page. */
 .matrix-scroll {
   position: relative;
   max-width: 100%;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior-inline: contain;
-}
-@media (max-width: 767px) {
-  .matrix-scroll::after {
-    content: "Swipe for more columns";
-    position: sticky;
-    left: 0.5rem;
-    bottom: 0.5rem;
-    display: inline-block;
-    margin: 0.5rem;
-    border-radius: 999px;
-    background: var(--color-navy-800);
-    padding: 0.25rem 0.5rem;
-    color: var(--color-white);
-    font-size: 0.6875rem;
-    pointer-events: none;
-  }
-  .matrix-scroll table th:first-child,
-  .matrix-scroll table td:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    background: var(--color-white);
-  }
 }
 
 /*
@@ -1020,26 +885,4 @@ table[data-responsive] tr[data-virtual-spacer] td { padding: 0 !important; }
   background-color: var(--color-steel);
 }
 
-/* A 12px inset on each side leaves a fixed 24px reading gap between
- * neighbouring columns, including when content minima require scrolling. */
-table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid):not(:where(.conversion-items-grid)) > thead > tr > th,
-table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid):not(:where(.conversion-items-grid)) > tbody > tr:not([data-virtual-spacer]) > td,
-table[data-column-layout]:not(.sale-items-grid):not(.document-lines-grid):not(:where(.conversion-items-grid)) > tfoot > tr > td {
-  padding-inline: 12px !important;
-}
-table[data-column-layout][data-responsive] > tbody > tr:not([data-virtual-spacer]) > td.p-0 {
-  padding-inline: 0 !important;
-}
-table[data-column-layout][data-responsive] > tbody > tr:not([data-virtual-spacer]) > td.p-0 > :is(a, span).block {
-  padding-inline: 12px !important;
-}
-table[data-column-layout] > tbody > tr > td > input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
-table[data-column-layout] > tbody > tr > td > select {
-  width: 100% !important;
-}
-@media (min-width: 768px) {
-  table[data-column-layout]:is(.sale-items-grid, .document-lines-grid) > thead > tr > th,
-  table[data-column-layout]:is(.sale-items-grid, .document-lines-grid) > tbody > tr > td {
-    padding-inline: 12px !important;
-  }
-}
+

@@ -21,7 +21,7 @@ import { Icon } from "@/components/ui/Icon";
 import { useOptimisticRecords } from "@/lib/use-optimistic-records";
 import type { ColumnDef, Row } from "@/lib/table";
 
-const SETUP_COL_WIDTH = 100;
+const SETUP_COL_WIDTH = 76;
 
 // No S.No column here — DataTable numbers every row itself.
 const columns: ColumnDef[] = [
@@ -42,7 +42,7 @@ const columns: ColumnDef[] = [
     key: "name",
     label: "Item Name",
     sortable: true,
-    width: 340,
+    width: 220,
     // Product names remain plain database values.  Setup state is intentionally
     // kept in its own column so a red marker never becomes part of the name.
     render: (row) => (

@@ -104,7 +104,7 @@ try{
  assert.ok(keys.includes('sales.view')&&keys.includes('sales.create')&&!keys.includes('sales.delete'));
  await page.evaluate(()=>window.showTables());await page.waitForFunction(()=>{const table=document.querySelector('#first table');return table&&Math.abs(table.getBoundingClientRect().width-table.parentElement.clientWidth)<2;});
  const widths=await page.evaluate(()=>['first','second'].map(id=>Array.from(document.querySelectorAll('#'+id+' thead th')).map(cell=>Math.round(cell.getBoundingClientRect().width))));
- assert.deepEqual(widths[0],widths[1],'semantic column widths must match across equally sized tables');assert.equal(widths[0][0],64);
+ assert.deepEqual(widths[0],widths[1],'semantic column widths must match across equally sized tables');assert.equal(widths[0][0],52);
  await page.evaluate(()=>window.showFluidTables());
  const fluid=()=>page.evaluate(()=>['fluid-a','fluid-b','native-fluid'].map(id=>{const table=document.querySelector('#'+id+' table');return {id,width:table.getBoundingClientRect().width,available:table.parentElement.clientWidth,columns:Array.from(table.querySelectorAll('thead th')).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>({width:cell.getBoundingClientRect().width,left:getComputedStyle(cell).paddingLeft,right:getComputedStyle(cell).paddingRight})),minimum:parseFloat(getComputedStyle(table).getPropertyValue('--table-min-width'))||parseFloat(table.style.minWidth)};}));
  await page.waitForFunction(()=>document.querySelector('#native-fluid table')?.dataset.columnLayout==='auto');
@@ -113,9 +113,9 @@ try{
  const medium=await fluid();
  await page.setViewportSize({width:2400,height:1100});
  await page.waitForFunction(()=>document.querySelector('#fluid-a table').getBoundingClientRect().width>2300);
- await page.waitForFunction(()=>['fluid-a','fluid-b','native-fluid'].every(id=>Math.round(document.querySelector('#'+id+' th').getBoundingClientRect().width)===64));
+ await page.waitForFunction(()=>['fluid-a','fluid-b','native-fluid'].every(id=>Math.round(document.querySelector('#'+id+' th').getBoundingClientRect().width)===52));
  const wide=await fluid();
- for(const table of wide){assert.ok(Math.abs(table.width-table.available)<2,'every table fills its large container: '+JSON.stringify(table));assert.equal(Math.round(table.columns[0].width),64);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
+ for(const table of wide){assert.ok(Math.abs(table.width-table.available)<2,'every table fills its large container: '+JSON.stringify(table));assert.equal(Math.round(table.columns[0].width),52);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
  assert.deepEqual(wide[0].columns,wide[1].columns,'global semantic minima and growth ratios stay uniform across lists');
  const nameGrowth=wide[0].columns[1].width-medium[0].columns[1].width,totalGrowth=wide[0].columns[2].width-medium[0].columns[2].width;
  assert.ok(nameGrowth>0,'names receive spare screen width');assert.equal(totalGrowth,0,'figures keep their fixed width');
@@ -128,7 +128,7 @@ try{
  await page.setViewportSize({width:390,height:900});
  await page.waitForFunction(()=>document.querySelector('#fluid-a th[data-column-key=code]')&&getComputedStyle(document.querySelector('#fluid-a th[data-column-key=code]')).display!=='none');
  const narrow=await fluid();
- for(const table of narrow){assert.ok(table.width>=table.minimum-2);assert.ok(table.width>table.available,'narrow screens scroll instead of compressing content');assert.equal(Math.round(table.columns[0].width),64);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
+ for(const table of narrow){assert.ok(table.width>=table.minimum-2);assert.ok(table.width>table.available,'narrow screens scroll instead of compressing content');assert.equal(Math.round(table.columns[0].width),52);for(const cell of table.columns){assert.equal(cell.left,'12px');assert.equal(cell.right,'12px');}}
  assert.ok((await gutters()).every(pair=>pair[0]===12&&pair[1]===12),'scrolling layouts retain the same body gutters');
  await page.locator('#fluid-a [data-list]').evaluate(element=>element.scrollLeft=element.scrollWidth);
  assert.ok(await page.locator('#fluid-a [data-list]').evaluate(element=>element.scrollLeft>0));
@@ -138,7 +138,7 @@ try{
  assert.equal(await page.evaluate(()=>localStorage.getItem('erp:global-column-widths:v2')),storedMinima,'resizing never saves stretched widths as content minima');
  await page.locator('#fluid-a').evaluate(element=>element.style.width='1300px');
  await page.waitForFunction(()=>Math.abs(document.querySelector('#fluid-a table').getBoundingClientRect().width-document.querySelector('#fluid-a [data-list]').clientWidth)<2);
- assert.equal(Math.round((await fluid())[0].columns[0].width),64,'container-only resize keeps the serial column compact');
+ assert.equal(Math.round((await fluid())[0].columns[0].width),52,'container-only resize keeps the serial column compact');
  await page.setViewportSize({width:1440,height:1000});
  await page.evaluate(()=>window.showEmptyTable());await page.getByRole('button',{name:'Add fixture row',exact:true}).click();
  await page.waitForFunction(()=>{const table=document.querySelector('#empty-transition table');return table&&Math.abs(table.getBoundingClientRect().width-table.parentElement.clientWidth)<2;});

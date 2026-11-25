@@ -97,15 +97,15 @@ function MarketPurchaseManagerBody({
       <PageHeader title="Market Purchases" subtitle={`${pendingRows.length} item(s) on this page waiting for confirmation`} />
       <WorkspaceControls label="Market purchase filters"><HistoryControls sortOptions={[{key:'date',label:'Date'},{key:'company',label:'Company'},{key:'customer',label:'Customer'},{key:'item',label:'Item'},{key:'quantity',label:'Quantity'},{key:'cost',label:'Cost'},{key:'status',label:'Status'},{key:'sale',label:'Sale'}]}/></WorkspaceControls>
       <div data-list="global" tabIndex={0} className="min-h-0 flex-1 overflow-auto rounded border border-sand bg-white">
-        <table className="w-full min-w-[64rem] table-fixed border-collapse text-sm">
+        <table className="w-full min-w-[56rem] table-fixed border-collapse text-sm">
           <colgroup>
-            <col className="w-10" style={{ width: "2.5rem" }} />
-            <col className="w-32" style={{ width: "8rem" }} />
-            <col className="w-56" style={{ width: "14rem" }} />
-            <col className="w-64" style={{ width: "16rem" }} />
-            <col className="w-32" style={{ width: "8rem" }} />
-            <col className="w-40" style={{ width: "10rem" }} />
-            <col className="w-36" style={{ width: "9rem" }} />
+            <col style={{ width: "2.75rem" }} />
+            <col style={{ width: "7.5rem" }} />
+            <col style={{ width: "12rem" }} />
+            <col style={{ width: "16rem" }} />
+            <col style={{ width: "7.5rem" }} />
+            <col style={{ width: "9rem" }} />
+            <col style={{ width: "8rem" }} />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-ivory text-left text-xs uppercase tracking-wide text-steel">
             <tr>
@@ -144,9 +144,9 @@ function MarketPurchaseManagerBody({
           <input type="hidden" name="operationId" value={operationId} />
           <input type="hidden" name="requestsJson" value={JSON.stringify(payload)} />
           <div className="flex flex-wrap items-end gap-3">
-            <label className={`${labelClass} w-40`}><span className={labelTextClass}>Purchase Date</span><DateField name="documentDate" required defaultValue={todayISO()} className={fieldClass} /></label>
-            <label className={`${labelClass} w-40`}><span className={labelTextClass}>Paid Via</span><select value={settlementType} onChange={(event) => setSettlementType(event.target.value as typeof settlementType)} className={fieldClass}><option value="cash">Cash</option><option value="account">Bank Account</option><option value="cheque">Cheque</option></select></label>
-            <label className={`${labelClass} min-w-64 flex-1`}><span className={labelTextClass}>Settlement Account</span>
+            <label className={`${labelClass} w-full sm:w-40`}><span className={labelTextClass}>Purchase Date</span><DateField name="documentDate" required defaultValue={todayISO()} className={fieldClass} /></label>
+            <label className={`${labelClass} w-full sm:w-40`}><span className={labelTextClass}>Paid Via</span><select value={settlementType} onChange={(event) => setSettlementType(event.target.value as typeof settlementType)} className={fieldClass}><option value="cash">Cash</option><option value="account">Bank Account</option><option value="cheque">Cheque</option></select></label>
+            <label className={`${labelClass} w-full sm:min-w-64 sm:flex-1`}><span className={labelTextClass}>Settlement Account</span>
               <select key={settlementType} name={settlementType === "account" ? "bankAccountId" : settlementType === "cash" ? "cashAccountId" : "chequeId"} required className={fieldClass} defaultValue="">
                 <option value="" disabled>Select account</option>
                 {visibleAccounts(settlementType === "account" ? bankAccountOptions : settlementType === "cash" ? cashAccountOptions : chequeOptions).map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}

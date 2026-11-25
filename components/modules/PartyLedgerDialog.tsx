@@ -223,7 +223,7 @@ function DescriptionCell({ entry }: { entry: PartyLedgerEntry }) {
         extraHeight={Math.min(260, 40 + entry.lineItems.length * 36)}
       >
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-steel">Line Items</p>
-        <div className="scroll-thin min-h-0 max-h-56 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+        <div className="scroll-thin min-h-0 max-h-56 flex-1 overflow-auto overscroll-contain pr-1">
           <table className="w-full table-auto border-collapse text-sm">
             <thead className="sticky top-0 bg-white">
               <tr className="border-b-2 border-sand">
@@ -235,8 +235,8 @@ function DescriptionCell({ entry }: { entry: PartyLedgerEntry }) {
             </thead>
             <tbody>
               {entry.lineItems.map((l, i) => (
-                <tr key={i} className="border-b border-sand/50 last:border-0 whitespace-nowrap">
-                  <td className="py-1.5 pr-4 text-ink whitespace-nowrap" title={l.itemName}>{l.itemName}</td>
+                <tr key={i} className="border-b border-sand/50 last:border-0">
+                  <td className="py-1.5 pr-4 text-ink" title={l.itemName}>{l.itemName}</td>
                   <td className="py-1.5 px-3 text-right tabular-nums text-ink whitespace-nowrap">{l.quantity}{l.unitSymbol ? ` ${l.unitSymbol}` : ""}</td>
                   <td className="py-1.5 px-3 text-right tabular-nums text-steel whitespace-nowrap">{money(l.rate)}</td>
                   <td className="py-1.5 pl-3 text-right tabular-nums font-medium text-ink whitespace-nowrap">{money(l.lineTotal)}</td>
@@ -672,17 +672,17 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, channelId
 
           {/* Filters */}
           <div className="flex flex-wrap items-end gap-2 rounded border border-sand bg-white p-2">
-            <label className="flex flex-col gap-0.5">
+            <label className="flex w-full flex-col gap-0.5 sm:w-auto">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">From</span>
-              <input type="date" value={fromDate} onChange={(e) => {setPage(1);setFromDate(e.target.value);}} className="h-8 w-32 rounded border border-sand px-1.5 text-xs text-ink" />
+              <input type="date" value={fromDate} onChange={(e) => {setPage(1);setFromDate(e.target.value);}} className="h-8 w-full rounded border border-sand px-1.5 text-xs text-ink sm:w-32" />
             </label>
-            <label className="flex flex-col gap-0.5">
+            <label className="flex w-full flex-col gap-0.5 sm:w-auto">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">To</span>
-              <input type="date" value={toDate} onChange={(e) => {setPage(1);setToDate(e.target.value);}} className="h-8 w-32 rounded border border-sand px-1.5 text-xs text-ink" />
+              <input type="date" value={toDate} onChange={(e) => {setPage(1);setToDate(e.target.value);}} className="h-8 w-full rounded border border-sand px-1.5 text-xs text-ink sm:w-32" />
             </label>
-            <label className="flex flex-col gap-0.5">
+            <label className="flex w-full flex-col gap-0.5 sm:w-auto">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-steel">Search</span>
-              <input type="text" placeholder="Item or ref…" value={search} onChange={(e) => {setPage(1);setSearch(e.target.value);}} className="h-8 w-36 rounded border border-sand px-1.5 text-xs text-ink" />
+              <input type="text" placeholder="Item or ref…" value={search} onChange={(e) => {setPage(1);setSearch(e.target.value);}} className="h-8 w-full rounded border border-sand px-1.5 text-xs text-ink sm:w-36" />
             </label>
             <div className="flex flex-wrap items-center justify-end gap-1.5 w-full sm:w-auto sm:ml-auto">
               <button
@@ -768,16 +768,16 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, channelId
             </div>
           ) : (
             <div className="matrix-scroll scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-sand bg-white">
-              <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[46rem] table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-36" style={{ width: "9rem" }} />
+                  <col style={{ width: "7rem" }} />
                   <col />
-                  <col className="w-28" style={{ width: "7rem" }} />
-                  <col className="w-32" style={{ width: "8rem" }} />
-                  <col className="w-32" style={{ width: "8rem" }} />
-                  <col className="w-36" style={{ width: "9rem" }} />
-                  <col className="w-28" style={{ width: "7rem" }} />
-                  <col className="w-12" style={{ width: "3rem" }} />
+                  <col style={{ width: "6.5rem" }} />
+                  <col style={{ width: "7.5rem" }} />
+                  <col style={{ width: "7.5rem" }} />
+                  <col style={{ width: "8rem" }} />
+                  <col style={{ width: "6.5rem" }} />
+                  <col style={{ width: "2.75rem" }} />
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-ivory/90 backdrop-blur">
                   <tr className="border-b border-sand">
@@ -855,11 +855,11 @@ export function PartyLedgerDialog({ contactId, companyId, contactName, channelId
 
           {/* Status bar — shows when cells are selected */}
           {selectionStats && (
-            <div className="flex items-center justify-between rounded border border-sand bg-ivory/50 px-3 py-1.5 text-xs text-steel">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-sand bg-ivory/50 px-3 py-1.5 text-xs text-steel">
               <span className="tabular-nums text-ink">
                 {selectionStats.count} cell{selectionStats.count === 1 ? "" : "s"} selected
               </span>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3">
                 <span>Sum: <span className="tabular-nums font-medium text-ink">{money(selectionStats.sum)}</span></span>
                 <span>Difference: <span className="tabular-nums font-medium text-ink">{money(selectionStats.max - selectionStats.min)}</span></span>
                 <span>Product: <span className="tabular-nums font-medium text-ink">{selectionStats.count > 1 ? (selectionStats.product).toLocaleString() : "—"}</span></span>

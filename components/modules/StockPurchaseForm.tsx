@@ -559,7 +559,7 @@ export function StockPurchaseCreateForm({
               block is below the fold on a long purchase — so they're repeated here
               at the end of the header row, styled exactly as they are down
               there. Same as the sale form. */}
-          <div className="ml-auto flex flex-col items-end justify-end gap-0.5 text-sm text-ink">
+          <div className="flex w-full flex-col items-end justify-end gap-0.5 text-sm text-ink sm:ml-auto sm:w-auto">
             <span>Subtotal: {money(subtotal)}</span>
             <span className="font-semibold">Grand Total: {money(grandTotal)}</span>
           </div>
@@ -588,19 +588,19 @@ export function StockPurchaseCreateForm({
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
         <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
-          <table className="document-lines-grid w-full min-w-[1060px] md:table-fixed border-collapse text-sm">
+          <table className="document-lines-grid w-full md:min-w-[820px] md:table-fixed border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>
-                <th className={`${thClass} min-w-[280px]`}>Item</th>
-                <th className={`${thClass} w-32`}>Unit</th>
-                <th className={`${thClass} w-24`}>Qty</th>
-                <th className={`${thClass} w-28`}>Unit Price</th>
+                <th className={`${thClass} min-w-[200px]`}>Item</th>
+                <th className={`${thClass} w-24`}>Unit</th>
+                <th className={`${thClass} w-24 text-right`}>Qty</th>
+                <th className={`${thClass} w-28 text-right`}>Unit Price</th>
                 <th className={`${thClass} w-28 text-right`} title="Unit price plus this unit's share of the shipping">
                   Unit Cost
                 </th>
                 <th className={`${thClass} w-28 text-right`}>Total</th>
-                <th className="w-8 border border-sand" />
+                <th className="w-10 border border-sand" />
               </tr>
             </thead>
             <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>

@@ -41,16 +41,16 @@ const buildColumns: ColumnDef[] = [
     key: "creditBalance",
     label: "Payable", // We Owe
     align: "right",
-    width: 150,
-    paddingRight: 28,
+    width: 132,
+    paddingRight: 20,
   },
   {
     key: "debtBalance",
     label: "Receivable", // Owes Us
     align: "right",
-    width: 150,
-    paddingLeft: 20,
-    paddingRight: 28,
+    width: 132,
+    paddingLeft: 16,
+    paddingRight: 20,
   },
 ];
 
@@ -59,8 +59,8 @@ const buildColumns: ColumnDef[] = [
 const statementColumn = (byRowId: Map<string, ContactLedgerBalance>, buttons: (contact: ContactLedgerBalance) => ReactNode): ColumnDef => ({
   key: "statement",
   label: "Statement",
-  width: 120,
-  paddingLeft: 24,
+  width: 112,
+  paddingLeft: 16,
   render: (row) => {
     const balance = byRowId.get(String(row.id));
     return balance ? <div className="flex gap-1.5">{buttons(balance)}</div> : null;

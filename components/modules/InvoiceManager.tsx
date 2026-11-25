@@ -250,7 +250,7 @@ export function InvoiceManager({
   const downloadColumn = (format: "pdf" | "png", pendingId: string | null): ColumnDef => ({
     key: format,
     label: "",
-    width: 76,
+    width: 64,
     render: (row) => (
       <button
         type="button"
@@ -274,7 +274,7 @@ export function InvoiceManager({
   const returnColumn: ColumnDef = {
     key: "return",
     label: "",
-    width: 90,
+    width: 80,
     render: (row) => String(row.status) === "Cancelled" ? "—" : (
       <button
         type="button"
@@ -302,7 +302,7 @@ export function InvoiceManager({
           width={600}
           extraHeight={Math.min(260, 40 + items.length * 36)}
         >
-          <div className="scroll-thin min-h-0 max-h-56 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+          <div className="scroll-thin min-h-0 max-h-56 flex-1 overflow-auto overscroll-contain pr-1">
             <table className="w-full table-auto border-collapse text-sm">
               <thead className="sticky top-0 bg-white">
                 <tr className="border-b-2 border-sand">
@@ -313,8 +313,8 @@ export function InvoiceManager({
               </thead>
               <tbody>
                 {items.map((it, i) => (
-                  <tr key={i} className="border-b border-sand/50 last:border-0 whitespace-nowrap">
-                    <td className="py-1.5 pr-4 text-ink whitespace-nowrap" title={it.name}>
+                  <tr key={i} className="border-b border-sand/50 last:border-0">
+                    <td className="py-1.5 pr-4 text-ink" title={it.name}>
                       {it.name}
                     </td>
                     <td className="py-1.5 px-3 text-right tabular-nums text-ink whitespace-nowrap">
@@ -375,18 +375,18 @@ export function InvoiceManager({
           <RecoveryValue name="returnQuantities" value={returnQuantities} restore={value => setReturnQuantities(value as Record<string, string>)} />
           <form onSubmit={(event) => void saveReturn(event)} className="flex flex-col gap-4">
             <input type="hidden" name="sourceDocumentId" value={returning.id} />
-            <label className="text-sm">Return type<select name="returnMode" value={returnMode} onChange={(event) => setReturnMode(event.target.value as "all" | "partial")} className="ml-3 rounded border border-sand p-2"><option value="all">Complete sale — all remaining products</option><option value="partial">Only selected products / quantities</option></select></label>
-            <label className="w-fit text-sm text-ink">Return date
-              <input name="documentDate" type="date" required defaultValue={todayISO()} className="mt-1 block rounded border border-sand bg-white px-3 py-2" />
+            <label className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3">Return type<select name="returnMode" value={returnMode} onChange={(event) => setReturnMode(event.target.value as "all" | "partial")} className="w-full rounded border border-sand p-2 sm:w-auto"><option value="all">Complete sale — all remaining products</option><option value="partial">Only selected products / quantities</option></select></label>
+            <label className="w-full text-sm text-ink sm:w-44">Return date
+              <input name="documentDate" type="date" required defaultValue={todayISO()} className="mt-1 block w-full rounded border border-sand bg-white px-3 py-2" />
             </label>
             <p className="text-sm text-steel">Returned quantities restore stock at the recorded sale cost and create a customer credit. A refund can then be recorded as a normal payment out.</p>
             <div className="overflow-x-auto rounded border border-sand">
-              <table className="w-full min-w-[32rem] table-fixed text-sm">
+              <table className="w-full min-w-[30rem] table-fixed text-sm">
                 <colgroup>
-                  <col className="w-56" style={{ width: "14rem" }} />
-                  <col className="w-24" style={{ width: "6rem" }} />
-                  <col className="w-32" style={{ width: "8rem" }} />
-                  <col className="w-32" style={{ width: "8rem" }} />
+                  <col />
+                  <col style={{ width: "5.5rem" }} />
+                  <col style={{ width: "7.5rem" }} />
+                  <col style={{ width: "7.5rem" }} />
                 </colgroup>
                 <thead className="bg-ivory text-left text-steel">
                   <tr>

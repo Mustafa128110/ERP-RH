@@ -657,8 +657,8 @@ export function ProductsBatchEditDialog({
                     {/* An existing product's company is fixed — moving one would
                         move its stock between two sets of books with no document
                         saying so. A new row still has to pick one. */}
-                    <td className="hidden"><input type="hidden" value={row.companyId} /></td>
                     <td className={cellClass}>
+                      <input type="hidden" value={row.companyId} />
                       <input value={row.name} onChange={(e) => update(i, { name: e.target.value })} className={`${cellInputClass} min-w-[14rem]`} />
                     </td>
                     <td className={cellClass}>

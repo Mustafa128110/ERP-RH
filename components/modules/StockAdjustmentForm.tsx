@@ -221,19 +221,19 @@ export function StockAdjustmentFormPage({
       <div className="flex flex-col gap-2">
         <span className={sectionTitleClass}>Items</span>
         <div className="overflow-x-hidden rounded border border-sand md:overflow-x-auto">
-          <table className="document-lines-grid w-full md:table-fixed border-collapse text-sm">
+          <table className="document-lines-grid w-full md:min-w-[640px] md:table-fixed border-collapse text-sm">
             <thead>
               <tr>
                 <th className={`${thClass} w-10 text-right`}>#</th>
                 <th className={thClass}>Item</th>
-                <th className={`${thClass} w-32`}>Unit</th>
+                <th className={`${thClass} w-28`}>Unit</th>
                 <th className={`${thClass} w-44`} title="Latest three distinct purchase rates, per base stock unit">
                   Purchase Rate
                 </th>
-                <th className={`${thClass} w-28`} title="Negative writes stock off, positive adds it">
+                <th className={`${thClass} w-28 text-right`} title="Negative writes stock off, positive adds it">
                   Adjust By
                 </th>
-                <th className="w-8 border border-sand" />
+                <th className="w-10 border border-sand" />
               </tr>
             </thead>
             <tbody ref={gridRef} {...gridSelectionProps} onKeyDown={(e) => gridKeyDown(e, gridRef)}>

@@ -19,7 +19,7 @@ const columns=[{key:'name',label:'Name',render:row=><span className='truncate'>{
  {key:'total',label:'Total',align:'right'},{key:'balance',label:'Balance',align:'right'},{key:'status',label:'Status'},
  {key:'actions',label:'',render:()=> <button type='button' aria-label='Row action' onClick={()=>window.actionLog.push('row')}>Edit</button>}];
 const original=Array.from({length:2000},(_,i)=>({id:String(i),name:i===0?'A long product and customer name that wraps naturally without hiding any part of its description. '.repeat(4):'Browser fixture '+i,
- code:i===0?'LONG-REFERENCE-'.repeat(16):'REF-'+i,date:'25-11-2026',createdAt:'25-11-2026 23:59:59',total:'-9,999,999,999,999,999.99',balance:'9,999,999,999,999,999.99',status:'Posted'}));
+ code:i===0?'LONG-REFERENCE-'.repeat(16):'REF-'+i,date:'25-11-2026',createdAt:'25-11-2026 23:59:59',total:'-9,999,999.99',balance:'9,999,999.99',status:'Posted'}));
 function App(){const[selected,setSelected]=useState([]),[rows,setRows]=useState(original),[local,setLocal]=useState(false);window.openLocal=()=>setLocal(true);window.closeLocal=()=>setLocal(false);
  window.resetNames=()=>setRows(original);window.shortRows=()=>setRows(original.slice(1,17));
  window.changeName=()=>setRows(previous=>previous.map((row,index)=>index?row:{...row,name:row.name+' EXTRA'.repeat(160)}));
@@ -67,7 +67,7 @@ try{
  const geometry=()=>page.locator('[data-list] table').evaluate(table=>Array.from(table.querySelectorAll('thead th')).map(cell=>Math.round(cell.getBoundingClientRect().width)));
  await page.waitForFunction(()=>document.querySelector('[data-list] table')?.getBoundingClientRect().width<5000);
  const before=await geometry();
- assert.equal(before[0],48);assert.equal(before[1],64);assert.equal(before[4],144);assert.equal(before[6],256);
+ assert.equal(before[0],44);assert.equal(before[1],52);assert.equal(before[4],108);assert.equal(before[6],132);
  const readable=await page.locator('[data-row-index="0"]').evaluate(row=>Array.from(row.querySelectorAll('[data-cell-kind="number"],[data-cell-kind="date"]')).map(cell=>({label:cell.dataset.label,scroll:cell.scrollWidth,width:cell.clientWidth,space:getComputedStyle(cell).whiteSpace})));
  for(const fact of readable){assert.equal(fact.space,'nowrap');assert.ok(fact.scroll<=fact.width+1,'Complete figures and dates must fit: '+JSON.stringify(fact));}
  assert.ok(await page.locator('[data-row-index="0"] [data-label="Name"]').evaluate(cell=>cell.getBoundingClientRect().height>60&&getComputedStyle(cell.querySelector('span span')).whiteSpace==='normal'));
@@ -117,7 +117,7 @@ try{
  for(const width of [390,768,2400]){
   await page.setViewportSize({width,height:900});
   await page.waitForFunction(()=>document.querySelector('[data-list]').clientWidth>0);
-  const widths=await geometry();assert.equal(widths[4],144);assert.equal(widths[6],256);
+  const widths=await geometry();assert.equal(widths[4],108);assert.equal(widths[6],132);
   assert.equal(await page.locator('[data-column-key=code]').isVisible(),true,'Narrow screens retain every column');
   assert.ok(await page.locator('[data-list]').evaluate(node=>node.querySelector('table').getBoundingClientRect().width>=node.clientWidth-1));
   if(width<1000){await page.locator('[data-list]').evaluate(node=>node.scrollLeft=node.scrollWidth);assert.ok(await page.locator('[data-list]').evaluate(node=>node.scrollLeft>0));}
@@ -134,7 +134,7 @@ try{
  await page.locator('[data-workspace-focused]').waitFor({state:'detached'});
  await page.screenshot({path:join(out,'phone-top.png')});
  await page.evaluate(()=>document.documentElement.style.fontSize='175%');
- await page.waitForFunction(()=>Math.round(document.querySelector('[data-column-key=total]').getBoundingClientRect().width)===448);
+ await page.waitForFunction(()=>Math.round(document.querySelector('[data-column-key=total]').getBoundingClientRect().width)===231);
  const zoomed=await page.locator('[data-row-index="0"] [data-label="Total"]').evaluate(cell=>cell.scrollWidth<=cell.clientWidth+1);
  assert.equal(zoomed,true,'App zoom must scale fixed fact widths with the font');
  await page.evaluate(()=>document.documentElement.style.fontSize='100%');

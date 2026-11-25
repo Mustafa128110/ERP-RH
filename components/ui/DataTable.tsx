@@ -23,7 +23,7 @@ import {WorkspaceControls} from "@/components/layout/TableWorkspace";
 // real column — the count is the row's position on screen, not data anyone stores.
 const SNO_KEY = "__sno";
 const snoColumn: ColumnDef = { key: SNO_KEY, label: "#", align: "right" };
-const SELECT_COL_WIDTH = 48;
+const SELECT_COL_WIDTH = 44;
 
 function getColPadding(col: ColumnDef): React.CSSProperties {
   const style: React.CSSProperties = {};
@@ -132,7 +132,7 @@ export function DataTable({
   const allColumns = useMemo(() => [snoColumn, ...columns.filter((column) => column.key !== "company")], [columns]);
   const selectable = selected !== undefined && onSelectedChange !== undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { getWidth: getColWidth, minimumWidth: totalTableWidth, tableWidth, selectionWidth } = useTableColumnLayout(allColumns, rows, scrollRef, selectable);
+  const { measured, getWidth: getColWidth, minimumWidth: totalTableWidth, tableWidth, selectionWidth } = useTableColumnLayout(allColumns, rows, scrollRef, selectable);
   // Which row the highlight is on, and where a Shift-extended range started.
   // -1 until the list is actually used: an untouched page shouldn't already be
   // pointing at its first row.
@@ -485,7 +485,7 @@ export function DataTable({
             data-responsive
             aria-rowcount={visible.length + 1}
             className="table-fixed border-collapse text-sm"
-            style={{ width: `${tableWidth}px`, minWidth: `max(100%, ${totalTableWidth}px)`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
+            style={{ width: measured ? `${tableWidth}px` : "100%", minWidth: `max(100%, ${totalTableWidth}px)`, "--table-min-width": `${totalTableWidth}px` } as React.CSSProperties}
           >
             <colgroup>
               {selectable && <col style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }} />}
@@ -499,7 +499,7 @@ export function DataTable({
             <thead>
               <tr className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
                 {selectable && (
-                  <th className="px-4 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
+                  <th className="px-3 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
                     <input
                       type="checkbox"
                       aria-label={allSelected ? "Clear selection" : remote && !remote.info.all ? "Select rows on this page" : "Select all rows"}
@@ -522,7 +522,7 @@ export function DataTable({
                       style={{ width: getColWidth(col), ...getColPadding(col) }}
                       key={col.key}
                       onClick={columnSortKey ? () => toggleSort(columnSortKey) : undefined}
-                      className={`whitespace-normal break-words px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
+                      className={`whitespace-normal break-words px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 ${
                         col.align === "right" ? "text-right" : "text-left"
                       }${
                         sortable ? " cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200" : ""
@@ -569,7 +569,7 @@ export function DataTable({
                   </>
                 );
                 const cellClass = (col: ColumnDef) =>
-                  `${columnContentKind(col.key, col.align) === "text" ? "table-cell-text whitespace-normal break-words" : "table-cell-fact whitespace-nowrap"} px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                  `${columnContentKind(col.key, col.align) === "text" ? "table-cell-text whitespace-normal break-words" : "table-cell-fact whitespace-nowrap"} px-3 py-2.5 text-zinc-700 dark:text-zinc-300 ${
                     col.align === "right" ? "text-right tabular-nums" : "text-left"
                   }`;
 
@@ -603,7 +603,7 @@ export function DataTable({
                     }`}
                   >
                     {selectable && (
-                      <td data-label="Select" className="px-4 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
+                      <td data-label="Select" className="px-3 py-2.5" style={{ width: selectionWidth ?? `${SELECT_COL_WIDTH}px` }}>
                         <input
                           type="checkbox"
                           aria-label={`Select ${String(row[columns[0]?.key ?? idKey] ?? "row")}`}
